@@ -46,6 +46,7 @@ from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Any
 
+from spectre.astro.elset_check import FUTURE_EPOCH_TOLERANCE
 from spectre.domain.custody import age_text
 from spectre.domain.warning_change import Change, TargetWarning, classify
 
@@ -207,9 +208,14 @@ class SetAge:
 
 
 def _out_of_date(element_set: SetAge, now: datetime) -> str | None:
-    """Why *element_set* earns no span at *now*: its epoch unread, or its age past the limit (ElsetAge.stale)."""
+    """Why *element_set* earns no span at *now*: its epoch unread, dated in the future past the clock-skew tolerance
+    (SPC-226, evaluation F-38), or its age past the limit (ElsetAge.stale)."""
     if element_set.epoch is None:
         return f"the {element_set.label} element set's epoch cannot be read, so its age is unknown"
+    if element_set.epoch - now > FUTURE_EPOCH_TOLERANCE:
+        ahead_h = (element_set.epoch - now).total_seconds() / _SECONDS_PER_HOUR
+        return (f"the {element_set.label} element set is dated {age_text(ahead_h)} in the future, so it cannot be "
+                "read as current")
     age_h = (now - element_set.epoch).total_seconds() / _SECONDS_PER_HOUR
     if age_h > element_set.limit_hours:
         figure = f", the {element_set.figure}" if element_set.figure else ""

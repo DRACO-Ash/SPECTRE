@@ -1376,3 +1376,14 @@ The game tree drawn, two scoring assumptions stated, and the asset screen judgin
 | DAST | **HYGIENE** | An inline SVG drawing and three zoom buttons added to the Decision Engine results; two notes added | No new input. Every label in the drawing is autoescaped by Jinja, tested with a hostile name; the script is first-party and loaded from `'self'`, with no inline script or handler. | Then a page reflects a field unescaped; the report names the page. |
 | SAST | **HYGIENE** | A new first-party script file | It reads and writes only attributes and classes on the drawing; no `innerHTML`, `eval` or network call. | Then the scanner flags the script; the finding names the line. |
 | Other gates | **HYGIENE** | The asset screen's UDL fetches are bounded by the 60-actor cap, as before | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.42.0
+
+Scores, inputs, seeds, constants and dates checked before anything is recommended.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `decision.py`, `decision_inputs.py`, `tree_selectors.py`, `custody.py`, `interaction_graph.py`, `elset_check.py`, `pattern_of_life.py`, `monte_carlo.py`, `propagator.py`, `constants.py`, `decision_binding.py`, `decision_job.py`, `elsets.py`, `tree_view.py`, the decision, POL, threat and UDL routes and their templates, `scripts/smoke-browser.py` | `scripts/sonar_rules.py 602c963`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 602c963: all PASS. Full suite 10,925 passed, 15 skipped; coverage 98.4%, every floor met. Six review mutants killed. | Then a rule names the line; fix it in the next release. |
+| DAST | **HYGIENE** | New refusal sentences and notes on the decision, sweep, POL, UDL and threat pages | No new input field; every new sentence is built from constants or validated figures and autoescaped; no inline script. | Then a page reflects a field unescaped; the report names the page. |
+| SAST | **HYGIENE** | Form fields now refused when absent; element sets refused when dated in the future | Refusal only narrows what is accepted; nothing is evaluated or written from the new paths. | Then the scanner flags the parse; the finding names the line. |
+| Other gates | **HYGIENE** | Stored decision inputs go to version 7; earlier versions replay exactly | No dependency, Dockerfile or image change; no schema migration. | n/a. |

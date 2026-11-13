@@ -149,8 +149,9 @@ class TestComputedRefusals:
 
     def test_burns_to_size_beside_a_sampled_row_over_the_cap_are_refused_on_it(self) -> None:
         """A computed row and a sampled row of 500 over 9 h, with five burns: the sampled row's floor is
-        500 x 9.15 + 5 x (150 x 9.15 + 16 x 9.15 + 9) = 12,214.5, and the computed rows' sizing (2 + 80) x 9.15 =
-        750.3 more, so 12,965. The computed cells keep their SGP4 figure and our delta-V stays a lookup."""
+        500 x 9.15 + 5 x (150 x 9.15 + 16 x 9.15 + 9) = 12,214.5, charged twice for the second seed its convergence
+        is checked on (SPC-224), 24,429, and the computed rows' sizing (2 + 80) x 9.15 = 750.3 more, so 25,180. The
+        computed cells keep their SGP4 figure and our delta-V stays a lookup."""
         scenario = Scenario(
             name="Mixed", epoch_utc=EPOCH,
             adversary_actions=[
@@ -164,10 +165,10 @@ class TestComputedRefusals:
         result = evaluate_scenario(scenario, sampler=_never)
         refusal = result.outcome_matrix[0][1].response_refusal
         assert refusal is not None and refusal.startswith(
-            "Our burn is not sized: sizing it with the rest of this evaluation needs at least 12,965 sample-hours, "
+            "Our burn is not sized: sizing it with the rest of this evaluation needs at least 25,180 sample-hours, "
             f"above the {decision.MAX_SAMPLE_HOURS:,.0f} one evaluation may run within its "
             f"{decision.EVALUATION_BUDGET_S:.0f} s budget. At these sample counts the longest horizon that fits is "
-            "8.3 h."
+            "4.2 h."
         )
         assert refusal.endswith(_LOOKUP_DV)
         assert result.outcome_matrix[0][1].ca_computed is not None

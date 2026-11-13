@@ -2354,7 +2354,11 @@
   "note": "Evaluation finding F-32 (Low, L1), evaluation/EVALUATION.md. Remediation: refuse a non-finite score in find_robust_response. Closing evidence: a test with an injected NaN.",
   "files": [
    "spectre/domain/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.42.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-222",
@@ -2366,7 +2370,11 @@
   "note": "Evaluation finding F-33 (Low, L5), evaluation/EVALUATION.md. Remediation: refuse missing values. Closing evidence: a test.",
   "files": [
    "spectre/web/routes/decision.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.42.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-223",
@@ -2394,7 +2402,11 @@
   "note": "Evaluation finding F-35 (Low, L2, L4), evaluation/EVALUATION.md. Remediation: show the seed; check convergence on two seeds. Closing evidence: a test.",
   "files": [
    "spectre/astro/monte_carlo.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.42.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-225",
@@ -2407,7 +2419,11 @@
   "files": [
    "spectre/astro/constants.py",
    "spectre/astro/propagator.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.42.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-226",
@@ -2419,7 +2435,11 @@
   "note": "Evaluation finding F-38 (Low, L2), evaluation/EVALUATION.md. Remediation: probe it; if confirmed, refuse future epochs. Closing evidence: the probe result and a test.",
   "files": [
    "spectre/web/elsets.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.42.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-227",
@@ -2474,7 +2494,11 @@
   "note": "Found building SPC-202: the script looks for chrome-linux/ where the installed browser is chrome-linux64/, and its [asset-screening-result] check fails on 0.31.0 as well, before any 0.32.0 change.",
   "files": [
    "scripts/smoke-browser.py"
-  ]
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.42.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
  },
  {
   "ref": "SPC-231",

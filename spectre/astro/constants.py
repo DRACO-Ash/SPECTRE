@@ -4,6 +4,17 @@ Sources (audit F-194): MU_EARTH and R_EARTH are the WGS-84 values; J2_EARTH
 is the EGM-96 zonal coefficient as tabulated by Vallado, Fundamentals of
 Astrodynamics and Applications, 4th ed., Table D-3; SIDEREAL_DAY is the IERS
 mean sidereal day.
+
+SGP4 does not use these. It works with the WGS-72 constants its element sets
+are fitted with (spectre.astro.monte_carlo.SGP4_WGS72), and the RK45 that
+starts from an SGP4 state flies it with these WGS-84 ones (SPC-225, evaluation
+F-36). The handover was measured on three reference pairs: each object moves
+up to 3.52 km in LEO and 1.43 km at GEO by 72 h against the same flight with
+WGS-72's constants, and a pair's separation up to 0.18 km, because both
+objects drift alike (monte_carlo.WGS_HANDOVER_KM). That is the size of the
+integrator's own separation error and under a fifth of the smallest
+element-set error the engine draws, so these constants are kept; the sampled
+basis note and the RK45 computed line state the handover.
 """
 
 from __future__ import annotations

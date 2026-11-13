@@ -9,7 +9,10 @@ speaks, and refuses the row, naming the budget, once the budget is spent.
 Rows after a spent budget are refused without starting.
 
 Every test injects a fake sampler and a fake clock, so none depends on the
-wall clock or runs a propagator.
+wall clock or runs a propagator. The tests that count ticks across rows count
+them on one seed, _ONE, so each row is drawn once; under the two-seed rule a
+converged row is drawn again and ticks again, which test_decision_two_seeds
+counts (SPC-224).
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ from spectre.domain.decision import (
     evaluate_scenario,
     needs_a_run,
 )
-from tests.unit.test_decision_sampled import _LOOKUPS, _bound, _cells, _evasive, _scenario, _series, _steady
+from tests.unit.test_decision_sampled import _LOOKUPS, _ONE, _bound, _cells, _evasive, _scenario, _series, _steady
 
 _PART = (
     "Not sampled: this evaluation's {budget} s budget ran out after {k} of {n} samples of this hypothesis, and a "
@@ -111,7 +114,7 @@ def test_a_first_row_inside_the_budget_is_sampled_and_a_second_past_it_refused()
     """B5: 1 s a reading and an 80 s budget: row 1's 50 ticks end at 50 s, row 2 starts at 51 s and its 30th sample ends at 81 s."""
     sampler = _Ticking()
     result = evaluate_scenario(
-        _bound({0: _evasive(), 1: _evasive()}), sampler=sampler, run=_run(_Clock(1.0), budget_s=80.0),
+        _bound({0: _evasive(), 1: _evasive()}, rule=_ONE), sampler=sampler, run=_run(_Clock(1.0), budget_s=80.0),
     )
     assert sampler.calls == 2
     assert _refusals(result, 0) == {None}
@@ -126,7 +129,7 @@ def test_a_row_whose_last_sample_ends_past_the_budget_keeps_its_complete_series(
     """
     sampler = _Ticking()
     result = evaluate_scenario(
-        _bound({0: _evasive(), 1: _evasive()}), sampler=sampler, run=_run(_Clock(1.0), budget_s=49.5),
+        _bound({0: _evasive(), 1: _evasive()}, rule=_ONE), sampler=sampler, run=_run(_Clock(1.0), budget_s=49.5),
     )
     assert sampler.calls == 1
     assert _refusals(result, 0) == {None}
@@ -138,7 +141,7 @@ def test_a_row_starting_exactly_at_the_budget_starts() -> None:
     52 s with no sample finished within the budget."""
     sampler = _Ticking()
     result = evaluate_scenario(
-        _bound({0: _evasive(), 1: _evasive()}), sampler=sampler, run=_run(_Clock(1.0), budget_s=51.0),
+        _bound({0: _evasive(), 1: _evasive()}, rule=_ONE), sampler=sampler, run=_run(_Clock(1.0), budget_s=51.0),
     )
     assert sampler.calls == 2
     assert _refusals(result, 1) == {_PART.format(budget=51, k=0, n=50)}
@@ -170,7 +173,8 @@ def test_progress_is_reported_once_per_sample() -> None:
     """B7: row and rows count the rows that run, done and total the samples of the row, elapsed from the budget."""
     seen: list[SamplingProgress] = []
     evaluate_scenario(
-        _bound({0: _evasive(), 2: _evasive()}), sampler=_Ticking(), run=_run(_Clock(0.5), progress=seen.append),
+        _bound({0: _evasive(), 2: _evasive()}, rule=_ONE), sampler=_Ticking(),
+        run=_run(_Clock(0.5), progress=seen.append),
     )
     assert len(seen) == 100
     assert seen[0] == SamplingProgress(row=1, rows=2, done=1, total=50, elapsed_s=0.5)
@@ -181,7 +185,7 @@ def test_progress_is_reported_once_per_sample() -> None:
 
 def test_without_a_run_control_the_sampler_is_called_without_a_tick() -> None:
     """Without a RunControl no tick is passed: three positional arguments and the element-set error every bound row
-    draws (SPC-202), nothing else."""
+    draws (SPC-202), nothing else, on the row's own seed and on the second (SPC-224)."""
     calls: list[tuple[Any, ...]] = []
 
     def three(*args: Any, **kwargs: Any) -> SeparationSeries:
@@ -189,7 +193,8 @@ def test_without_a_run_control_the_sampler_is_called_without_a_tick() -> None:
         return _series(args[2])
 
     evaluate_scenario(_bound(), sampler=three)
-    assert len(calls) == 1 and len(calls[0][0]) == 3 and set(calls[0][1]) == {"elset_error"}
+    assert len(calls) == 2
+    assert all(len(args) == 3 and set(kwargs) == {"elset_error"} for args, kwargs in calls)
 
 
 def test_a_run_control_without_a_ready_row_never_reads_its_clock() -> None:

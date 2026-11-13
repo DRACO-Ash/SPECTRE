@@ -338,10 +338,11 @@ class TestTheDetectedBurn:
         state = _state(_entry(tof_hours=20.0), elset_histories={50322: _history(_burn(_NOW - timedelta(hours=4)))})
         prefill = _open(state)
         # A burn after the held red set's epoch is sampled. Two rows over 22 h of horizon plus the 4 h since the
-        # detected burn: 26 h, which 250 samples a row do not fit and 200 do.
-        assert decision.longest_horizon_h(250, rows=2) < 26 <= decision.longest_horizon_h(200, rows=2)
+        # detected burn: 26 h, which 150 samples a row do not fit and 100 do, each row charged twice for the second
+        # seed its convergence is checked on (SPC-224; 200 fitted on one seed).
+        assert decision.longest_horizon_h(150, rows=2) < 26 <= decision.longest_horizon_h(100, rows=2)
         assert [row.sampled for row in prefill.rows] == [True, True]
-        assert [row.samples for row in prefill.rows] == [200, 200]
+        assert [row.samples for row in prefill.rows] == [100, 100]
 
     def test_a_burn_more_than_72_h_old_is_not_offered(self) -> None:
         state = _state(elset_histories={50322: _history(_burn(_NOW - timedelta(hours=73)))})

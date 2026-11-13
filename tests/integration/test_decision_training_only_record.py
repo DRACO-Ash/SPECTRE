@@ -100,8 +100,9 @@ class TestTheRecord:
 class TestOldRecordsReplayExactly:
     def test_the_stored_inputs_are_unchanged(self) -> None:
         row = new_record(_one(_MANOEUVRE, _MANOEUVRE), Operator(1, "inputs"), _NOW, primary=_MINIMAX)
-        assert VERSION == 6
-        assert row.inputs is not None and json.loads(row.inputs)["version"] == 6
+        # SPC-207 left the stored inputs at version 6; SPC-224 moved them to 7, adding the convergence rule.
+        assert VERSION == 7
+        assert row.inputs is not None and json.loads(row.inputs)["version"] == 7
 
     def test_a_simulated_pre_label_record_replays_exactly(self) -> None:
         """Simulates a record from before the label: this code writes it, then its training_only column is nulled,

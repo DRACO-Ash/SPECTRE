@@ -176,7 +176,9 @@ async def fetch_tle_history_for_satno(
     # object's included, is dropped here, counted and its failures logged without its text (SPC-201). Each record
     # goes to the check with its set, so an SGP4-XP set or an uncorrelated track is refused by its own fields.
     tles = [tle for tle, _ in sets]
-    checks = [check_elset(tle, satno, record=rec) for tle, rec in sets]
+    # A set dated in the future is refused too, by the time it arrives (SPC-226).
+    checked_at = datetime.now(UTC)
+    checks = [check_elset(tle, satno, record=rec, now=checked_at) for tle, rec in sets]
     log_skipped_by_type(f"SATNO {satno}", sets)
     history = ElsetHistory(
         (tle for tle, check in zip(tles, checks, strict=True) if check.accepted),
@@ -292,7 +294,9 @@ async def fetch_tle_for_satno(
     newest = _tied_at_newest(complete, _select_latest_elset(complete))
     # An SGP4-XP set or an uncorrelated track is refused by the record's own fields, and named in the log by type.
     checked = [(rec, f"{_elset_line(rec, 1)}\n{_elset_line(rec, 2)}") for rec in newest]
-    checks = [check_elset(tle, satno, record=rec) for rec, tle in checked]
+    # A set dated in the future is refused too, by the time it arrives (SPC-226).
+    checked_at = datetime.now(UTC)
+    checks = [check_elset(tle, satno, record=rec, now=checked_at) for rec, tle in checked]
     refused = [(tle, rec) for (rec, tle), check in zip(checked, checks, strict=True) if not check.accepted]
     if refused:
         log_skipped_by_type(f"SATNO {satno}", refused)

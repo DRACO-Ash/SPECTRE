@@ -9,6 +9,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-11-13
+
+**Scores, inputs, seeds, constants and dates checked before anything is recommended.**
+
+### Changed
+- A composite score that is not finite is refused before any rule ranks on it, naming the cell in the server log; the operator sees a fixed sentence and no figure. Collect-first advice says whether a cue could change the recommendation is not available, rather than failing the page, when a cue's outcome holds such a score (SPC-221, F-32).
+- A missing row value or weight is refused inline, naming the row and the field, rather than taking a default; a column longer than the rows is refused too. Fields optional by design say so where they are declared (SPC-222, F-33).
+- Every sampled row shows its seed and is drawn again on a second seed, the seed plus one, and counts as converged only when both draws are. Each sampled row is charged twice against the cost cap, so at 500 samples the longest horizon that fits falls from 23.7 h to 11.8 h. On a game tree this holds for turn 1; turns 2 and 3 draw on a seed derived from the row's seed, the turn and the branch, are judged on that one draw, and the tree says so. Stored inputs go to version 7; records from 0.28.0 to 0.41.0 replay exactly (SPC-224, F-35).
+- The sampled basis note states the WGS-72 to WGS-84 handover between SGP4 and RK45, measured at no more than 0.18 km of separation by 72 h, so the constants are kept (SPC-225, F-36).
+- An element set dated more than 5 minutes after the time it is checked is refused wherever a set enters (the paste boxes, the sweep's and the screen's manual sets, a training load, the UDL panel, current fetch and history fetch, and the Pattern of Life history, where it is counted with the other refused sets) and at binding. A set already held that is dated in the future reads FUTURE EPOCH, loses custody and gets no interaction window. The sweep names it apart from the age range, and the delta-V band says it is dated in the future rather than 0 h old (SPC-226, F-38).
+
+### Fixed
+- The browser smoke script finds the installed Chromium and checks the asset screen against its current wording (SPC-230).
+
 ## [0.41.0] - 2026-11-13
 
 **The game tree drawn, two scoring assumptions stated, and the asset screen judging age on the set it uses.**

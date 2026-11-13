@@ -186,7 +186,7 @@ class TestTheOwnersRulingsOf5November:
             assert "120 s budget" not in text and "4,800 sample-hours" not in text
 
     def test_the_hint_names_what_fits_at_the_new_cap(self) -> None:
-        assert "about 23.7 h fits at 500 samples with no burn to size" in _flat(_read("docs/decision_engine_phases.md"))
+        assert "about 11.8 h fits at 500 samples with no burn to size" in _flat(_read("docs/decision_engine_phases.md"))
 
     def test_degraded_custody_scores_between_held_and_lost(self) -> None:
         for text in (_flat(_read("docs/decision_engine_phases.md")), _guide_section()):

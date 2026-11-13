@@ -110,7 +110,7 @@ from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, dominant_axis
 from spectre.web.burn_watch import CHECK_EVERY, BurnWatch, start_watch, watch_view
 from spectre.web.decision_threat import hold_threat_picture
 from spectre.web.deps import render
-from spectre.web.elsets import RefusedElset, elset_age, limit_hours_for_regime, refused
+from spectre.web.elsets import ElsetAge, RefusedElset, elset_age, limit_hours_for_regime, refused
 from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
@@ -1698,6 +1698,19 @@ def _red_track_source(state: object, red_sat: str, flown_tle: str) -> str:
     return track.elset_source
 
 
+def _set_age_words(age: ElsetAge | None) -> str:
+    """An element set's age as the delta-V band's sentence says it: "5 h old", "dated 2.0 d in the future", never 0 h
+    for a set dated after now (SPC-226), or "of unknown age"."""
+    if age is None:
+        return "of unknown age"
+    return f"dated {age.label}" if age.future else f"{age_text(age.hours)} old"
+
+
+def _stale_name(name: str, age: ElsetAge) -> str:
+    """A stale target as the sweep names it: with its regime and whose limit it is past."""
+    return f"{name} ({age.regime_line})" if age.regime_line else name
+
+
 def _elset_ages(red_tle: str, basis: _SweepBasis, now: datetime) -> dict[str, Any]:
     """The interceptor's element set age and that of every target flown, stale ones named.
 
@@ -1705,19 +1718,22 @@ def _elset_ages(red_tle: str, basis: _SweepBasis, now: datetime) -> dict[str, An
     a target, and listing ages only beside solutions hid it exactly then (charming-dirac 03b7507). A target the
     runner skipped, for a regime mismatch or for want of a set, was never flown, so it is not aged.
     """
-    targets = []
+    targets: list[tuple[str, ElsetAge]] = []
+    future: list[tuple[str, ElsetAge]] = []
     for target in basis.targets:
         tle = None if _not_flown(basis, target) else _flown_tle(basis, target)
         age = elset_age(tle, now) if tle else None
         if age is not None:
-            targets.append((target.target_name, age))
+            # A set dated in the future has no age to range over: it is named apart, never as 0 h (SPC-226).
+            (future if age.future else targets).append((target.target_name, age))
     return {
         "red": elset_age(red_tle, now),
         "newest": min(targets, key=lambda t: t[1].hours)[1] if targets else None,
         "oldest": max(targets, key=lambda t: t[1].hours)[1] if targets else None,
         # Each stale target named with its regime and whose limit it is past (SPC-215, V0.40 review).
-        "stale": [f"{name} ({age.regime_line})" if age.regime_line else name for name, age in targets if age.stale],
+        "stale": [_stale_name(name, age) for name, age in targets if age.stale],
         "count": len(targets),
+        "future": [f"{name} (dated {age.label})" for name, age in future],
     }
 
 
@@ -2738,10 +2754,10 @@ def _dv_band(state: object, entries: list[ThreatSweepEntry], red_tle: str, basis
         return {}
     dv_spread = max(abs(dv - worst.delta_v_m_s) for dv, _ in values)
     tof_minutes = max(abs(tof - worst.tof_hours) for _, tof in values) * 60.0
-    red_age, target_age = (age_text(a.hours) if a else "unknown" for a in ages)
+    red_age, target_age = (_set_age_words(a) for a in ages)
     # Both orbits take the rate for the interceptor's regime family; the words say whose figure that is (SPC-215).
     how = (f"re-solved with the interceptor's orbit moved {red_km:.0f} km and the target's {target_km:.0f} km along "
-           f"track, ahead and behind, the error assumed for element sets {red_age} and {target_age} old (for the "
+           f"track, ahead and behind, the error assumed for element sets {red_age} and {target_age} (for the "
            f"interceptor's regime, {_regime_of(red_tle)}: {error_rate_words(red_tle)}; tuned, not sourced). A "
            "sensitivity, not a confidence interval.")
     if worst.method == "min_time":

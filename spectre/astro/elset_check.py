@@ -14,7 +14,8 @@ from the bundled data:
 ● each line's modulo-10 checksum in column 69 (propagator.tle_checksum_valid);
 ● one catalogue number on both lines, five digits or an Alpha-5 letter and four digits, and, when the caller asked for
   a number, that number;
-● an epoch that reads as a date (day 1 to the last day of its year: 365, or 366 in a leap year);
+● an epoch that reads as a date (day 1 to the last day of its year: 365, or 366 in a leap year), and, when the caller
+  gives the time it checks at, no more than FUTURE_EPOCH_TOLERANCE after it (SPC-226, evaluation F-38);
 ● the first and second derivatives of the mean motion and the drag term B* each written as the published format
   writes them, so SGP4 never reads one as inf or nan;
 ● inclination from 0 to 180 degrees, eccentricity from 0 to under 1, mean motion above 0, and the right ascension of
@@ -46,13 +47,22 @@ from spectre.astro.catalogue import catalogue_number
 from spectre.astro.propagator import TLE_LINE_LENGTH, TLEOrbit, tle_checksum_valid
 
 __all__ = [
-    "HELD_KEPT", "NOT_STORED", "TLE_LINE_LENGTH", "ElsetCheck", "check_elset", "history_refusal", "refused_type",
-    "tle_epoch",
+    "FUTURE_EPOCH_TOLERANCE", "HELD_KEPT", "NOT_STORED", "TLE_LINE_LENGTH", "ElsetCheck", "check_elset",
+    "history_refusal", "hours_or_days", "refused_type", "tle_epoch",
 ]
 #: What a refusal says became of the set, when nothing was held for it.
 NOT_STORED = "It was not stored."
 #: The same, when a set already held for the object was kept in its place.
 HELD_KEPT = "It was not stored, and the set already held for that object was kept."
+
+#: How far after the time it is checked an element set's epoch may be and still read as now, for clock skew between
+#: the provider, UDL and this server (SPC-226, evaluation F-38). Past it the set is dated in the future and refused.
+#: Unsourced judgement, Claude's choice, listed in docs/lookup-register.md: a few minutes covers clocks that are
+#: kept, and is far below any staleness limit, so it moves no set's freshness.
+FUTURE_EPOCH_TOLERANCE = timedelta(minutes=5)
+
+_HOURS_PER_DAY = 24.0
+_SECONDS_PER_HOUR = 3600.0
 
 _TWO_LINES = "it does not hold two element lines"
 # Two-digit years from 57 are the 1900s: the first satellite flew in 1957.
@@ -282,10 +292,32 @@ def refused_type(tle: str, record: Mapping[str, object] | None = None) -> str:
     return ", ".join(words for _, words in _kind(lines[-2] if len(lines) > 1 else "", record))
 
 
-def check_elset(tle: str, satno: int | None = None, *, record: Mapping[str, object] | None = None) -> ElsetCheck:
+def hours_or_days(hours: float) -> str:
+    """A span in words as the ages read: hours under a day, "10.0 h"; days beyond it, "13.0 d"."""
+    return f"{hours:.1f} h" if hours < _HOURS_PER_DAY else f"{hours / _HOURS_PER_DAY:.1f} d"
+
+
+def _ahead(epoch: datetime | None, now: datetime | None) -> list[str]:
+    """Why an epoch more than FUTURE_EPOCH_TOLERANCE after *now* is refused (SPC-226); none with no clock given."""
+    if epoch is None or now is None or epoch - now <= FUTURE_EPOCH_TOLERANCE:
+        return []
+    ahead = hours_or_days((epoch - now).total_seconds() / _SECONDS_PER_HOUR)
+    minutes = FUTURE_EPOCH_TOLERANCE.total_seconds() / 60.0
+    return [
+        f"its epoch, {epoch:%Y-%m-%d %H:%M} UTC, is {ahead} after the time it was checked, {now:%Y-%m-%d %H:%M} "
+        f"UTC, more than the {minutes:g} minutes allowed for clock skew: a set dated in the future would read as "
+        "current, so check its epoch and this server's clock"
+    ]
+
+
+def check_elset(
+    tle: str, satno: int | None = None, *, record: Mapping[str, object] | None = None, now: datetime | None = None,
+) -> ElsetCheck:
     """Whether *tle* may be stored, and each reason it may not (see the module's list). With *satno*, the set must
     also be for that catalogue number: an answer for another object is not the set asked for. *record* is the UDL
-    record the set came in, when it came from UDL: its ephemType and uct flag are read from it."""
+    record the set came in, when it came from UDL: its ephemType and uct flag are read from it. With *now*, the time
+    it is checked, an epoch more than FUTURE_EPOCH_TOLERANCE after it is refused (SPC-226); the check reads no clock
+    of its own, so it stays pure."""
     lines = _lines(tle)
     # PLR2004: two element lines.
     if len(lines) < 2:  # noqa: PLR2004
@@ -295,8 +327,10 @@ def check_elset(tle: str, satno: int | None = None, *, record: Mapping[str, obje
     if structure:
         return ElsetCheck(tuple(structure))
     failures = [*_checksums(line1, line2), *_catalogue(line1, line2, satno)]
-    if tle_epoch(line1) is None:
+    epoch = tle_epoch(line1)
+    if epoch is None:
         failures.append("the epoch cannot be read")
+    failures += _ahead(epoch, now)
     failures += _drag(line1)
     failures += _ranges(line2)
     failures += [clause for clause, _ in _kind(line1, record)]

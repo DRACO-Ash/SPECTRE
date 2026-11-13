@@ -98,6 +98,7 @@ def assess_custody(  # noqa: PLR0913
     history_problem: str,
     truncated_at: datetime | None,
     limit_figure: str = "",
+    ahead_hours: float = 0.0,
 ) -> CustodyStatus:
     """Whether the object is in custody, from its orbit's age and its history.
 
@@ -106,7 +107,9 @@ def assess_custody(  # noqa: PLR0913
     history holds no burn. *history_problem* is why there is no history, empty
     when there is one. *limit_figure* says whose figure the limit is,
     "LEO figure applied to HEO/Molniya, unsourced for this regime", and is
-    named beside the limit wherever it is shown (V0.40 review, SPC-215).
+    named beside the limit wherever it is shown (V0.40 review, SPC-215). *ahead_hours* is how far the newest set's
+    epoch is after now, past the clock-skew tolerance (ElsetAge.ahead_hours): such a set is never current, so custody
+    is lost and says why (SPC-226, evaluation F-38).
     """
     limit = f"{limit_hours:.0f} h"
     tail = _figure_tail(limit_figure)
@@ -115,6 +118,13 @@ def assess_custody(  # noqa: PLR0913
             Custody.LOST,
             "Custody lost: there is no element set with a readable epoch, so neither "
             "its warning time nor its burns can be judged.",
+        )
+    if ahead_hours > 0.0:
+        return CustodyStatus(
+            Custody.LOST,
+            f"Custody lost: its newest element set is dated {_age(ahead_hours)} in the future, so it cannot be read "
+            "as current, and its warning time and its burns cannot be judged. Check the set's epoch and this "
+            "server's clock.",
         )
     if elset_hours > limit_hours:
         return CustodyStatus(

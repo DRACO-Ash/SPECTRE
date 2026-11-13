@@ -122,7 +122,13 @@ def tle_checksum_valid(line: str) -> bool:
 
 
 class TLEOrbit:
-    """Satellite orbit defined by a TLE, propagated with SGP4."""
+    """Satellite orbit defined by a TLE, propagated with SGP4.
+
+    Satrec.twoline2rv's default gravity model is WGS-72, the constants element sets are fitted with, and it is kept:
+    SGP4 must run on the constants its elements were made with. An RK45 arc started from one of these states flies
+    it with WGS-84's (spectre.astro.constants); that handover is measured and stated in
+    spectre.astro.monte_carlo.WGS_HANDOVER_KM (SPC-225, evaluation F-36).
+    """
 
     def __init__(self, tle: str) -> None:
         lines = [ln.strip() for ln in tle.strip().splitlines() if ln.strip()]

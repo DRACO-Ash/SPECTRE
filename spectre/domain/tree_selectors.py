@@ -25,12 +25,14 @@ value, the one rule that reads P. Imports the Decision Engine, never the reverse
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import NamedTuple, Protocol, cast
 
 from spectre.domain.decision import (
     TIE_TOLERANCE,
+    NonFiniteScoreError,
     Scenario,
     SelectorStrategy,
     named_list,
@@ -324,12 +326,30 @@ def _excluded(scenario: Scenario) -> tuple[str, ...]:
     return (EXCLUDED.format(names=", ".join(names)),) if names else ()
 
 
+def _require_finite(roots: Sequence[TreeNode], turns: int) -> None:
+    """Refuse the tree when a sequence score in its first *turns* turns is not finite, naming the first such sequence
+    met depth first, by its turns' rows and responses counted from 1 (SPC-221)."""
+    stack: list[tuple[TreeNode, tuple[TreeNode, ...]]] = [(node, ()) for node in reversed(roots)]
+    while stack:
+        node, before = stack.pop()
+        path = (*before, node)
+        if not math.isfinite(node.path_score):
+            steps = ", then ".join(
+                f"turn {k} row {n.action + 1} and response {n.response + 1}" for k, n in enumerate(path, start=1)
+            )
+            raise NonFiniteScoreError(f"the sequence {steps}", node.path_score)
+        if len(path) < turns:
+            stack.extend((child, path) for child in reversed(node.children))
+
+
 def select(
     scenario: Scenario, roots: Sequence[TreeNode], turns: int, strategy: SelectorStrategy, *, matrix_pick: int | None,
 ) -> TreeSelection:
     """*strategy*'s picks over the first *turns* turns of the tree under *roots*, beside the one-turn matrix's pick,
     *matrix_pick*, which a turn-1 pick that differs from it names; None when the matrix has no pick. Each turn is as
-    the engine set it (SPC-187)."""
+    the engine set it (SPC-187). A sequence score in those turns that is not finite raises NonFiniteScoreError before
+    any rule picks on it (SPC-221, evaluation F-32)."""
+    _require_finite(roots, turns)
     plan = plan_or_equal(scenario)
     selector = _Selector(scenario, strategy, turns, plan)
     selector.value([_Member(roots, (), 1.0)], 1, ())

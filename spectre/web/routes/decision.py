@@ -46,11 +46,13 @@ from spectre.domain.decision import (
     MAX_TURNS,
     MAX_VETO_REASON,
     MIN_KEEP_OUT_KM,
+    NON_FINITE_SCORE,
     ActionType,
     AdversaryAction,
     AdversaryHypothesis,
     BoundElset,
     FriendlyResponse,
+    NonFiniteScoreError,
     Scenario,
     ScenarioBinding,
     ScenarioResult,
@@ -127,6 +129,33 @@ router = APIRouter(prefix="/plan/decision", tags=["decision"])
 _WEIGHTS_ALL_ZERO = (
     "Every scoring weight is 0, so every score would be 0 and no rule could pick a response on them. Set at least "
     "one weight above 0."
+)
+# A row value or a weight the form did not post is refused, never given a default (SPC-222, evaluation F-33): a
+# truncated form evaluated as if P 0.5, Conf 0.5, Gap 0.7 or the default weights had been chosen.
+_ROW_FIELD_MISSING = (
+    "{side} row {row} posts no {field}. Every row must post each of its fields, and a missing one is not given a "
+    "default. Reload the panel and enter the row again."
+)
+_ROW_FIELD_EXTRA = "The {sides} post {n} values of {field} for {rows}. Reload the panel and enter the rows again."
+_WEIGHT_MISSING = (
+    "The {weight} weight is blank or was not posted. Every scoring weight must be given, and a missing one is not "
+    "given its default. Enter it, or reload the panel."
+)
+_TYPE_UNKNOWN = "Choose a listed action type for {side} row {row}."
+_ACTION_TYPES = frozenset(t.value for t in ActionType)
+#: Each row field every row must post, with its words for the operator, in the order the panel lays them out.
+_ADVERSARY_FIELDS = (
+    ("adv_names", "name"), ("adv_types", "action type"), ("adv_probs", "probability (P)"),
+    ("adv_confs", "confidence (Conf)"), ("adv_gaps", "custody gap share (Gap)"),
+)
+_FRIENDLY_FIELDS = (
+    ("fr_names", "name"), ("fr_types", "action type"), ("fr_costs", "cost"), ("fr_revs", "reversibility"),
+    ("fr_times", "time to execute (hours)"),
+)
+#: The five scoring weights, in the order the score adds them, each with its words.
+_WEIGHT_FIELDS = (
+    ("w_custody", "custody"), ("w_ca", "closest-approach"), ("w_dv", "delta-V"), ("w_time", "time-to-execute"),
+    ("w_rev", "reversibility"),
 )
 # Rows per side, as README.md documents, and the longest horizon in hours.
 _MAX_ROWS = 5
@@ -275,6 +304,29 @@ class _Inputs:
         """One numeric column of rows, each checked, named by its row."""
         return [self.number(raw, f"{label} in row {i + 1}", high) for i, raw in enumerate(raws or [])]
 
+    def weight(self, raw: str | None, words: str) -> float:
+        """One scoring weight in [0, 1]; refused, naming it, when blank or not posted (SPC-222)."""
+        if raw is None:
+            return self.refuse(_WEIGHT_MISSING.format(weight=words))
+        return self.number(raw, "each scoring weight")
+
+    def posted(self, columns: Sequence[tuple[list[str] | None, str]], rows: int, side: str, sides: str) -> None:
+        """Every column posts one value per row: the first row short of one is refused naming the row and the field,
+        and a column longer than the rows is refused too (SPC-222)."""
+        for column, field in columns:
+            n = len(column or [])
+            if n < rows:
+                self.refuse(_ROW_FIELD_MISSING.format(side=side, row=n + 1, field=field))
+            elif n > rows:
+                count = "1 row" if rows == 1 else f"{rows} rows"
+                self.refuse(_ROW_FIELD_EXTRA.format(sides=sides, n=n, field=field, rows=count))
+
+    def types(self, raws: list[str] | None, side: str) -> None:
+        """Every action type is a listed one; one that names none no longer falls back to a manoeuvre (SPC-222)."""
+        for row, raw in enumerate(raws or [], start=1):
+            if raw not in _ACTION_TYPES:
+                self.refuse(_TYPE_UNKNOWN.format(side=side, row=row))
+
     def rows(self, adv_ids: list[str] | None, fr_ids: list[str] | None) -> None:
         """Both sides take 1 to 5 rows, as README.md documents."""
         if not (1 <= len(adv_ids or []) <= _MAX_ROWS and 1 <= len(fr_ids or []) <= _MAX_ROWS):
@@ -301,16 +353,16 @@ def _err(msg: str) -> HTMLResponse:
 
 
 def _at[T](values: Sequence[T], index: int, default: T) -> T:
-    """Return ``values[index]``, or *default* when the form sent fewer rows."""
+    """Return ``values[index]``, or *default* when the form sent fewer: only for a section optional by design, the
+    hypotheses and our burns, which a form without them holds none of. Row values and weights are refused when
+    missing (SPC-222)."""
     return values[index] if index < len(values) else default
 
 
-def _action_type(types: Sequence[str], index: int) -> ActionType:
-    """Parse one row's action type, falling back to a manoeuvre."""
-    try:
-        return ActionType(types[index]) if index < len(types) else ActionType.MANOEUVRE
-    except ValueError:
-        return ActionType.MANOEUVRE
+def _action_type(types: Sequence[str], index: int) -> ActionType | None:
+    """One row's action type, or None when it is missing or names no listed type, which _parse refuses (SPC-222)."""
+    raw = types[index] if index < len(types) else ""
+    return ActionType(raw) if raw in _ACTION_TYPES else None
 
 
 class _AdversaryColumns(NamedTuple):
@@ -329,16 +381,17 @@ class _AdversaryColumns(NamedTuple):
 def _adversary_rows(
     columns: _AdversaryColumns, hypotheses: Sequence[AdversaryHypothesis | None],
 ) -> list[AdversaryAction]:
-    """Build the adversary actions from the form's parallel arrays, each with its hypothesis or None."""
+    """Build the adversary actions from the form's parallel arrays, each with its hypothesis or None. _parse has
+    refused a column short of the rows, so every row has every value it is built from (SPC-222)."""
     return [
         AdversaryAction(
             id=columns.ids[i],
-            name=_at(columns.names, i, f"ADV-{i+1}"),
-            action_type=_action_type(columns.types, i),
-            probability=float(_at(columns.probs, i, DEFAULT_PROBABILITY)),
-            confidence=float(_at(columns.confs, i, 0.5)),
+            name=columns.names[i],
+            action_type=ActionType(columns.types[i]),
+            probability=float(columns.probs[i]),
+            confidence=float(columns.confs[i]),
             hypothesis=_at(hypotheses, i, None),
-            custody_gap_fraction=_at(columns.gaps, i, DEFAULT_CUSTODY_GAP_FRACTION),
+            custody_gap_fraction=columns.gaps[i],
             probability_edited=columns.ids[i] in columns.edited,
         )
         for i in range(len(columns.ids))
@@ -649,15 +702,16 @@ def _friendly_rows(
     ids: list[str], names: list[str], types: list[str], columns: _ResponseColumns,
     burns: Sequence[ResponseBurnSpec | None] = (),
 ) -> list[FriendlyResponse]:
-    """Build the friendly responses from the form's parallel arrays, each manoeuvre with its burn or None."""
+    """Build the friendly responses from the form's parallel arrays, each manoeuvre with its burn or None. _parse has
+    refused a column short of the rows, so every row has every value it is built from (SPC-222)."""
     return [
         FriendlyResponse(
             id=ids[i],
-            name=_at(names, i, f"FR-{i+1}"),
-            action_type=_action_type(types, i),
-            cost=float(_at(columns.costs, i, 0.5)),
-            reversibility=float(_at(columns.reversibilities, i, 0.5)),
-            time_to_execute_hours=float(_at(columns.times_h, i, 6.0)),
+            name=names[i],
+            action_type=ActionType(types[i]),
+            cost=float(columns.costs[i]),
+            reversibility=float(columns.reversibilities[i]),
+            time_to_execute_hours=float(columns.times_h[i]),
             burn=_at(burns, i, None),
         )
         for i in range(len(ids))
@@ -928,15 +982,17 @@ class _ScenarioForm(BaseModel):
     # No default: FastAPI reads a blank field as absent, and a default would
     # turn a cleared horizon into a silent 72 h.
     horizon_hours: str | None = None
-    # Adversary actions (up to 4)
+    # Adversary actions (up to 5). Every row posts each of its fields, blanks included; a column short of the rows is
+    # refused naming the row and the field, never given a default (SPC-222, evaluation F-33).
     adv_ids: list[str] | None = Field(default=None, alias="adv_id")
     adv_names: list[str] | None = Field(default=None, alias="adv_name")
     adv_types: list[str] | None = Field(default=None, alias="adv_type")
     adv_probs: list[str] | None = Field(default=None, alias="adv_prob")
     adv_confs: list[str] | None = Field(default=None, alias="adv_conf")
-    # Each row's custody gap share (SPC-161), apart from its confidence; a form without the column takes the default.
+    # Each row's custody gap share (SPC-161), apart from its confidence; a form without the column is refused, as a
+    # form without any other row field is (SPC-222). It took the default, DEFAULT_CUSTODY_GAP_FRACTION, until 0.42.0.
     adv_gaps: list[str] | None = Field(default=None, alias="adv_gap")
-    # Friendly responses (up to 4)
+    # Friendly responses (up to 5), each posting every field, as the adversary rows do (SPC-222).
     fr_ids: list[str] | None = Field(default=None, alias="fr_id")
     fr_names: list[str] | None = Field(default=None, alias="fr_name")
     fr_types: list[str] | None = Field(default=None, alias="fr_type")
@@ -950,16 +1006,18 @@ class _ScenarioForm(BaseModel):
     # Not permitted per friendly row (SPC-195): the ids of the rows ticked, and every row's reason, blanks included.
     fr_vetoed: list[str] | None = Field(default=None, alias="fr_vetoed")
     fr_veto_reasons: list[str] | None = Field(default=None, alias="fr_veto_reason")
-    # Scoring weights
-    w_custody: str = "0.35"
-    w_ca: str = "0.25"
-    w_dv: str = "0.20"
-    w_time: str = "0.10"
-    w_rev: str = "0.10"
+    # Scoring weights. No default, as for the horizon: FastAPI reads a blank field as absent, and a default turned a
+    # cleared or missing weight into its default silently; each is refused, naming it (SPC-222, evaluation F-33).
+    w_custody: str | None = None
+    w_ca: str | None = None
+    w_dv: str | None = None
+    w_time: str | None = None
+    w_rev: str | None = None
     # The miss at or inside which closest approach scores its full penalty (SPC-191). No default, as for the horizon:
     # FastAPI reads a blank field as absent, and a default would turn a cleared distance into a silent 10 km.
     keep_out_km: str | None = None
-    # The rule chosen; absent or naming no rule, the deployment's primary rule (SPC-194).
+    # Optional by design, each stating what its absence means. The rule chosen; absent or naming no rule, the
+    # deployment's primary rule (SPC-194).
     strategy: str = ""
     # The game tree (SPC-142): its turn depth, 1 to 3, and what the operator states turn 1 showed, blank for none.
     turns: str = "1"
@@ -1019,11 +1077,15 @@ def _observed(inputs: _Inputs, raw: str) -> Seen | None:
 def _parse(inputs: _Inputs, form: _ScenarioForm, now: datetime) -> _Parsed:
     """Every number on the form, checked at scenario epoch *now*; the first problem is kept on *inputs*."""
     inputs.rows(form.adv_ids, form.fr_ids)
+    rows = (len(form.adv_ids or []), len(form.fr_ids or []))
+    inputs.posted([(getattr(form, name), words) for name, words in _ADVERSARY_FIELDS], rows[0],
+                  "Adversary action", "adversary actions")
+    inputs.posted([(getattr(form, name), words) for name, words in _FRIENDLY_FIELDS], rows[1],
+                  "Friendly response", "friendly responses")
+    inputs.types(form.adv_types, "adversary action")
+    inputs.types(form.fr_types, "friendly response")
     horizon = inputs.number(form.horizon_hours, "the horizon in hours", _MAX_HORIZON_H, positive=True)
-    weights = [
-        inputs.number(w, "each scoring weight")
-        for w in (form.w_custody, form.w_ca, form.w_dv, form.w_time, form.w_rev)
-    ]
+    weights = [inputs.weight(getattr(form, name), words) for name, words in _WEIGHT_FIELDS]
     if inputs.problem is None and sum(weights) <= 0.0:
         # Every score would be 0 and every pick a tie broken by row order: a recommendation with no basis (F-31).
         inputs.refuse(_WEIGHTS_ALL_ZERO)
@@ -1185,6 +1247,10 @@ async def _evaluate_inline(
     try:
         result = await asyncio.to_thread(evaluate_tree, scenario, strat)
         state.append_log(evaluated_line(scenario, result))
+    # A score that is not finite (SPC-221): the log names the cell, the page gives the fixed sentence.
+    except NonFiniteScoreError:
+        logger.exception("Decision evaluation refused a score that is not finite")
+        return _err(NON_FINITE_SCORE)
     # The traceback goes to the log; the page says only that it failed.
     except Exception:
         logger.exception("Decision evaluation failed")

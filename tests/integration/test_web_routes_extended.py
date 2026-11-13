@@ -211,11 +211,11 @@ class TestDecisionRoutes:
         )
         assert resp.status_code == 200
 
-    def test_decision_evaluate_fills_short_rows_and_labels_the_result(
+    def test_decision_evaluate_refuses_short_rows_naming_the_row(
         self, client: object, auth_cookie: str,
     ) -> None:
-        """Rows the form sends short get named defaults, and the page says modelled. Row 2 takes the default P of
-        0.5, so row 1 posts 0.3 to keep the rows' P at most 1 (SPC-203)."""
+        """Rows the form sends short were given named defaults until 0.42.0, ADV-2 and FR-2 at P 0.5; each missing
+        value is now refused, naming the row and the field (SPC-222, evaluation F-33)."""
         resp = client.post(  # type: ignore[attr-defined]
             "/plan/decision/evaluate",
             data={
@@ -232,10 +232,11 @@ class TestDecisionRoutes:
             headers=csrf_headers(auth_cookie),
         )
         assert resp.status_code == 200
-        assert b"ADV-2" in resp.content
-        assert b"FR-2" in resp.content
-        assert b"Modelled estimate, not a computed solution" in resp.content
-        assert b"Minimax strategy" in resp.content, "an unknown strategy must fall back to minimax"
+        assert resp.text == (
+            '<p class="error-msg">Adversary action row 2 posts no name. Every row must post each of its fields, and '
+            "a missing one is not given a default. Reload the panel and enter the row again.</p>"
+        )
+        assert b"ADV-2" not in resp.content and b"FR-2" not in resp.content
 
     def test_decision_unauthenticated_redirects(self, initialized_app: object) -> None:
         from fastapi.testclient import TestClient

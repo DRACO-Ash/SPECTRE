@@ -44,7 +44,10 @@ from typing import Any
 
 from spectre.domain.decision import (
     EVALUATION_BUDGET_S,
+    NON_FINITE_SCORE,
+    SECOND_SEED_STAGE,
     EvaluationStoppedError,
+    NonFiniteScoreError,
     RunControl,
     SamplingProgress,
     Scenario,
@@ -108,7 +111,7 @@ class DecisionJob:
     waiting: bool = False
     #: Set from the worker thread after each sample; a single assignment, safe under the GIL.
     progress: SamplingProgress | None = None
-    #: Why the job stopped: a fixed sentence, never exception text.
+    #: Why the job stopped, or why it failed when that can be said (SPC-221): a fixed sentence, never exception text.
     stopped: str = ""
     result: ScenarioResult | None = None
     cancelled: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -241,9 +244,9 @@ async def _prepared(state: SessionState, key: SessionKey, job: DecisionJob) -> b
             job.state = JobState.QUEUED
             return True
         result = await asyncio.to_thread(evaluate_tree, job.scenario, job.strategy)
-    except Exception:
+    except Exception as error:
         logger.exception("Decision evaluation %s failed", log_safe(job.job_id))
-        job.state = JobState.FAILED
+        _fail(job, error)
         return False
     await _finish(state, key, job, result)
     return False
@@ -277,11 +280,19 @@ async def run_job(state: SessionState, key: SessionKey, job: DecisionJob, *, eva
         except EvaluationStoppedError as stopped:
             _stop(job, stopped.reason)
             return
-        except Exception:
+        except Exception as error:
             logger.exception("Decision evaluation %s failed", log_safe(job.job_id))
-            job.state = JobState.FAILED
+            _fail(job, error)
             return
     await _finish(state, key, job, result)
+
+
+def _fail(job: DecisionJob, error: Exception) -> None:
+    """End *job* FAILED, its traceback logged by the caller: with NON_FINITE_SCORE's fixed sentence for a score that
+    is not finite (SPC-221), else the page's general one."""
+    job.state = JobState.FAILED
+    if isinstance(error, NonFiniteScoreError):
+        job.stopped = NON_FINITE_SCORE
 
 
 async def _finish(state: SessionState, key: SessionKey, job: DecisionJob, result: ScenarioResult) -> None:
@@ -375,6 +386,12 @@ _SIZING = (
     "Sizing our burn for {label}: trial {p.done} of at most {p.total}, {p.elapsed_s:.0f} s of the {budget:g} s "
     "budget used. Scenario epoch {epoch:%H:%M} UTC."
 )
+#: While a row is drawn again on the second seed its convergence is checked on (SPC-224).
+_SECOND_SEED = (
+    "Checking hypothesis {p.row} of {p.rows} on a second seed: {p.done:,} of {p.total:,} samples, "
+    "{p.elapsed_s:.0f} s of the {budget:g} s budget used. Its figures are the first seed's; this draw says only "
+    "whether they converged. Scenario epoch {epoch:%H:%M} UTC."
+)
 _CUSTODY = (
     "Reading custody: waiting up to {wait:g} s for {red}'s element-set history, {fetch}, so its custody is judged "
     "as the sweep judges it. The evaluation starts when the history arrives or the wait ends; if "
@@ -404,10 +421,12 @@ def _message(job: DecisionJob) -> str:
             return _STARTING.format(budget=budget, epoch=epoch)
         if job.progress.stage == "sizing":   # SPC-121: the label is the response's name, escaped where rendered
             return _SIZING.format(label=job.progress.label, p=job.progress, budget=budget, epoch=epoch)
+        if job.progress.stage == SECOND_SEED_STAGE:
+            return _SECOND_SEED.format(p=job.progress, budget=budget, epoch=epoch)
         return _RUNNING.format(p=job.progress, budget=budget, epoch=epoch)
     return {
         JobState.STOPPED: _STOPPED.format(reason=job.stopped),
-        JobState.FAILED: _FAILED,
+        JobState.FAILED: job.stopped or _FAILED,
         JobState.RECORDING: _RECORDING,
     }.get(job.state, _DONE)
 

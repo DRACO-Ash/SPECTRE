@@ -346,9 +346,10 @@ def _analyse_merged(
     Returns ``(analysis, quality_flags)``, or ``None`` when nothing parsed.
     One copy for the panel and for the history held for the sweep (SPC-001).
     """
+    # A set dated in the future is refused by the clock it is read at, counted with the other refusals (SPC-226).
     records, dropped = parse_tle_history_counted(
         history.merged_text, satno=satno,
-        metadata=history.metadata, rms_metadata=history.rms_metadata,
+        metadata=history.metadata, rms_metadata=history.rms_metadata, now=datetime.now(UTC),
     )
     if not records:
         return None
@@ -608,6 +609,7 @@ def custody_from_history(
     age = elset_age(red_tle, now)
     return assess_custody(
         elset_hours=age.hours if age else None,
+        ahead_hours=age.ahead_hours if age else 0.0,
         limit_hours=age.limit_hours if age else 0.0,
         elset_count=pol.tle_count if pol else 0,
         history_days=pol.span_days if pol else 0.0,

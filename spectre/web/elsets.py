@@ -28,11 +28,13 @@ from typing import TYPE_CHECKING
 
 from spectre.astro.along_track import RegimeBasis, regime_basis
 from spectre.astro.elset_check import (
+    FUTURE_EPOCH_TOLERANCE,
     HELD_KEPT,
     NOT_STORED,
     ElsetCheck,
     check_elset,
     history_refusal,
+    hours_or_days,
     refused_type,
 )
 from spectre.astro.propagator import TLE_ERRORS, regime_from_tle
@@ -47,6 +49,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _HOURS_PER_DAY = 24.0
+_SECONDS_PER_HOUR = 3600.0
 _SLOW_REGIMES = frozenset({"GEO", "DEEP"})
 
 #: Element sets in these provenances came from UDL and may be refreshed from
@@ -87,12 +90,13 @@ def log_skipped_by_type(subject: str, sets: Iterable[tuple[str, Mapping[str, obj
 
 def refused(
     name: str, tle: str, *, outcome: str = NOT_STORED, satno: int | None = None,
-    record: Mapping[str, object] | None = None,
+    record: Mapping[str, object] | None = None, now: datetime | None = None,
 ) -> str | None:
     """The sentence refusing *tle* for the object *name*, logged, or None when the acceptance check accepts it. With
     *satno*, a set for another catalogue number is refused too; *record*, the UDL record it came in, adds that
-    record's ephemeris type and UCT flag to the check."""
-    check = check_elset(tle, satno, record=record)
+    record's ephemeris type and UCT flag to the check. A set dated more than FUTURE_EPOCH_TOLERANCE after *now*, the
+    wall clock unless given, is refused too (SPC-226)."""
+    check = check_elset(tle, satno, record=record, now=datetime.now(tz=UTC) if now is None else now)
     if check.accepted:
         return None
     sentence = check.refusal(name, outcome=outcome)
@@ -162,6 +166,14 @@ class ElsetAge:
     limit_hours: float
     # The set's regime and whose limit it is (SPC-215); None when the set's elements cannot be read.
     regime: RegimeBasis | None = None
+    # How far the epoch is after the moment aged at, hours, when that is more than FUTURE_EPOCH_TOLERANCE: the set is
+    # dated in the future (SPC-226, evaluation F-38). 0 otherwise, a clock a little ahead reading as now.
+    ahead_hours: float = 0.0
+
+    @property
+    def future(self) -> bool:
+        """Whether the set is dated in the future, past the clock-skew tolerance: never current (SPC-226)."""
+        return self.ahead_hours > 0.0
 
     @property
     def regime_line(self) -> str:
@@ -177,14 +189,16 @@ class ElsetAge:
 
     @property
     def stale(self) -> bool:
-        return self.hours > self.limit_hours
+        """Past the regime's limit, or dated in the future, which is no more current than a set past it (SPC-226)."""
+        return self.future or self.hours > self.limit_hours
 
     @property
     def label(self) -> str:
-        """Hours under a day, days beyond it: "10.0 h", "13.0 d"."""
-        if self.hours < _HOURS_PER_DAY:
-            return f"{self.hours:.1f} h"
-        return f"{self.days:.1f} d"
+        """Hours under a day, days beyond it: "10.0 h", "13.0 d"; a set dated in the future says how far ahead it is,
+        "2.0 d in the future"."""
+        if self.future:
+            return f"{hours_or_days(self.ahead_hours)} in the future"
+        return hours_or_days(self.hours)
 
 
 def _epoch_of(tle: str) -> datetime | None:
@@ -210,12 +224,26 @@ def _limit_hours(tle: str) -> float:
 
 
 def elset_age(tle: str, now: datetime) -> ElsetAge | None:
-    """How old *tle* is at *now*, or None when its epoch cannot be read."""
+    """How old *tle* is at *now*, or None when its epoch cannot be read.
+
+    An epoch after *now* reads as 0 h within FUTURE_EPOCH_TOLERANCE, for clock skew; past it the set is dated in the
+    future, ahead_hours says by how much, and it is never current (SPC-226, evaluation F-38). Until 0.42.0 any later
+    epoch read as 0 h, current.
+    """
     epoch = _epoch_of(tle)
     if epoch is None:
         return None
-    hours = max((now - epoch).total_seconds() / 3600.0, 0.0)
-    return ElsetAge(epoch=epoch, hours=hours, limit_hours=_limit_hours(tle), regime=regime_basis(tle))
+    hours = max((now - epoch).total_seconds() / _SECONDS_PER_HOUR, 0.0)
+    return ElsetAge(
+        epoch=epoch, hours=hours, limit_hours=_limit_hours(tle), regime=regime_basis(tle),
+        ahead_hours=ahead_hours(epoch, now),
+    )
+
+
+def ahead_hours(epoch: datetime, now: datetime) -> float:
+    """How far *epoch* is after *now*, hours, when that is more than FUTURE_EPOCH_TOLERANCE; 0 within it, a clock a
+    little ahead reading as now, and 0 for an epoch at or before *now* (SPC-226)."""
+    return (epoch - now).total_seconds() / _SECONDS_PER_HOUR if epoch - now > FUTURE_EPOCH_TOLERANCE else 0.0
 
 
 def _is_newer(candidate: str, held: str) -> bool:

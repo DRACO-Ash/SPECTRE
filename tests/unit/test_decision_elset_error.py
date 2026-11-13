@@ -329,10 +329,10 @@ class TestARecordOf0280To0310ReplaysAsItWasEvaluated:
 
 class TestTheStoredInputsHoldTheRule:
     def test_this_code_writes_a_version_holding_it_and_reads_every_earlier_one(self) -> None:
-        # Version 4 added the miss rule; versions 5 (SPC-187) and 6 (SPC-188) hold it too.
-        assert (VERSION, VERSIONS) == (6, (1, 2, 3, 4, 5, 6))
+        # Version 4 added the miss rule; versions 5 (SPC-187), 6 (SPC-188) and 7 (SPC-224) hold it too.
+        assert (VERSION, VERSIONS) == (7, (1, 2, 3, 4, 5, 6, 7))
         document = json.loads(store_inputs(evaluate_scenario(_pair_scenario(0.0, n=60)))[0])
-        assert document["version"] == 6
+        assert document["version"] == 7
         assert document["scenario"]["miss_rule"] == MissRule.ELSET_ERROR.value
 
     def test_it_reads_back_the_rule(self) -> None:
@@ -354,7 +354,7 @@ class TestTheStoredInputsHoldTheRule:
         """Version 3 never held it: a field it never held is unknown there."""
         document = json.loads(store_inputs(evaluate_scenario(_pair_scenario(0.0, n=60)))[0])
         text = canonical_json({**document, "version": 3})
-        with pytest.raises(InputsRefusedError, match="unknown field miss_rule"):
+        with pytest.raises(InputsRefusedError, match="unknown field convergence_rule, miss_rule"):
             read_inputs(text, sha256_of(text))
 
 

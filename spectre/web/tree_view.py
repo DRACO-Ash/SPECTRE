@@ -442,14 +442,15 @@ def diagram(nodes: Sequence[NodeView], vetoed: Sequence[bool]) -> TreeDiagram | 
     )
 
 
-def _assumptions(nodes: Sequence[NodeView]) -> tuple[str, ...]:
+def _assumptions(nodes: Sequence[NodeView], seeds: str | None = None) -> tuple[str, ...]:
     """The lines beside a tree built: its last turn shown, the deepest branch built in full where the tree was built
-    in part, valued as if no one moves after it (SPC-220), and the score's terms added with nothing joining them
-    (SPC-219). None for a tree with no branch."""
+    in part, valued as if no one moves after it (SPC-220), the score's terms added with nothing joining them
+    (SPC-219), and, with *seeds*, how its sampled turns are drawn and judged (ScenarioResult.tree_seed_line, SPC-224).
+    None for a tree with no branch."""
     if not nodes:
         return ()
     deepest = max(node.turn for node, _ in _order(nodes))
-    return LEAVES_LINE.format(turns=deepest, most=MAX_TURNS), TERMS_INDEPENDENT_LINE
+    return (LEAVES_LINE.format(turns=deepest, most=MAX_TURNS), TERMS_INDEPENDENT_LINE, *([seeds] if seeds else []))
 
 
 def _update(result: ScenarioResult, selection: TreeSelection | None) -> tuple[str, ...]:
@@ -478,6 +479,6 @@ def tree_view(result: ScenarioResult) -> TreeView | None:
         _update(result, selection),
         None if stated is None else FigureView(UPDATE_HEADING, stated.line, stated.basis.kind.value, stated.basis.note),
         nodes,
-        _assumptions(nodes),
+        _assumptions(nodes, result.tree_seed_line),
         diagram(nodes, [bool(f.not_permitted) for f in result.scenario.friendly_responses]),
     )

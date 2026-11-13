@@ -146,7 +146,14 @@ class TestAComputedRowAppliesOurBurn:
             "RK45 with J2 and exponential drag for both orbits, from their SGP4 states at the scenario epoch. With no "
             f"burn, SGP4 puts the closest approach at {sgp4.approach.miss_km:.3f} km at "
         )
-        assert line.endswith(f": {dm:.3f} km and {dt:.0f} s apart, which is the propagators, not any burn.")
+        assert f": {dm:.3f} km and {dt:.0f} s apart, which is the propagators, not any burn. " in line
+        # The WGS-72 to WGS-84 handover over the 6 h searched, the 24 h figures (SPC-225).
+        assert line.endswith(
+            " Constants handover, not in the spread: RK45 starts from SGP4's states, which SGP4 works out with the "
+            "WGS-72 constants, and flies them with WGS-84's; flown with WGS-72's instead, each object of three "
+            "reference pairs moved up to 1.17 km in LEO and 0.48 km at GEO by 24 h, and the pair's separation up to "
+            "0.06 km (SPC-225).",
+        )
         assert line in _page(leo)
 
     def test_buys_is_rk45_after_minus_rk45_before_and_before_is_the_hold_cell(self, leo: ScenarioResult) -> None:
@@ -406,9 +413,10 @@ class TestTheCost:
 
     @pytest.mark.parametrize("burns", [0, 1, 5])
     def test_the_longest_horizon_counts_burns(self, burns: int) -> None:
-        """40: each burn adds 0.3 of a search per sample, 16 sizing trials and blue's burnt arc to every row."""
+        """40: each burn adds 0.3 of a search per sample, 16 sizing trials and blue's burnt arc to every row; and
+        each row is charged twice, for the second seed its convergence is checked on (SPC-224)."""
         m = 500 * (1.0 + 0.3 * burns) + 16 * burns
-        hours = (MAX_SAMPLE_HOURS - m * SET_UP_S_PER_SAMPLE / 3600.0) / (m + 2 + burns)
+        hours = (MAX_SAMPLE_HOURS - 2 * m * SET_UP_S_PER_SAMPLE / 3600.0) / (2 * (m + 2 + burns))
         assert longest_horizon_h(500, burns=burns) == pytest.approx(math.floor(hours * 10) / 10)
         assert longest_horizon_h(500, burns=5) < longest_horizon_h(500, burns=1) < longest_horizon_h(500)
 

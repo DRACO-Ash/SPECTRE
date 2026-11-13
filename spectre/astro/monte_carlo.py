@@ -535,6 +535,35 @@ _INTEGRATOR_ERROR = (
 )
 _INTEGRATOR_UNMEASURED = "; it was measured to {h} h only, and grows with time"
 
+#: SGP4's own constants, WGS-72, as the sgp4 package's default gravity model holds them (Vallado, Crawford, Hujsak
+#: and Kelso, "Revisiting Spacetrack Report #3", AIAA 2006-6753): mu km^3/s^2, equatorial radius km and J2. Every RK45
+#: arc here starts from an SGP4 state worked out with them and flies it with spectre.astro.constants' WGS-84 mu and
+#: radius and EGM-96 J2 (SPC-225, evaluation F-36). Read only to measure that handover; nothing propagates with them.
+SGP4_WGS72: tuple[float, float, float] = (398600.8, 6378.135, 0.001082616)
+#: That handover, km, measured by tests/unit/test_wgs_handover.py on the reference pairs INTEGRATOR_ERROR_KM is
+#: measured on, at B* 1e-4: each object flown by this RK45 from its SGP4 state with the WGS-72 constants in place of
+#: the WGS-84 ones. Keyed by horizon, h: the largest position difference of any object up to it in LEO, the same at
+#: GEO, and the largest difference in any pair's separation, each rounded up to 0.01 km. Both objects drift along
+#: track alike, about 1.2 km a day in LEO and 0.5 km a day at GEO, so the separation, which a closest approach reads,
+#: moves at most 0.18 km by 72 h: the size of the integrator's own separation error and under a fifth of the smallest
+#: element-set error each sample draws, so the physics is not changed and the handover is stated instead (SPC-225).
+WGS_HANDOVER_KM: dict[int, tuple[float, float, float]] = {
+    24: (1.17, 0.48, 0.06),
+    48: (2.34, 0.96, 0.12),
+    72: (3.52, 1.43, 0.18),
+}
+_WGS_HANDOVER = (
+    "constants handover, not in the spread: RK45 starts from SGP4's states, which SGP4 works out with the WGS-72 "
+    "constants, and flies them with WGS-84's; flown with WGS-72's instead, each object of three reference pairs "
+    "moved up to {leo:g} km in LEO and {geo:g} km at GEO by {h} h, and the pair's separation up to {sep:g} km"
+)
+
+
+def _measured_at(table: dict[int, tuple[float, float, float]], horizon_hours: float) -> int:
+    """The shortest horizon *table* was measured at that is at or past *horizon_hours*; the longest past them all."""
+    measured = sorted(table)
+    return next((m for m in measured if horizon_hours <= m), measured[-1])
+
 
 def integrator_error_words(horizon_hours: float) -> str:
     """The production RK45's error by *horizon_hours*, in words for the sampled basis note (SPC-214).
@@ -542,10 +571,17 @@ def integrator_error_words(horizon_hours: float) -> str:
     The figures are those of the shortest horizon measured at or past it; past the longest measured they are the
     longest's, and the words say the horizon is past what was measured.
     """
-    measured = sorted(INTEGRATOR_ERROR_KM)
-    h = next((m for m in measured if horizon_hours <= m), measured[-1])
+    h = _measured_at(INTEGRATOR_ERROR_KM, horizon_hours)
     leo, geo, sep = INTEGRATOR_ERROR_KM[h]
     words = _INTEGRATOR_ERROR.format(rtol=RK45_RTOL, atol=RK45_ATOL, leo=leo, geo=geo, sep=sep, h=h)
+    return words + (_INTEGRATOR_UNMEASURED.format(h=h) if horizon_hours > h else "")
+
+
+def handover_words(horizon_hours: float) -> str:
+    """The WGS-72 to WGS-84 handover by *horizon_hours*, in words, chosen as integrator_error_words is (SPC-225)."""
+    h = _measured_at(WGS_HANDOVER_KM, horizon_hours)
+    leo, geo, sep = WGS_HANDOVER_KM[h]
+    words = _WGS_HANDOVER.format(leo=leo, geo=geo, sep=sep, h=h)
     return words + (_INTEGRATOR_UNMEASURED.format(h=h) if horizon_hours > h else "")
 
 
@@ -1089,6 +1125,45 @@ class RedBurn(NamedTuple):
     bstar_after: float
 
 
+class SeedCheck(NamedTuple):
+    """What a second draw of the same series, on *seed*, found of its own convergence (SPC-224): its widest
+    half-width, the tolerance it was held to, and whether it converged."""
+
+    seed: int
+    half_width_km: float
+    tolerance_km: float
+    converged: bool
+
+
+#: A series' convergence is checked on a second draw, seeded this much past the hypothesis's own (SPC-224, evaluation
+#: F-35): at 50 samples whether a row converged was one draw of seed 42 (15 of 20 seeds in one case, probe P-11). The
+#: second seed, 43 by default, draws every sample afresh, the burn and the element-set error alike, so the two are
+#: independent draws; one is not a sample of the other. Its figures are not shown: only whether it converged.
+SECOND_SEED_OFFSET = 1
+
+
+def second_seed(seed: int) -> int:
+    """The seed a series' convergence is checked on as well as its own (SPC-224)."""
+    return seed + SECOND_SEED_OFFSET
+
+
+def confirmed(first: SeparationSeries, second: SeparationSeries, seed: int) -> SeparationSeries:
+    """*first*, with its convergence checked on *second*, the same series drawn on *seed* (SPC-224, evaluation F-35).
+
+    Every figure is *first*'s, so what the operator reads is the hypothesis's own seed's; *first* is converged only
+    when *second* converged too, and so is each of our burns' series. When the two seeds disagree the series is not
+    converged: one draw that converged is not enough to rest a band on.
+    """
+    if len(second.after_burns) != len(first.after_burns):
+        raise ValueError("a series and its second draw search the same burns")
+    check = SeedCheck(seed, second.percentile_half_width_km, second.tolerance_km, second.converged)
+    burns = tuple(
+        mine._replace(stats=mine.stats._replace(converged=mine.stats.converged and theirs.stats.converged))
+        for mine, theirs in zip(first.after_burns, second.after_burns, strict=True)
+    )
+    return replace(first, converged=first.converged and second.converged, check=check, after_burns=burns)
+
+
 @dataclass(frozen=True)
 class SeparationSeries:
     """Each sample's closest approach to the blue track in one window, and their statistics.
@@ -1131,6 +1206,9 @@ class SeparationSeries:
     p5_half_width_km: float = math.inf
     # The element-set error each sample drew, red's and blue's 1 sigma (SPC-202); None when none was drawn.
     elset_error: ElsetError | None = None
+    # The second seed its convergence was checked on, and what that seed's draw found (SPC-224, evaluation F-35):
+    # ``converged`` is then this seed's and that one's both. None when it was checked on its own seed alone.
+    check: SeedCheck | None = None
 
     def __post_init__(self) -> None:
         if self.closing_speeds_km_s and len(self.closing_speeds_km_s) != len(self.approaches):

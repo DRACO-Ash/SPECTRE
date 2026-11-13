@@ -455,12 +455,11 @@ class TestThePanelStartsWhereTheRegisterSays:
         values = self._starts(self._panel(), field)
         assert values and all(v == start for v in values), (field, values)
 
-    @pytest.mark.parametrize(("field", "start"), [
-        ("w_custody", Scenario.w_custody), ("w_ca", Scenario.w_closest_approach), ("w_dv", Scenario.w_dv_cost),
-        ("w_time", Scenario.w_time_to_exec), ("w_rev", Scenario.w_reversibility),
-    ])
-    def test_the_forms_weights_default_to_the_registered_values(self, field: str, start: float) -> None:
-        assert float(decision_route._ScenarioForm.model_fields[field].default) == start
+    @pytest.mark.parametrize("field", ["w_custody", "w_ca", "w_dv", "w_time", "w_rev"])
+    def test_the_form_gives_no_weight_a_default(self, field: str) -> None:
+        """A weight the form does not post is refused, never given its registered default (SPC-222, F-33): the panel
+        starts each field at the registered value (above), and the route reads only what is posted."""
+        assert decision_route._ScenarioForm.model_fields[field].default is None
 
     def test_a_blank_budget_and_the_sample_count_are_the_registered_defaults(self) -> None:
         page = self._panel()

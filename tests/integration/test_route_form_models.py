@@ -48,10 +48,12 @@ class TestInterceptForm:
 class TestDecisionForm:
     _SCENARIO = {
         "scenario_name": "Form model", "horizon_hours": "72", "keep_out_km": "10",
-        "adv_id": ["A1", "A2"], "adv_name": ["Approach", "Hold"], "adv_type": ["RPO", "RPO"],
-        "adv_prob": ["0.6", "0.4"], "adv_conf": ["0.8", "0.7"],
-        "fr_id": ["F1"], "fr_name": ["Manoeuvre"], "fr_type": ["MANOEUVRE"],
+        "adv_id": ["A1", "A2"], "adv_name": ["Approach", "Hold"], "adv_type": ["manoeuvre", "manoeuvre"],
+        "adv_prob": ["0.6", "0.4"], "adv_conf": ["0.8", "0.7"], "adv_gap": ["0.7", "0.7"],
+        "fr_id": ["F1"], "fr_name": ["Manoeuvre"], "fr_type": ["manoeuvre"],
         "fr_cost": ["0.2"], "fr_rev": ["0.5"], "fr_time": ["2"],
+        # Every weight is posted, as the panel posts each: a missing one is refused (SPC-222).
+        "w_custody": "0.35", "w_ca": "0.25", "w_dv": "0.2", "w_time": "0.1", "w_rev": "0.1",
     }
 
     def test_parallel_arrays_are_read_by_their_form_names(self, client: Any, auth_cookie: str) -> None:

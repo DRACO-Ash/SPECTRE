@@ -326,12 +326,14 @@ class TestTheToleranceEdges:
         assert tied_with([bad, bad]) == ()
 
     def test_a_pick_never_loses_its_tie_set(self) -> None:
-        """A NaN score find_robust_response still picks: the tie set holds that pick alone, never none."""
-        from spectre.domain.decision import ties_of
+        """A value that is not finite never ties: the tie set holds the pick alone, never none. A matrix holding a NaN
+        score is refused before any rule picks on it since SPC-221 (evaluation F-32), where 0.41.0 picked by order."""
+        from spectre.domain.decision import NonFiniteScoreError, ties_of
         scenario, matrix = TestTheTolerance()._two(math.nan, 0.4)
-        pick = find_robust_response(scenario, matrix, _MINIMAX)
-        assert pick is not None
-        assert tied_responses(scenario, matrix, _MINIMAX) == (pick,)
+        with pytest.raises(NonFiniteScoreError):
+            find_robust_response(scenario, matrix, _MINIMAX)
+        with pytest.raises(NonFiniteScoreError):
+            tied_responses(scenario, matrix, _MINIMAX)
         assert ties_of([math.nan, 0.4], 0) == (0,)
         assert ties_of([0.4, 0.4], None) == ()
         assert ties_of([0.4, 0.4], 1) == (0, 1)

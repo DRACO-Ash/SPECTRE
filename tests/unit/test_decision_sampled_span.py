@@ -69,14 +69,15 @@ class TestTheSampledSearchStopsAtTheLimit:
         """1: 20 h old on a 24 h limit, over a 48 h horizon, the series runs over 4 h, not 48."""
         fake = _Fake()
         evaluate_scenario(_one_row(_evasive(50), age_h=20.0), sampler=fake)
-        assert len(fake.calls) == 1
-        assert fake.calls[0][2] == SeparationWindow(start_utc=EPOCH, span_s=4 * _HOUR_S)
+        assert len(fake.calls) == 2   # on its own seed and the second (SPC-224), over the same span
+        assert fake.calls[0][2] == fake.calls[1][2] == SeparationWindow(start_utc=EPOCH, span_s=4 * _HOUR_S)
 
     def test_the_trim_admits_what_the_horizon_alone_would_not(self) -> None:
         """2: enough samples that over 48 h their floor alone, samples times hours, is past MAX_SAMPLE_HOURS, so
-        they would be refused before anything ran; over the 24 h earned, they fit."""
-        n = int(decision.MAX_SAMPLE_HOURS / 36.0)
-        assert n * 48.0 > decision.MAX_SAMPLE_HOURS
+        they would be refused before anything ran; over the 24 h earned, they fit, each row charged twice for the
+        second seed its convergence is checked on (SPC-224)."""
+        n = int(decision.MAX_SAMPLE_HOURS / 72.0)
+        assert 2 * n * 48.0 > decision.MAX_SAMPLE_HOURS
         fake = _Fake()
         result = evaluate_scenario(_one_row(_evasive(n), age_h=0.0), sampler=fake)
         assert fake.calls[0][2].span_s == 24 * _HOUR_S

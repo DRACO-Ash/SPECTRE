@@ -84,15 +84,16 @@ def _same_object(red: BoundElset, blue: BoundElset) -> str | None:
     return None
 
 
-def _unsound(*held: tuple[str, RedTrack | BlueAsset | None]) -> str | None:
-    """The sentence refusing the first held set the acceptance check refuses, or None (SPC-201).
+def _unsound(now: datetime, *held: tuple[str, RedTrack | BlueAsset | None]) -> str | None:
+    """The sentence refusing the first held set the acceptance check refuses at *now*, or None (SPC-201).
 
     Every ingest path runs the check before storing a set; the binder runs it again, so a set held by any other
-    route, or before the check existed, never reaches the engine.
+    route, or before the check existed, never reaches the engine. At the scenario epoch, so a set dated after it is
+    refused, not bound as current (SPC-226).
     """
     for kind, obj in held:
         if obj is not None:
-            refusal = refused(f"{kind} {obj.name}", obj.tle, outcome=_NOT_BOUND)
+            refusal = refused(f"{kind} {obj.name}", obj.tle, outcome=_NOT_BOUND, now=now)
             if refusal is not None:
                 return refusal
     return None
@@ -106,7 +107,7 @@ def bind_scenario(state: SessionState, red_sat: str, blue_sat: str, now: datetim
     blue_obj = _held(state.blue_assets, blue_sat) if blue_sat else None
     if blue_sat and blue_obj is None:
         return BindOutcome(None, _NOT_HELD.format(kind="Blue asset", name=blue_sat))
-    unsound = _unsound(("red track", red_obj), ("blue asset", blue_obj))
+    unsound = _unsound(now, ("red track", red_obj), ("blue asset", blue_obj))
     if unsound is not None:
         return BindOutcome(None, unsound)
     red = None if red_obj is None else bound_elset("red", red_obj, now)

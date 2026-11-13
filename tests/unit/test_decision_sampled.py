@@ -50,6 +50,7 @@ from spectre.domain.decision import (
     AdversaryAction,
     AdversaryHypothesis,
     BoundElset,
+    ConvergenceRule,
     FriendlyResponse,
     HypothesisSource,
     OutcomeMetrics,
@@ -123,9 +124,10 @@ def _steady(n_samples: int, *, at: datetime = EPOCH) -> AdversaryHypothesis:
 
 def _scenario(
     hypotheses: dict[int, AdversaryHypothesis] | None = None, *, binding: ScenarioBinding | None = None,
-    horizon_hours: float = 1.0,
+    horizon_hours: float = 1.0, rule: ConvergenceRule = ConvergenceRule.TWO_SEEDS,
 ) -> Scenario:
-    """One adversary row and one friendly row per action type: 16 cells; *hypotheses* by row."""
+    """One adversary row and one friendly row per action type: 16 cells; *hypotheses* by row; *rule*, how many
+    seeds a sampled row's convergence is checked on (SPC-224), two as every new scenario's."""
     carried = hypotheses or {}
     adversaries = [
         AdversaryAction(
@@ -143,8 +145,13 @@ def _scenario(
     ]
     return Scenario(
         name="What if", epoch_utc=EPOCH, adversary_actions=adversaries, friendly_responses=friendlies,
-        horizon_hours=horizon_hours, binding=binding,
+        horizon_hours=horizon_hours, binding=binding, convergence_rule=rule,
     )
+
+
+#: The rule the cap's hand-counted arithmetic below is set against: one seed, each row charged once, as a record
+#: 0.28.0 to 0.41.0 wrote replays. Charging each row twice for the second seed is held in test_decision_two_seeds.
+_ONE = ConvergenceRule.ONE_SEED
 
 
 def _bound(hypotheses: dict[int, AdversaryHypothesis] | None = None, **kwargs: Any) -> Scenario:
@@ -237,7 +244,8 @@ class TestOnlyABoundRowWithAHypothesisIsSampled:
         fake = _Fake()
         scenario = _bound()
         result = evaluate_scenario(scenario, sampler=fake)
-        assert len(fake.calls) == 1
+        assert len(fake.calls) == 2   # the row, on its own seed and on the second (SPC-224)
+        assert [call[0].random_seed for call in fake.calls] == [42, 43]
         hypothesis, blue, window = fake.calls[0]
         assert hypothesis is scenario.adversary_actions[0].hypothesis.hypothesis  # type: ignore[union-attr]
         assert window == SeparationWindow(start_utc=EPOCH, span_s=3600.0)
@@ -327,7 +335,11 @@ class TestASampledCell:
             "start to its end; integrator error, not in the spread: RK45 at "
             "rtol 1e-08 and atol 1e-10, against DOP853 at rtol 1e-12 on three reference pairs, put each object within "
             "0.1 km of the reference in LEO and 0.003 km at GEO by 24 h, and the pair's separation within 0.02 km; "
-            "between two unlike orbits the separation error can reach both objects' errors added",
+            "between two unlike orbits the separation error can reach both objects' errors added; constants "
+            "handover, not in the spread: RK45 starts from SGP4's states, which SGP4 works out with the WGS-72 "
+            "constants, and flies them with WGS-84's; flown with WGS-72's instead, each object of three reference "
+            "pairs moved up to 1.17 km in LEO and 0.48 km at GEO by 24 h, and the pair's separation up to 0.06 km; "
+            "drawn on seed 42, its convergence checked on seed 43 as well, which converged too",
         )
         assert bases.time_to_closest_hours == FigureBasis(
             Basis.SAMPLED,
@@ -474,7 +486,7 @@ _REFUSALS: dict[str, tuple[Callable[[pytest.MonkeyPatch], tuple[Scenario, Any]],
     "over the cap": (
         # The floor, 2 x 500 x (11.9 h + 9 min) = 12,050, is over the cap, so it is the figure; at 11.8 h the exact
         # cost is 2 x ((500 + 2) x 11.8 h + 500 x 9 min) = 11,997.2, which fits.
-        lambda _mp: (_bound({0: _steady(500), 1: _steady(500)}, horizon_hours=11.9), _never),
+        lambda _mp: (_bound({0: _steady(500), 1: _steady(500)}, horizon_hours=11.9, rule=_ONE), _never),
         "Not sampled: this scenario needs at least 12,050 sample-hours (samples times the hours each is propagated, "
         "counting any burn before the window, plus 9 minutes of set-up for each sample, across 2 hypotheses), "
         "above the 12,000 one evaluation may run within its 300 s budget. At these sample counts the longest "
@@ -529,8 +541,8 @@ _REFUSALS: dict[str, tuple[Callable[[pytest.MonkeyPatch], tuple[Scenario, Any]],
     "not converged": (
         lambda _mp: (_bound(), _Fake(half_width=2.3, converged=False)),
         "Not sampled: P5, P50 and P95 are known only to within 2.3 km, wider than the 1.0 km this miss needs (1 km, "
-        "or 5 % of P5 where that is larger). Take more samples, with a shorter horizon if that goes over the 12,000 "
-        "sample-hour cap.",
+        "or 5 % of P5 where that is larger), drawn on seed 42. Take more samples, with a shorter horizon if that goes "
+        "over the 12,000 sample-hour cap.",
     ),
 }
 
@@ -577,14 +589,16 @@ class TestTheCapAndTheRefusals:
     def test_under_the_cap_it_runs(self) -> None:
         """B2: 11,997.2 sample-hours, (500 + 2) x 11.8 h and 500 x 9 min for each of two rows."""
         fake = _Fake()
-        result = evaluate_scenario(_bound({0: _steady(500), 1: _steady(500)}, horizon_hours=11.8), sampler=fake)
+        result = evaluate_scenario(
+            _bound({0: _steady(500), 1: _steady(500)}, horizon_hours=11.8, rule=_ONE), sampler=fake,
+        )
         assert len(fake.calls) == 2
         assert all(c.ca_percentiles is not None for c in _cells(result, 0) + _cells(result, 1))
 
     def test_a_row_refused_before_the_run_is_not_counted_against_the_cap(self) -> None:
         fake = _Fake()
         rows = {0: _steady(500), 1: _steady(500), 2: _evasive(49)}
-        result = evaluate_scenario(_bound(rows, horizon_hours=11.8), sampler=fake)
+        result = evaluate_scenario(_bound(rows, horizon_hours=11.8, rule=_ONE), sampler=fake)
         assert len(fake.calls) == 2
         assert _cells(result, 2)[0].ca_refusal is not None
         assert "fewer than the 50" in str(_cells(result, 2)[0].ca_refusal)
@@ -615,7 +629,7 @@ class TestTheCapAndTheRefusals:
 
         1,000 x 12 h and 1,000 x 9 min is 12,150. Counted as integrated hours alone it would be 175 and would run.
         """
-        scenario = _bound({0: _steady(1000, at=EPOCH + timedelta(hours=13))}, horizon_hours=12.0)
+        scenario = _bound({0: _steady(1000, at=EPOCH + timedelta(hours=13))}, horizon_hours=12.0, rule=_ONE)
         refusal = str(_cells(evaluate_scenario(scenario, sampler=_never), 0)[0].ca_refusal)
         assert refusal.startswith("Not sampled: this scenario needs at least 12,150 sample-hours")
 
@@ -630,7 +644,7 @@ class TestTheCapAndTheRefusals:
         """
         binding = ScenarioBinding(red=_elset("red", age=6.0, epoch=EPOCH - timedelta(hours=6)), blue=_elset("blue"))
         rows = {0: _steady(1275, at=EPOCH + timedelta(hours=5)), 1: _steady(1250, at=EPOCH - timedelta(hours=5))}
-        scenario = _scenario(rows, binding=binding, horizon_hours=4.0)
+        scenario = _scenario(rows, binding=binding, horizon_hours=4.0, rule=_ONE)
         refusal = str(_cells(evaluate_scenario(scenario, sampler=_never), 0)[0].ca_refusal)
         assert refusal.startswith("Not sampled: this scenario needs at least 16,742 sample-hours")
         assert refusal.endswith("across 2 hypotheses), above the 12,000 one evaluation may run within its 300 s "
@@ -639,7 +653,7 @@ class TestTheCapAndTheRefusals:
     def test_one_hypothesis_is_named_in_the_singular_with_its_longest_horizon(self) -> None:
         """1,450 x (12 h + 9 min) is 17,617.5, the floor, so 17,618 without drawing a sample; at 8.1 h the cost is
         (1,450 + 2) x 8.1 h + 1,450 x 9 min = 11,978.7, and at 8.2 h 12,123.9."""
-        scenario = _bound({0: _steady(1450)}, horizon_hours=12.0)
+        scenario = _bound({0: _steady(1450)}, horizon_hours=12.0, rule=_ONE)
         assert _cells(evaluate_scenario(scenario, sampler=_never), 0)[0].ca_refusal == (
             "Not sampled: this scenario needs at least 17,618 sample-hours (samples times the hours each is "
             "propagated, counting any burn before the window, plus 9 minutes of set-up for each sample, across 1 "
@@ -653,8 +667,8 @@ class TestTheCapAndTheRefusals:
         Each sample costs a solve_ivp set-up and a closest-approach search whatever its window; without that,
         20,000 samples over 0.028 h counted 560 and ran for 49 s.
         """
-        refusal = str(_cells(evaluate_scenario(_bound({0: _steady(50_000)}, horizon_hours=0.1), sampler=_never), 0)[0]
-                      .ca_refusal)
+        scenario = _bound({0: _steady(50_000)}, horizon_hours=0.1, rule=_ONE)
+        refusal = str(_cells(evaluate_scenario(scenario, sampler=_never), 0)[0].ca_refusal)
         assert refusal.startswith("Not sampled: this scenario needs at least 12,500 sample-hours")
         assert refusal.endswith(
             "No horizon of 0.1 h or more fits at these sample counts: take fewer samples, at least 50, or start "
@@ -670,7 +684,8 @@ class TestTheCapAndTheRefusals:
             raise AssertionError("samples were drawn to cost the row")
 
         monkeypatch.setattr(decision, "separation_integration_s", drawn)
-        refusal = str(_cells(evaluate_scenario(_bound({0: _steady(1_000_000)}), sampler=_never), 0)[0].ca_refusal)
+        scenario = _bound({0: _steady(1_000_000)}, rule=_ONE)
+        refusal = str(_cells(evaluate_scenario(scenario, sampler=_never), 0)[0].ca_refusal)
         assert refusal.startswith("Not sampled: this scenario needs at least 1,150,000 sample-hours")
 
     def test_the_red_no_state_sentence_names_the_burn_time(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -701,7 +716,7 @@ class TestTheCapAndTheRefusals:
         assert decision.START_VELOCITY_TOLERANCE_KM_S == 0.1
         fake = _Fake()
         cell = _cells(evaluate_scenario(_bound({0: _evasive(dv_offset_km_s=0.0999)}), sampler=fake), 0)[0]
-        assert len(fake.calls) == 1
+        assert len(fake.calls) == 2   # on both seeds (SPC-224)
         assert cell.ca_refusal is None and cell.ca_percentiles is not None
 
     def test_a_start_just_over_the_velocity_tolerance_is_refused(self) -> None:
@@ -883,12 +898,12 @@ class TestTheResultCountsItsSampledCells:
         def two_bands(_h: ManoeuvreHypothesis, _b: BlueTrack, window: SeparationWindow, **_: Any) -> SeparationSeries:
             series = _series(window)
             runs.append(series)
-            return dataclasses.replace(series, miss_km_p95=103.0) if len(runs) == 2 else series
+            return dataclasses.replace(series, miss_km_p95=103.0) if len(runs) == 3 else series
 
         scenario = _bound({0: _evasive(), 1: _evasive()})
         scenario.w_closest_approach = 1.0
         result = evaluate_scenario(scenario, sampler=two_bands)
-        assert len(runs) == 2
+        assert len(runs) == 4   # each row on its own seed, then on the second (SPC-224); the third is row 1's own
         assert str(result.sampled_caveat).endswith("moves it by at most 0.2738 here.")
 
     def test_a_refused_result_has_no_caveat(self, monkeypatch: pytest.MonkeyPatch) -> None:

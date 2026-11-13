@@ -52,16 +52,19 @@ _ADMIN_USER = "smoke_admin"
 _ADMIN_PASS = "smoke-probe-password-not-a-secret"
 _SECRET_KEY = "smoke-probe-secret-key-not-a-secret"
 
-# A real catalogued GEO element set, used only to give the sweep a red object
-# without needing UDL credentials.
+# GEO element sets with real catalogue numbers, used only to give the screen an
+# asset and the sweep a red object without needing UDL credentials. Each line
+# carries its own checksum: from 0.30.0 every ingest path runs the acceptance
+# check (SPC-201), and with a wrong one the manual asset was refused, so the
+# screen rendered the refusal rather than a ranking or an explanation (SPC-230).
 _PROBE_ASSET_TLE = (
-    "1 30793U 07007A   26250.50000000 -.00000100  00000-0  00000-0 0  9995\n"
-    "2 30793   0.0400  95.0000 0002000 270.0000 180.0000  1.00271000 46210"
+    "1 30793U 07007A   26250.50000000 -.00000100  00000-0  00000-0 0  9998\n"
+    "2 30793   0.0400  95.0000 0002000 270.0000 180.0000  1.00271000 46216"
 )
 
 _PROBE_RED_TLE = (
-    "1 41838U 16065A   26250.50000000  .00000000  00000-0  00000-0 0  9990\n"
-    "2 41838   3.4700  83.3000 0005000 310.0000 124.0000  1.00270000 26260"
+    "1 41838U 16065A   26250.50000000  .00000000  00000-0  00000-0 0  9992\n"
+    "2 41838   3.4700  83.3000 0005000 310.0000 124.0000  1.00270000 26266"
 )
 
 # Network failures reaching outside the app are the sandbox or the network, not
@@ -82,17 +85,27 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def _build_number(directory: Path) -> int:
+    """The build number in a versioned browser directory's name, "chromium-1243" -> 1243; -1 when it has none."""
+    number = directory.name.rpartition("-")[2]
+    return int(number) if number.isdecimal() else -1
+
+
 def _find_chromium() -> str | None:
     """Return an explicit Chromium path, or None to let Playwright decide.
 
     The pre-provisioned browser directory is versioned, so the path is
     discovered rather than pinned; a hard-coded version would rot silently.
+    Builds are taken newest first by their number, not in text order, where
+    chromium-999 would come after chromium-1243; each holds its browser under
+    chrome-linux on older builds and chrome-linux64 on newer ones (SPC-230).
     """
-    for root in (Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers")),):
-        if not root.is_dir():
-            continue
-        # chrome-linux on older builds, chrome-linux64 on newer ones.
-        for candidate in sorted(root.glob("chromium-*/chrome-linux*/chrome")):
+    root = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers"))
+    if not root.is_dir():
+        return None
+    for build in sorted(root.glob("chromium-*"), key=_build_number, reverse=True):
+        for layout in ("chrome-linux64", "chrome-linux"):
+            candidate = build / layout / "chrome"
             if candidate.is_file():
                 return str(candidate)
     return None

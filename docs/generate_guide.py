@@ -1551,6 +1551,19 @@ def _section_13_decision_engine(doc: Document) -> None:
                 "of engagement are the owner's to supply later; these choices are Claude's design, awaiting the "
                 "owner's ruling.")
 
+    _add_heading_h2(doc, "What Is Refused Rather Than Guessed")
+    _add_bullet(doc, "Every row must post each of its fields, and every scoring weight must be given. A missing P, "
+                "Conf, Gap, cost, reversibility, time to execute, name or action type is refused, naming the row and "
+                "the field, and a blank or missing weight is refused, naming it: none is given a default (SPC-222). "
+                "The panel posts every field of every row, so this is met by evaluating from the panel.")
+    _add_bullet(doc, "A composite score that is not a finite number is refused before any rule picks on it: the "
+                "page says nothing is recommended and that it is a fault in the engine or a figure it was given, "
+                "not in your entries; the server log names the cell (SPC-221).")
+    _add_bullet(doc, "An element set whose epoch is more than 5 minutes after the time it is checked is refused "
+                "wherever a set enters and when it is bound, naming its epoch and how far ahead it is: a set dated "
+                "in the future would otherwise read as current. The red card and the sweep say FUTURE EPOCH for any "
+                "such set already held (SPC-226). The 5 minutes, for clock skew, is Claude's choice, unsourced.")
+
     _add_heading_h2(doc, "How the Figures Are Worked Out")
     _add_bullet(doc, "Closest approach, computed: for a red action that does not move red, both orbits are "
                 "propagated from their element sets with no burn, searched every 60 s and refined to 0.01 s. "
@@ -1564,7 +1577,19 @@ def _section_13_decision_engine(doc: Document) -> None:
                 "cent of P5 where larger. The basis note gives how closely P5 itself is known, its own half-width, "
                 "and names apart the widest of the three, the figure convergence is judged on. It also states the "
                 "integrator's own error against a tight reference: by 72 h up to 0.89 km per object in LEO, 0.015 "
-                "km at GEO and 0.38 km in a pair's separation, less at shorter horizons.")
+                "km at GEO and 0.38 km in a pair's separation, less at shorter horizons. It states the handover "
+                "from SGP4, which works on the WGS-72 constants, to RK45, which flies its states with WGS-84's: by "
+                "72 h each object moves up to 3.52 km in LEO and 1.43 km at GEO against the same flight on WGS-72, "
+                "but a pair's separation at most 0.18 km, since both drift alike (SPC-225).")
+    _add_bullet(doc, "Seeds: every sample of a row is drawn on its hypothesis's seed, 42 unless stated, and the "
+                "figures you see are that draw's. The row is drawn again on a second seed, 43, and counts as "
+                "converged only when both draws are; if they disagree the row is not converged, is not sampled, and "
+                "its cells name both seeds (SPC-224). The basis note and a line under the matrix name the seeds. The "
+                "second draw doubles a row's sampling time, so each sampled row counts twice against the cap: at "
+                "500 samples about 11.8 h fits with no burn to size. A record from 0.41.0 or earlier replays on its "
+                "one seed, as it was evaluated. On a game tree this holds for turn 1 alone: turns 2 and 3 draw each "
+                "branch's samples on a seed derived from the row's seed, the turn and the branch, and each sequence's "
+                "closest approach is judged converged on that one draw, which the tree says beside it.")
     _add_bullet(doc, "A row of several burns is sampled from the first burn it applies, and costed from that "
                 "burn. Every later burn is drawn at its own time with the row's pointing, timing and drag spreads, "
                 "and a delta-V spread in proportion to its size. A burn due after the span searched ends is flown "

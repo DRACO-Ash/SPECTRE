@@ -547,11 +547,12 @@ class TestTheOtherWordings:
 
 
 def test_our_burn_sized_against_every_burn_names_them() -> None:
-    """One real evaluation: red's three burns flown in every sample and in the nominal our burn is sized against."""
+    """One real evaluation: red's three burns flown in every sample and in the nominal our burn is sized against, at 100
+    samples, which converge on both seeds (SPC-224)."""
     from spectre.domain.decision import ActionType, FriendlyResponse
     from spectre.domain.decision_figures import ResponseBurnSpec
 
-    scenario = _with(_transfer())
+    scenario = _with(_transfer(n=100))   # converged on both seeds (SPC-224); at 50 seed 43 is not
     response = FriendlyResponse(
         id="F9", name="Open", action_type=ActionType.MANOEUVRE, cost=0.2, reversibility=0.8,
         time_to_execute_hours=0.1, burn=ResponseBurnSpec(target_km=30.0),

@@ -230,12 +230,13 @@ tests/unit/test_decision_reference_cases.py.
 ● **Converged** means P5, P50 and P95 are each known to within 1 km, or 5 per cent of P5 where that is larger
   (SPC-117): the operator reads P5 to answer "can it reach one of mine", and 8 km at 800 km changes no answer.
   Below 20 km the 1 km floor governs.
-● **The cost cap** is 12,000 sample-hours, what the 300 s budget covers at the slowest rate measured (40
-  sample-hours a second), with 9 minutes of set-up counted per sample. The owner ruled on 2026-11-05 to raise the
-  budget from 120 s, when the cap was 4,800 (SPC-178). An over-cap row is refused naming the longest horizon that
-  would fit; the panel says about 23.7 h fits at 500 samples with no burn to size. Nothing else ends a run before
-  its budget: the page polls without limit, no reaper ends a job (it stops only when cancelled, replaced, signed out
-  of, when the sign-in expires 8 h after it began, or at shutdown), and no server or container timeout applies to it.
+● **The cost cap** is 12,000 sample-hours, what the 300 s budget covers at the slowest rate measured (40 sample-hours
+  a second), with 9 minutes of set-up counted per sample. The owner ruled on 2026-11-05 to raise the budget from 120
+  s, when the cap was 4,800 (SPC-178). An over-cap row is refused naming the longest horizon that would fit; the
+  panel says about 11.8 h fits at 500 samples with no burn to size, since SPC-224 charges each sampled row twice for
+  the second seed its convergence is checked on (23.7 h on one seed). Nothing else ends a run before its budget: the
+  page polls without limit, no reaper ends a job (it stops only when cancelled, replaced, signed out of, when the
+  sign-in expires 8 h after it began, or at shutdown), and no server or container timeout applies to it.
 ● **Off the request** (SPC-113): a scenario that samples runs as a session job the page polls every 2 s, naming the
   hypothesis being sampled, the samples done and the budget used, with a Cancel button. One sampled evaluation runs
   on the server at a time; a second waits and its budget starts when it runs. A stopped evaluation scores nothing and
@@ -243,9 +244,10 @@ tests/unit/test_decision_reference_cases.py.
 ● **On screen** (SPC-115): a sampled cell shows P5 to P95 with the median, the half-width all three are known to, and
   the score's spread across samples. Since SPC-213 the closest approach's basis note gives P5 its own half-width and
   names the convergence figure apart, as the widest of the three, and since SPC-214 it states the integrator's own
-  error. Since SPC-202 every sample also draws both objects' element-set error along track,
-  and the cell says so with each side's error and age; the hover names what is still not in the band: element-set
-  error across track and the hypothesis being wrong.
+  error; since SPC-225 it states the WGS-72 to WGS-84 handover, and since SPC-224 the seed it was drawn on and the
+  second its convergence was checked on. Since SPC-202 every sample also draws both objects' element-set error along
+  track, and the cell says so with each side's error and age; the hover names what is still not in the band:
+  element-set error across track and the hypothesis being wrong.
 
 ## Phase 3: computed outcomes, custody and our burns
 
@@ -1465,6 +1467,79 @@ earlier release replays exactly; the stored inputs stay at version 6.
   the Threat Understanding's window, which apply the limit but quote no hours. `tests/unit/test_orbit_regime.py`
   holds one case per regime and each classifier boundary. The SDP4 flag of SPC-200 stands.
 
+## Scores, inputs, seeds, constants and dates checked (SPC-221, SPC-222, SPC-224, SPC-225, SPC-226)
+
+**Status: built.** Evaluation findings F-32, F-33, F-35, F-36 and F-38 (Low). SPC-224 moves what a sampled row
+replays to, so the stored inputs go to version 7, which holds the convergence rule; versions 1 to 6, written by
+0.28.0 to 0.41.0, read as the one seed those releases judged convergence on, and replay exactly
+(`tests/unit/test_decision_replay_0_41_0.py`, four records 0.41.0 wrote).
+
+● **A score that is not finite is refused** (SPC-221, F-32). Probe P-14 injected a NaN lookup: the matrix printed
+  "nan" and the pick followed the row order, since NaN compares false with everything. Now `find_robust_response`,
+  `rule_values` and so every rule, minimax, expected value and minimin, and the ties beside them, refuse a matrix
+  holding a composite score that is not finite, NaN or infinite, under a response not permitted too; and the tree's
+  selectors refuse a sequence score that is not finite in the turns they pick over. Each raises
+  `NonFiniteScoreError`, which names the cell or the sequence for the log; the operator is shown a fixed sentence,
+  `NON_FINITE_SCORE`, inline or as the job's failure, and no figure. An infinite lookup closest approach is not a
+  score that is not finite: the closest-approach term saturates, so its score is finite.
+● **A missing row value or weight is refused** (SPC-222, F-33). A truncated form evaluated as if P 0.5, Conf 0.5,
+  Gap 0.7 or the default weights had been chosen; an action type naming no listed type fell back to a manoeuvre;
+  and a cleared weight, which reaches the route as absent, took its default. Each is now refused inline, naming the
+  row and the field ("Adversary action row 2 posts no probability (P).") or the weight, and a column longer than the
+  rows is refused too. The panel posts every field of every row, blanks included, and nothing else in SPECTRE posts
+  to the route, so its submissions are unchanged. Optional by design, and said so where each is declared: the
+  hypothesis section, our burn fields and the not-permitted fields, each absent as a whole meaning none; the hidden
+  sweep fields; the scenario's name; the selector, absent meaning the deployment's primary rule; and the tree's turn
+  depth and stated observation, absent meaning one turn and nothing stated.
+● **The seed shown, and convergence checked on two seeds** (SPC-224, F-35). The seed was fixed at 42 and never shown,
+  and at 50 samples whether a row converged was one draw: 15 of 20 seeds in one case, 1 of 6 in another (probe P-11).
+  Now every sampled row is drawn on its hypothesis's own seed, whose figures are shown, and again on the second seed,
+  the seed plus one (43 for 42), every sample afresh, and is converged only when both draws are. When the two
+  disagree the row is not converged and not sampled, and its cells say so, naming both seeds and both half-widths; a
+  row not converged on its own seed is refused as before and not drawn again. The seed is in each sampled cell's
+  basis note and in a line beside what converged means, which names the matrix and points to the tree, and in the
+  stored inputs, where every hypothesis has always carried it; version 7 stores the rule. The case the build found:
+  the 0.41.0 tree record's scenario over one turn at 59 samples converges on seed 42 (half-width 0.66 km) and not on
+  seed 43, so 0.41.0 sampled it and 0.42.0 refuses it. A game tree's first turn is the matrix's row and is checked on
+  both seeds; its later turns' sequence closest approaches are still judged on the one draw each turn makes, on a
+  seed derived from the row's, the turn and the branch, and a line beside the tree says so.
+● **The runtime cost of the second seed.** A row converged on its own seed is drawn again in full, so its sampling
+  time doubles; a row not converged is not drawn again. Measured on the build container (4 cores, idle, Python 3.13,
+  median of 3 runs each): plane_change Evasive at 500 samples over 1 h took 3.93 s on one seed and 7.75 s on two,
+  1.97 times; the 0.41.0 sampled record's scenario, coplanar_leo Evasive at 50 samples over 6 h beside its lookup
+  row, 3.44 s and 5.84 s, 1.70 times, the rest of the evaluation not drawn again. Each sampled row is charged twice
+  against the 12,000 sample-hour cap, so at 500 samples the longest horizon that fits falls from 23.7 h to 11.8 h,
+  and a game tree's first turn is charged twice against the tree's own cap.
+● **The WGS-72 to WGS-84 handover, measured and stated** (SPC-225, F-36). SGP4 runs on the WGS-72 constants its
+  element sets are fitted with; every RK45 arc starts from an SGP4 state and flies it with WGS-84's mu and radius
+  and the EGM-96 J2. `tests/unit/test_wgs_handover.py` flies each object of the three reference pairs from its SGP4
+  state with both sets of constants (B* 1e-4) and compares every 60 s. The largest difference up to each horizon:
+
+  | Horizon | Position, LEO | Position, GEO | Separation, any pair |
+  |-------|------------|------------|------------|
+  | 24 h | 1.167 km | 0.476 km | 0.058 km |
+  | 48 h | 2.336 km | 0.952 km | 0.117 km |
+  | 72 h | 3.516 km | 1.428 km | 0.176 km |
+
+  Both objects drift along track alike, about 1.2 km a day in LEO, so a pair's separation, which the closest
+  approach reads, moves at most 0.18 km by 72 h: the size of the integrator's own separation error (0.02 to
+  0.38 km) and under a fifth of the smallest element-set error each sample draws. It is judged not material, so the
+  constants are kept and the handover is stated in the sampled basis note, beside the RK45 computed line and in
+  `spectre/astro/constants.py`; `monte_carlo.WGS_HANDOVER_KM` holds each figure rounded up.
+● **An element set dated in the future is refused** (SPC-226, F-38). Probed at 602c963: a LEO and a GEO set dated
+  48 h ahead, each with good checksums, were accepted, aged 0.0 h, not stale, and bound as current. Now an epoch more
+  than 5 minutes after the time a set is checked, `elset_check.FUTURE_EPOCH_TOLERANCE`, an unsourced allowance for
+  clock skew in the lookup register, is refused by the acceptance check, by the time it is checked, on every path a
+  set enters by: the operator's paste box for a red track or a blue asset, the sweep's manual red element set and the
+  screen's manual asset, a training scenario's load, the UDL TLE panel's fetch and the HRR watchlist's sets, the UDL
+  current fetch the sweep, the screen and the background refresh use, the UDL history fetch, and the Pattern of Life
+  history parse, where it is counted and named with the other refused sets; and again at binding, at the scenario
+  epoch. The sentence names the epoch, how far ahead it is and that a set dated in the future would read as current.
+  Wherever an age is computed, `elset_age` marks such a set as dated in the future, never current: custody from the
+  history is lost and says so, the interaction graph gives it no window, the red card and the sweep say "FUTURE
+  EPOCH" and name it apart from the age range, and the sweep's delta-V band says so rather than 0 h. Within the
+  tolerance the age reads 0 h as before.
+
 ## What remains out of scope
 
 ● **The composite weights are uncited** (SPC-151). Until an analyst sources them the score stays a lookup and the
@@ -1523,3 +1598,8 @@ earlier release replays exactly; the stored inputs stay at version 6.
 | SPC-219 | Custody lost and closest approach stated as separate terms of the score, with no term joining them, beside the matrix and the tree | Built; no interaction term sourced |
 | SPC-220 | The last turn's branches stated as valued as if no one moves after it, beside the tree | Built |
 | SPC-190 | The game tree drawn beside its branches: collapsible and zoomable by mouse and keyboard, static without script | Built |
+| SPC-221 | A composite score that is not finite refused before any rule or the tree picks on it, with a fixed sentence | Built |
+| SPC-222 | A missing row value, weight or action type refused, naming the row and field; nothing given a default | Built |
+| SPC-224 | The seed shown; each sampled row's convergence checked on two seeds, a disagreement not converged; stored inputs version 7 | Built; the tree's later turns still on one draw |
+| SPC-225 | The WGS-72 to WGS-84 handover measured, 0.18 km of separation at most by 72 h, and stated | Built; constants unchanged as not material |
+| SPC-226 | An element set dated more than 5 minutes ahead refused at ingest and binding, and shown as dated in the future | Built |

@@ -189,6 +189,10 @@
     {% if result.converged_means is defined and result.converged_means is not none %}
     <div class="converged-means" style="color:var(--gold)">{{ result.converged_means }}</div>
     {% endif %}
+    {# The seed each sample is drawn on, and the second each row's convergence is checked on (SPC-224). #}
+    {% if result.seed_line is defined and result.seed_line is not none %}
+    <div class="seed-line" style="color:var(--gold)">{{ result.seed_line }}</div>
+    {% endif %}
     {% if result.score_spread_note is defined and result.score_spread_note is not none %}
     <div class="score-spread-note" style="color:var(--gold)">{{ result.score_spread_note }}</div>
     {% endif %}

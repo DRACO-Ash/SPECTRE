@@ -105,7 +105,7 @@ class TestThePreManoeuvreState:
 class TestTheLongestHorizon:
     def test_it_is_what_the_cap_leaves_after_set_up_floored_to_tenths(self) -> None:
         n = 500
-        expected = (MAX_SAMPLE_HOURS - n * SET_UP_S_PER_SAMPLE / 3600.0) / (n + 2)
+        expected = (MAX_SAMPLE_HOURS - 2 * n * SET_UP_S_PER_SAMPLE / 3600.0) / (2 * (n + 2))   # two seeds (SPC-224)
         assert longest_horizon_h(n) == pytest.approx(int(expected * 10) / 10)
 
     def test_more_rows_share_the_cap(self) -> None:

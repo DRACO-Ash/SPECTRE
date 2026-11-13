@@ -164,11 +164,14 @@ from spectre.astro.monte_carlo import (
     SeparationWindow,
     Tick,
     _ric_split,
+    confirmed,
     elset_state,
+    handover_words,
     hypothesis_from_tle_record,
     integrator_error_words,
     rk45_sgp4_gap_km,
     run_separation_series,
+    second_seed,
     separation_integration_s,
 )
 from spectre.astro.response_burn import (
@@ -307,6 +310,20 @@ class TreeCap(StrEnum):
 
     OWN = "own"
     SHARED = "shared"
+
+
+class ConvergenceRule(StrEnum):
+    """How many draws a sampled row's convergence is checked on (SPC-224, evaluation F-35).
+
+    TWO_SEEDS: the row's series is drawn on its hypothesis's own seed, whose figures are shown, and again on
+    monte_carlo.second_seed of it, and is converged only when both draws are; when they disagree the row is not
+    converged and is not sampled. Each sampled row is charged twice against the sample-hour cap. ONE_SEED: the rule of
+    0.28.0 to 0.41.0, convergence judged on the one draw; it is read only from a record those releases wrote, so the
+    replay samples it as it was sampled then.
+    """
+
+    TWO_SEEDS = "two seeds"
+    ONE_SEED = "one seed"
 
 
 class SelectorStrategy(Enum):
@@ -1912,6 +1929,9 @@ class Scenario:
     # Which cost cap a game tree is checked against (SPC-188): OWN, the tree's own measured cap, unless the scenario was
     # read from a record 0.23.0 to 0.37.0 wrote, which is checked against the matrix's cap it shared then, SHARED.
     tree_cap:           TreeCap = TreeCap.OWN
+    # How many draws a sampled row's convergence is checked on (SPC-224): TWO_SEEDS, unless the scenario was read from
+    # a record 0.28.0 to 0.41.0 wrote, which is replayed on its one seed, ONE_SEED.
+    convergence_rule:   ConvergenceRule = ConvergenceRule.TWO_SEEDS
 
     def __post_init__(self) -> None:
         # A zero horizon divided by zero in the score (audit F-112).
@@ -2278,6 +2298,10 @@ class ScenarioResult:
         now = self.scenario.epoch_utc
         swept = picture.unaged(now)
         relevance = {cue: cue_relevance(self, cue, rule) for cue in picture.cues}
+        refused = next((seen for seen in relevance.values() if seen.refused is not None), None)
+        if refused is not None:
+            sentence = CUE_NOT_AVAILABLE.format(observation=refused.cue.observation, why=refused.refused)
+            return dataclasses.replace(swept, sentence=_beside(f"{swept.sentence} {sentence}", picture.age(now)))
         # The matrix is said to read no Threat band only when no cue's outcome moved a cell: earned, not assumed.
         band_read = any(seen.moved for seen in relevance.values())
         if swept.advice is not Advice.COLLECT_FIRST:
@@ -2485,15 +2509,17 @@ class ScenarioResult:
 
     @property
     def rk45_reference_line(self) -> str | None:
-        """The SGP4 and RK45 figures with no burn and how far apart they are, once the computed cells are RK45."""
+        """The SGP4 and RK45 figures with no burn and how far apart they are, once the computed cells are RK45, and
+        the WGS-72 to WGS-84 handover over the span searched (SPC-225, evaluation F-36)."""
         if self.rk45_reference is None:
             return None
         sgp4, rk45 = (found.approach for found in self.rk45_reference)
         start = self.rk45_reference[0].window.start_utc
+        words = handover_words(self.searched_span_s / _SECONDS_PER_HOUR)
         return RK45_FOR_BURNS.format(
             sm=sgp4.miss_km, st=sgp4.tca_utc(start), rm=rk45.miss_km, rt=rk45.tca_utc(start),
             dm=abs(rk45.miss_km - sgp4.miss_km), dt=abs(rk45.tca_s - sgp4.tca_s),
-        )
+        ) + f" {words[0].upper()}{words[1:]} (SPC-225)."
 
     def _burn_moves(self) -> list[tuple[float, int, OutcomeMetrics]]:
         """Each cell with a sized burn, with how far its burn moves the cell's closest-approach term in the score:
@@ -2571,6 +2597,30 @@ class ScenarioResult:
         if self.scenario.miss_rule is MissRule.ELSET_ERROR:
             return CONVERGED_MEANS_ELSET.format(ages=self._elset_ages())
         return CONVERGED_MEANS
+
+    @property
+    def seed_line(self) -> str | None:
+        """The seeds the sampled rows were drawn on and, under the two-seed rule, the second each one's convergence is
+        checked on (SPC-224, evaluation F-35); None when no cell is sampled."""
+        if not self._bands():
+            return None
+        return self._seed_words(SEED_LINE_ONE, SEED_LINE_TWO)
+
+    def _seed_words(self, one: str, two: str) -> str:
+        """*one* or *two*, by the scenario's convergence rule, with the seeds its hypotheses carry (SPC-224)."""
+        seeds = sorted({a.hypothesis.hypothesis.random_seed for a in self.scenario.adversary_actions if a.hypothesis})
+        named = named_list([str(s) for s in seeds])
+        if self.scenario.convergence_rule is ConvergenceRule.ONE_SEED:
+            return one.format(seeds=named)
+        return two.format(seeds=named, checks=named_list([str(second_seed(s)) for s in seeds]))
+
+    @property
+    def tree_seed_line(self) -> str | None:
+        """Beside a game tree of more than one turn holding a sampled row: how its later turns are drawn and judged
+        (V0.42 review of SPC-224); None for one turn or no sampled row."""
+        if self.scenario.turns == 1 or not any(a.hypothesis for a in self.scenario.adversary_actions):
+            return None
+        return self._seed_words(TREE_SEEDS_LINE_ONE, TREE_SEEDS_LINE_TWO)
 
     @property
     def score_spread_note(self) -> str | None:
@@ -3166,13 +3216,27 @@ _BUDGET_PART = (
     "Not sampled: this evaluation's {budget:g} s budget ran out after {k:,} of {n:,} samples of this hypothesis, "
     "and a P5 from part of them would not be earned. Take fewer samples or a shorter horizon."
 )
+_BUDGET_SECOND = (
+    "Not sampled: this evaluation's {budget:g} s budget ran out after {k:,} of {n:,} samples of this hypothesis "
+    "drawn on the second seed its convergence is checked on, so whether it converged is not known. Take fewer "
+    "samples or a shorter horizon."
+)
 _BUDGET_NONE = (
     "Not sampled: this evaluation's {budget:g} s budget ran out before this hypothesis started. Take fewer samples "
     "or a shorter horizon."
 )
 _UNCONVERGED = (
     "Not sampled: P5, P50 and P95 are known only to within {hw:.1f} km, wider than the {tol:.1f} km this miss needs "
-    "(1 km, or 5 % of P5 where that is larger). Take more samples, with a shorter horizon if that goes over the "
+    "(1 km, or 5 % of P5 where that is larger), drawn on seed {seed}. Take more samples, with a shorter horizon if "
+    "that goes over the {cap:,.0f} sample-hour cap."
+)
+#: A row whose draw on its own seed converged and whose draw on the second did not (SPC-224, evaluation F-35): the
+#: seeds disagree, so whether it converged is the luck of one draw, and it is not converged.
+_SEEDS_DIFFER = (
+    "Not sampled: the samples converged on seed {seed}, known to within {hw:.2f} km against the {tol:.2f} km this "
+    "miss needs, but not on seed {check}, the second its convergence is checked on, where they are known only to "
+    "within {chw:.2f} km against {ctol:.2f} km. The two seeds disagree, so the band would rest on the luck of one "
+    "draw, and the row is not converged. Take more samples, with a shorter horizon if that goes over the "
     "{cap:,.0f} sample-hour cap."
 )
 #: The sampled basis note. P5 carries its own half-width and convergence's figure, the widest of the three, is named
@@ -3254,6 +3318,30 @@ CONVERGED_MEANS = (
     "on how close is too close for your asset, which this page is not told. It says nothing about element-set error "
     "or the hypothesis being wrong."
 )
+#: Beside CONVERGED_MEANS (SPC-224, evaluation F-35): the seed every sample is drawn on, and the second each row's
+#: convergence is checked on; a record 0.28.0 to 0.41.0 wrote replays on its one seed and says so.
+SEED_LINE_TWO = (
+    "Every sample in the outcome matrix is drawn on seed {seeds}, and the figures shown are that draw's. Each row's "
+    "convergence is checked on seed {checks} as well, a second, independent draw, and a row is converged only when "
+    "both draws are: a row whose two draws disagree is not sampled, and its cells say so. A game tree's later turns "
+    "are drawn otherwise, and the tree says how."
+)
+SEED_LINE_ONE = (
+    "Every sample in the outcome matrix is drawn on seed {seeds}. This result is under the rule of 0.28.0 to 0.41.0, "
+    "which judged convergence on that one draw, as the record it replays was evaluated."
+)
+#: Beside a game tree of more than one turn holding a sampled row (V0.42 review): turn 1 is the matrix's row, checked
+#: on two seeds; each later turn draws on a seed derived from the row's, the turn and the branch (decision_tree
+#: _seeded), and each sequence's closest approach is judged converged on that one draw.
+TREE_SEEDS_LINE_TWO = (
+    "Turn 1's sampled rows are the matrix's, drawn on seed {seeds} and checked on seed {checks} as well. Turns 2 "
+    "and 3 draw each branch's samples afresh on a seed derived from the row's seed, the turn and the branch, and each "
+    "sequence's closest approach is judged converged on that one draw, not checked on a second."
+)
+TREE_SEEDS_LINE_ONE = (
+    "Every turn's sampled figures are judged converged on one draw: turn 1 on seed {seeds}, and turns 2 and 3 on a "
+    "seed derived from it, the turn and the branch, as the record it replays was built."
+)
 #: CONVERGED_MEANS once each sample draws element-set error (SPC-202).
 CONVERGED_MEANS_ELSET = (
     "Converged means P5, P50 and P95 are each known to within 1 km, or to within 5 % of P5 where that is larger "
@@ -3322,6 +3410,13 @@ class _Row(NamedTuple):
     # Each side's element-set error at the scenario epoch, which every sample draws (SPC-202); None under the rule
     # of 0.28.0 to 0.31.0.
     elset_error: ElsetError | None = None
+    # Whether its convergence is checked on a second seed too (SPC-224); False under the rule of 0.28.0 to 0.41.0.
+    two_seeds: bool = False
+
+    @property
+    def seeds(self) -> int:
+        """How many draws of the row are charged against the cap: two when convergence is checked on a second."""
+        return 2 if self.two_seeds else 1
 
 
 def _refusal(sentence: str) -> str:
@@ -3406,9 +3501,18 @@ def _failed(series: SeparationSeries) -> str | None:
 
 
 def _unconverged(series: SeparationSeries) -> str | None:
+    """Why a series that did not converge is refused: on its own seed, or, converged there, on the second (SPC-224)."""
     if series.converged:
         return None
-    return _UNCONVERGED.format(hw=series.percentile_half_width_km, tol=series.tolerance_km, cap=MAX_SAMPLE_HOURS)
+    check = series.check
+    if check is not None and series.percentile_half_width_km <= series.tolerance_km:
+        return _SEEDS_DIFFER.format(
+            seed=series.random_seed, hw=series.percentile_half_width_km, tol=series.tolerance_km, check=check.seed,
+            chw=check.half_width_km, ctol=check.tolerance_km, cap=MAX_SAMPLE_HOURS,
+        )
+    return _UNCONVERGED.format(
+        hw=series.percentile_half_width_km, tol=series.tolerance_km, cap=MAX_SAMPLE_HOURS, seed=series.random_seed,
+    )
 
 
 #: Checked in this order before anything runs; the first that speaks refuses the row.
@@ -3484,7 +3588,9 @@ class _Work(NamedTuple):
 
 
 def _cost(work: _Work) -> float:
-    """What *rows* cost together, in sample-hours; their floor alone once that is over the cap.
+    """What *rows* cost together, in sample-hours; their floor alone once that is over the cap. A row whose
+    convergence is checked on a second seed is charged twice, sizing included, which the second draw does not repeat,
+    so the charge is never under what runs (SPC-224).
 
     The exact cost draws every sample to find its burn time, so a row far over the cap is refused on the floor
     without drawing any: a million samples took 1 s and 238 MB just to be costed. The floor bounds the samples
@@ -3518,10 +3624,10 @@ def _cost(work: _Work) -> float:
     it would hold the server's only sampling slot for 5 to 8 minutes at the rates measured. Not timed by any test.
     """
     computed = 0.0 if work.computed_s is None else _computed_sizing_s(work.computed_s, work.burns)
-    floor = (sum(_floor_s(row, work.burns) for row in work.rows) + computed) / _SECONDS_PER_HOUR
+    floor = (sum(row.seeds * _floor_s(row, work.burns) for row in work.rows) + computed) / _SECONDS_PER_HOUR
     if floor > MAX_SAMPLE_HOURS:
         return floor
-    return (sum(_cost_s(row, work.burns) for row in work.rows) + computed) / _SECONDS_PER_HOUR
+    return (sum(row.seeds * _cost_s(row, work.burns) for row in work.rows) + computed) / _SECONDS_PER_HOUR
 
 
 def _at_span(row: _Row, span_s: float) -> _Row:
@@ -3564,9 +3670,12 @@ def _over_cap(work: _Work) -> _OverCap | None:
 
 
 def _counted(work: _Work) -> str:
-    """What the cap was summed across: the hypotheses, and our burns when any are sized."""
+    """What the cap was summed across: the hypotheses, each on two seeds when its convergence is checked on a second
+    (SPC-224), and our burns when any are sized."""
     n = len(work.rows)
     rows = f"{n} hypothesis" if n == 1 else f"{n} hypotheses"
+    if any(row.two_seeds for row in work.rows):
+        rows += ", each drawn on two seeds"
     if not work.burns:
         return rows
     burns = f"{work.burns} of our burns to size"
@@ -3580,6 +3689,10 @@ def _cap_refusal(work: _Work, over: _OverCap) -> str:
         budget=EVALUATION_BUDGET_S,
     )
     return _refusal(sentence + over.advice)
+
+
+#: The stage a row's progress reports while it is drawn again on its second seed (SPC-224).
+SECOND_SEED_STAGE = "second seed"
 
 
 class SamplingProgress(NamedTuple):
@@ -3686,6 +3799,11 @@ class _Budget:
         self.stage, self.label = "sampling", ""
         return self.tick
 
+    def second_seed(self) -> Tick:
+        """The tick while the row is drawn again on its second seed, so the page says what it waits on (SPC-224)."""
+        self.stage, self.label = SECOND_SEED_STAGE, ""
+        return self.tick
+
 
 def _checked(series: SeparationSeries, sized: tuple[SizedBurn | BurnRefusal, ...] = ()) -> RowSampling:
     """A series that has run, or why it is refused."""
@@ -3752,19 +3870,42 @@ def sized_burns(sized: Sequence[SizedBurn | BurnRefusal]) -> tuple[BlueBurn, ...
     return tuple(s.burn for s in sized if isinstance(s, SizedBurn) and s.burn is not None)
 
 
+def _on_second_seed(row: _Row) -> tuple[_Row, int]:
+    """*row* drawn again on the second seed of its own and of each later burn's, and that seed (SPC-224)."""
+    seed = second_seed(row.hypothesis.random_seed)
+    then = tuple(dataclasses.replace(h, random_seed=second_seed(h.random_seed)) for h in row.then)
+    return row._replace(hypothesis=dataclasses.replace(row.hypothesis, random_seed=seed), then=then), seed
+
+
+def _second_draw(
+    row: _Row, sampler: Sampler, sized: tuple[SizedBurn | BurnRefusal, ...], series: SeparationSeries,
+    budget: _Budget | None,
+) -> SeparationSeries:
+    """*series* with its convergence checked on the second seed, when the row's rule asks and it converged on its own
+    with no sample failed; as it is otherwise, since such a series is refused whatever the other seed finds (SPC-224).
+    Our burns are not sized again: they are sized on the nominal burn, which no seed moves."""
+    if not row.two_seeds or not series.converged or series.n_failed:
+        return series
+    again, seed = _on_second_seed(row)
+    tick = None if budget is None else budget.second_seed()
+    return confirmed(series, _sample(again, sampler, sized, tick), seed)
+
+
 def _run(
     row: _Row, sampler: Sampler, budget: _Budget | None, responses: _Responses | None = None,
     keep_at_s: Sequence[float] = (),
 ) -> RowSampling:
     """Run a row's series, under *budget* when there is one: a row it does not cover is refused, naming it.
 
-    Our burns are sized first, on the row's nominal burn, and applied in every sample (SPC-121).
+    Our burns are sized first, on the row's nominal burn, and applied in every sample (SPC-121). Under the
+    two-seed rule the series is drawn again on the second seed and converged only when both draws are (SPC-224).
     """
     blue = cast("BlueTrack", row.blue_track)   # _no_state refused None
     wanted = responses is not None and bool(responses.requests)
     if budget is None:
         sized = _size_row(row, blue, cast("_Responses", responses), None) if wanted else ()
-        return _checked(_sample(row, sampler, sized, None, keep_at_s), sized)
+        series = _sample(row, sampler, sized, None, keep_at_s)
+        return _checked(_second_draw(row, sampler, sized, series, None), sized)
     budget_s = budget.run.budget_s
     if not budget.begin_row():
         return RowSampling(None, _refusal(_BUDGET_NONE.format(budget=budget_s)), spent=True)
@@ -3777,6 +3918,12 @@ def _run(
     except _BudgetSpentError as spent:
         return RowSampling(
             None, _refusal(_BUDGET_PART.format(budget=budget_s, k=spent.done, n=spent.total)), spent=True,
+        )
+    try:
+        series = _second_draw(row, sampler, sized, series, budget)
+    except _BudgetSpentError as spent:
+        return RowSampling(
+            None, _refusal(_BUDGET_SECOND.format(budget=budget_s, k=spent.done, n=spent.total)), spent=True,
         )
     return _checked(series, sized)
 
@@ -3842,6 +3989,7 @@ def _eligible_row(  # noqa: PLR0913, PLR0917
         # A burn due after the span searched ends is handed to no sample, so no figure flies it.
         then=tuple(h for h in burns.then if h.epoch_utc < end),
         elset_error=sample_error(scenario),
+        two_seeds=scenario.convergence_rule is ConvergenceRule.TWO_SEEDS,
     )
 
 
@@ -3920,18 +4068,19 @@ def _turn_one_cost_h(scenario: Scenario) -> float:
     return 0.0 if work.empty else _cost(work)
 
 
-def longest_horizon_h(n_samples: int, rows: int = 1, burns: int = 0) -> float:
+def longest_horizon_h(n_samples: int, rows: int = 1, burns: int = 0, seeds: int = 2) -> float:
     """The longest horizon, in hours floored to tenths, at which *rows* hypotheses of *n_samples* fit the cap.
 
     For the panel's hint (SPC-114): a burn at the scenario epoch integrates about (n + 2) times the horizon per
     row (each sample, blue and red's unburnt arc), and each sample adds SET_UP_S_PER_SAMPLE. A burn before the
     epoch costs more, so this is an upper bound; the cap itself is checked on the real cost. Each of *burns* of
     our burns (SPC-121) adds _BURN_SEARCH_FRACTION of a sample per sample, MAX_SIZING_TRIALS samples to size it
-    and blue's burnt arc: m = n (1 + 0.3 k) + 16 k samples, each with set-up, over (m + 2 + k) arcs.
+    and blue's burnt arc: m = n (1 + 0.3 k) + 16 k samples, each with set-up, over (m + 2 + k) arcs. Each row is
+    charged *seeds* times: twice under the two-seed rule (SPC-224), once under the rule of 0.28.0 to 0.41.0.
     """
     m = n_samples * (1.0 + _BURN_SEARCH_FRACTION * burns) + MAX_SIZING_TRIALS * burns
-    set_up_h = rows * m * SET_UP_S_PER_SAMPLE / _SECONDS_PER_HOUR
-    hours = (MAX_SAMPLE_HOURS - set_up_h) / (rows * (m + 2 + burns))
+    set_up_h = seeds * rows * m * SET_UP_S_PER_SAMPLE / _SECONDS_PER_HOUR
+    hours = (MAX_SAMPLE_HOURS - set_up_h) / (seeds * rows * (m + 2 + burns))
     return max(math.floor(hours * 10) / 10, 0.0)
 
 
@@ -4010,6 +4159,19 @@ def _integrated_hours(window: SeparationWindow, burn_at: datetime | None) -> flo
     return (end - start).total_seconds() / _SECONDS_PER_HOUR
 
 
+#: The seed a sampled cell's figures were drawn on, for its basis note (SPC-224, evaluation F-35), and, under the
+#: two-seed rule, the second its convergence was checked on as well; a shown cell converged on both.
+SEED_ONE = "drawn on seed {seed}, its convergence judged on that draw alone, as before 0.42.0"
+SEED_TWO = "drawn on seed {seed}, its convergence checked on seed {check} as well, which converged too"
+
+
+def seed_words(series: SeparationSeries) -> str:
+    """The seed *series* was drawn on and, when its convergence was checked on a second, that one (SPC-224)."""
+    if series.check is None:
+        return SEED_ONE.format(seed=series.random_seed)
+    return SEED_TWO.format(seed=series.random_seed, check=series.check.seed)
+
+
 def _sampled_bases(
     series: SeparationSeries, horizon_hours: float, *, burnt: bool = False, drawn: ElsetErrorAt | None = None,
     burn_at: datetime | None = None,
@@ -4019,9 +4181,10 @@ def _sampled_bases(
     integrated = _integrated_hours(series.window, burn_at)
     early = burn_at is not None and burn_at < series.window.start_utc
     integrator = _INTEGRATED.format(h=integrated, start=_FROM_BURN if early else _FROM_WINDOW)
+    handover = f"{handover_words(integrated)}; {seed_words(series)}"
     note = (_SAMPLED_CA_NOTE if drawn is None else _SAMPLED_CA_NOTE_ELSET).format(
         n=n, hw5=series.p5_half_width_km, hw=series.percentile_half_width_km, span=span, horizon=horizon_hours,
-        ours=ours, integrator=integrator + integrator_error_words(integrated),
+        ours=ours, integrator=f"{integrator}{integrator_error_words(integrated)}; {handover}",
         elset="" if drawn is None else SAMPLED_ELSET.format(**drawn.words()),
     )
     return outcome_bases(
@@ -4153,6 +4316,9 @@ def _after_burn_refusal(after: BurnSeries | None, n: int) -> str | None:
     if after is None or after.n_failed > 0:
         failed = n if after is None else after.n_failed
         return _refusal(_AFTER_BURN_FAILED.format(k=failed, n=n))
+    if not after.stats.converged and after.stats.half_width_km <= after.stats.tolerance_km:
+        # Converged on the hypothesis's own seed, so it was the second seed that did not (SPC-224).
+        return _refusal(_AFTER_BURN_SEEDS_DIFFER.format(hw=after.stats.half_width_km, tol=after.stats.tolerance_km))
     if not after.stats.converged:
         return _refusal(_AFTER_BURN_UNCONVERGED.format(hw=after.stats.half_width_km, tol=after.stats.tolerance_km))
     return None
@@ -4492,6 +4658,11 @@ _AFTER_BURN_FAILED = (
 _AFTER_BURN_UNCONVERGED = (
     "Not sampled after our burn: P5, P50 and P95 are known only to within {hw:.1f} km, wider than the {tol:.1f} km "
     "this miss needs."
+)
+_AFTER_BURN_SEEDS_DIFFER = (
+    "Not sampled after our burn: the samples converged on the hypothesis's own seed, known to within {hw:.2f} km "
+    "against the {tol:.2f} km this miss needs, but not on the second seed its convergence is checked on. The two "
+    "seeds disagree, so the row is not converged after our burn (SPC-224)."
 )
 _PROPAGATOR_LINE = (
     "Computed rows use SGP4; sampled rows use RK45 with J2 and drag, from the same element sets. Over this horizon "
@@ -4937,6 +5108,37 @@ def _expected(shares: Sequence[float], matrix: Sequence[Sequence[OutcomeMetrics]
     return sum(shares[i] * matrix[i][j].composite_score for i in range(len(shares)))
 
 
+# ── Scores that are not finite (SPC-221, evaluation F-32) ──────────────────
+
+#: What the operator is shown when a composite score is not a finite number: a fixed sentence, never the exception's
+#: text, which names the cell for the log. A NaN compares false with everything, so a rule's min() kept whatever it
+#: met first and the pick followed the row order (probe P-14); an infinite score would have picked by it alone.
+NON_FINITE_SCORE = (
+    "Nothing is recommended: a composite score is not a finite number, so no rule can rank the responses on it. "
+    "This is a fault in the engine or in a figure it was given, not in your entries; the server log names the cell."
+)
+
+
+class NonFiniteScoreError(ValueError):
+    """A composite score that is not finite, found before any rule picked on it: in the matrix, *row* and *response*
+    name the cell, 0-based; over a game tree both are None and the message names the sequence."""
+
+    def __init__(self, where: str, score: float, row: int | None = None, response: int | None = None) -> None:
+        super().__init__(f"{where} scores {score!r}: {NON_FINITE_SCORE}")
+        self.row, self.response = row, response
+
+
+def require_finite_scores(scenario: Scenario, outcome_matrix: Sequence[Sequence[OutcomeMetrics]]) -> None:
+    """Refuse *outcome_matrix* when any composite score in it is not finite, naming the first such cell in row order,
+    under a response not permitted too, since a cell no rule weighs still says the engine went wrong (SPC-221)."""
+    for i, row in enumerate(outcome_matrix):
+        for j, cell in enumerate(row):
+            if not math.isfinite(cell.composite_score):
+                action, response = scenario.adversary_actions[i], scenario.friendly_responses[j]
+                where = f"row {i + 1} ({action.name}), response {response.id} ({response.name})"
+                raise NonFiniteScoreError(where, cell.composite_score, i, j)
+
+
 # ── Response ranking ──────────────────────────────────────────────────────────
 
 def rank_responses(
@@ -4977,12 +5179,14 @@ def find_robust_response(
     permitted, or under expected value when every row has P 0, which leaves it no weight to pick on (SPC-200,
     evaluation F-31; the tree's selectors already give none there). A response marked not permitted is removed
     before any rule aggregates, so it is never the pick, and a tie is broken among the permitted responses alone
-    (SPC-195).
+    (SPC-195). A composite score anywhere in the matrix that is not finite raises NonFiniteScoreError before any
+    rule aggregates (SPC-221, evaluation F-32).
     """
     n_adversary = len(scenario.adversary_actions)
 
     if not scenario.friendly_responses:
         raise ValueError("No friendly responses to select from")
+    require_finite_scores(scenario, outcome_matrix)
     allowed = permitted_responses(scenario)
     if not allowed:
         return None
@@ -5037,7 +5241,8 @@ def rule_values(
     """Each response's value under *strategy*, lower being better, as find_robust_response works it out: its worst
     score over the rows under minimax, its best under minimin, its expected score under expected value. None for a
     response marked not permitted, which no rule values (SPC-195), and for every response under expected value when
-    every share is 0, which leaves it no weight (SPC-200)."""
+    every share is 0, which leaves it no weight (SPC-200). A score that is not finite is refused, as there (SPC-221)."""
+    require_finite_scores(scenario, outcome_matrix)
     rows = range(len(scenario.adversary_actions))
     if strategy is SelectorStrategy.EXPECTED_VALUE:
         shares = row_shares(scenario)
@@ -5117,6 +5322,10 @@ def _with_none_can_change(
     return dataclasses.replace(swept, sentence=_beside(f"{swept.sentence} {none_can}", picture.age(now)))
 
 
+#: Beside the sweep's advice when a cue's outcome matrix held a score that is not finite (V0.42 review of SPC-221).
+CUE_NOT_AVAILABLE = "Whether {observation} could change the recommended response is not available: {why}"
+
+
 @dataclass(frozen=True)
 class CueRelevance:
     """The recommended response under each of a cue's outcomes: *benign* with the picture's range at the cue's
@@ -5127,11 +5336,15 @@ class CueRelevance:
     benign:  FriendlyResponse | None
     hostile: FriendlyResponse | None
     moved:   bool
+    # Why no pick could be had under an outcome's picture: NON_FINITE_SCORE when its matrix held a score that is not
+    # finite (V0.42 review of SPC-221); None when both picks were had.
+    refused: str | None = None
 
     @property
     def changes(self) -> bool:
-        """Whether collecting it could change the recommended response: its two outcomes give different picks."""
-        return self.benign is not self.hostile
+        """Whether collecting it could change the recommended response: its two outcomes give different picks. Not
+        when either outcome's matrix was refused, which leaves nothing to compare."""
+        return self.refused is None and self.benign is not self.hostile
 
 
 def cue_relevance(result: ScenarioResult, cue: Cue, rule: SelectorStrategy) -> CueRelevance:
@@ -5151,7 +5364,12 @@ def cue_relevance(result: ScenarioResult, cue: Cue, rule: SelectorStrategy) -> C
         matrix = result.matrix_under(floor, ceiling)
         moved = moved or matrix != as_held
         outcome = dataclasses.replace(result.scenario, threat=dataclasses.replace(held, floor=floor, ceiling=ceiling))
-        picks.append(find_robust_response(outcome, matrix, rule))
+        try:
+            picks.append(find_robust_response(outcome, matrix, rule))
+        except NonFiniteScoreError:
+            # Asked while the page renders: a fault here must say so, never fail the page (V0.42 review).
+            logger.exception("A cue's outcome matrix held a score that is not finite")
+            return CueRelevance(cue, None, None, moved, refused=NON_FINITE_SCORE)
     return CueRelevance(cue, picks[0], picks[1], moved)
 
 
@@ -5639,7 +5857,8 @@ def _hashed(scenario: Scenario) -> dict[str, Any]:
     miss rule of 0.28.0 to 0.31.0, so a record those releases wrote hashes as it did then (SPC-202); and so is the turn
     rule where it sets nothing, one turn, or is the equal turns of 0.23.0 to 0.36.0, so a record those releases wrote,
     and any one-turn scenario, hashes as it did then (SPC-187); and so is the tree's cost cap where it sets nothing, one
-    turn, or is the shared cap of 0.23.0 to 0.37.0, for the same reason (SPC-188)."""
+    turn, or is the shared cap of 0.23.0 to 0.37.0, for the same reason (SPC-188); and so is the convergence rule
+    where it sets nothing, no row carrying a hypothesis, or is the one seed of 0.28.0 to 0.41.0 (SPC-224)."""
     plain = dataclasses.asdict(without_remainder(scenario))
     for response in plain["friendly_responses"]:
         if not response["vetoed"]:
@@ -5654,6 +5873,10 @@ def _hashed(scenario: Scenario) -> dict[str, Any]:
         del plain["turn_rule"]
     if scenario.turns == 1 or scenario.tree_cap is TreeCap.SHARED:
         del plain["tree_cap"]
+    if scenario.convergence_rule is ConvergenceRule.ONE_SEED or all(
+        a.hypothesis is None for a in scenario.adversary_actions
+    ):
+        del plain["convergence_rule"]
     return plain
 
 

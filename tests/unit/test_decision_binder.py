@@ -73,9 +73,18 @@ def test_staleness_uses_the_regime_limit(hours: float, leo: bool, freshness: Fre
     assert outcome.binding.red.limit_hours == limit
 
 
-def test_a_future_epoch_binds_at_zero_hours() -> None:
-    """elset_age clamps a future epoch to 0 h; the binder must accept it, as it runs outside the try."""
+def test_a_future_epoch_is_refused_not_bound_at_zero_hours() -> None:
+    """elset_age clamped a future epoch to 0 h and the binder bound it as current (SPC-226, evaluation F-38); it is
+    refused now with a sentence, never raised, as the binder runs outside the try."""
     state = _state([RedTrack("RX", _tle(_NOW + timedelta(hours=2)))])
+    outcome = bind_scenario(state, "RX", "", _NOW)
+    assert outcome.binding is None
+    assert outcome.problem is not None
+    assert "is 2.0 h after the time it was checked" in outcome.problem
+
+
+def test_an_epoch_within_the_clock_skew_tolerance_binds_at_zero_hours() -> None:
+    state = _state([RedTrack("RX", _tle(_NOW + timedelta(minutes=2)))])
     outcome = bind_scenario(state, "RX", "", _NOW)
     assert outcome.problem is None
     assert outcome.binding is not None and outcome.binding.red is not None

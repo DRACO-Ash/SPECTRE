@@ -106,6 +106,23 @@ python3 .claude/skills/backlog-brain/scripts/brain.py plan --config .board/confi
 | 2026-11-12 | Sweep rows that do not reach the target (d2e6513) | Keep and label: port the corrected miss figures only; rows that do not reach stay, labelled and never ranked |
 | 2026-11-12 | Intercept Engine Max delta-V default (d3447e2) | 171.8 m/s from the NOTSO export's largest on-station burn window; R7's 500 m/s is overruled |
 | 2026-11-12 | Latent Code Quality issues (562b6c9) | Convert as touched, the documented policy; the Sonar checker (c930087) gates new code only |
+| 2026-11-13 | Asset forms keep what was typed (0.33.0) | Agreed: keep the values after adding an asset |
+| 2026-11-13 | What counts as a tie (0.38.0) | Agreed: scores within 0.0000005 are tied, and the screen says so |
+| 2026-11-13 | Which tied response the record keeps (0.38.0) | Agreed: the lowest-scoring one, as before ties were named |
+| 2026-11-13 | Decide-by with response times missing (0.38.0) | Agreed: no time shown, and the targets without one are named |
+| 2026-11-13 | Game-tree cost cap (0.38.0) | Agreed: 21,000 sample-hours, to be measured again on the deployment machine |
+| 2026-11-13 | What the training-only label covers (0.39.0) | Agreed: results resting on the 7 unsourced lookup relations only |
+| 2026-11-13 | Training-only label when unsure (0.39.0) | Agreed: name every relation (fail closed) |
+| 2026-11-13 | Records before 0.39.0 and the label (0.39.0) | Agreed: 'not recorded'; replay prints it and does not compare it |
+| 2026-11-13 | Calibration tool bins (0.39.0) | Agreed: 1 to 1,000 bins, binned on the parsed number |
+| 2026-11-13 | Burns recorded for a V-bar hop plan (0.40.0) | Agreed: n and 1 burns, a hop's stop and the next start being one burn |
+| 2026-11-13 | When a LEO hop plan arrives (0.40.0) | Agreed: on the flown closest approach, as every other approach |
+| 2026-11-13 | What counts as GEO (0.40.0) | Agreed: within 20.5 min of a geosynchronous period with eccentricity under 0.25; registered as unsourced |
+| 2026-11-13 | Unreadable period or eccentricity (0.40.0) | Agreed: refused, 'regime not readable' beside the rate used |
+| 2026-11-13 | RK45 integration error basis (0.40.0) | Agreed: 3 measured reference pairs, up to 72 h |
+| 2026-11-13 | Placeholder designators ignored (0.41.0) | Agreed: fully synthetic sets only; UDL test, exercise and simulated sets keep theirs |
+| 2026-11-13 | Synthetic objects with no launch date (0.41.0) | Agreed: screened like any undated object |
+| 2026-11-13 | The 60-object cap note's count (0.41.0) | Agreed: includes payloads the screen never reached |
 
 ## Decision Engine plan
 

@@ -388,10 +388,10 @@ class TestThreeTurnsOverATransfer:
 class TestARecordWrittenBeforeReplaysUnderEqualTurns:
     def test_this_code_writes_a_version_holding_the_rule(self) -> None:
         """Version 5 added the turn rule; version 6 (SPC-188) keeps it and adds the tree's own cost cap."""
-        assert (VERSION, VERSIONS) == (6, (1, 2, 3, 4, 5, 6))
+        assert (VERSION, VERSIONS) == (7, (1, 2, 3, 4, 5, 6, 7))
         scenario = cases.scenario([cases.still()], [cases.hold()], turns=1)
         document = json.loads(store_inputs(evaluate_scenario(scenario))[0])
-        assert (document["version"], document["scenario"]["turn_rule"]) == (6, "burns")
+        assert (document["version"], document["scenario"]["turn_rule"]) == (7, "burns")
 
     def test_the_0310_tree_reads_as_equal_turns_and_replays_exactly(self) -> None:
         row = _records(_V3)["tree"]
@@ -426,7 +426,7 @@ class TestARecordWrittenBeforeReplaysUnderEqualTurns:
         document.pop("version")
         del document["scenario"]["tree_cap"]
         text = canonical_json({**document, "version": 4})
-        with pytest.raises(InputsRefusedError, match="unknown field turn_rule"):
+        with pytest.raises(InputsRefusedError, match="unknown field convergence_rule, turn_rule"):
             read_inputs(text, sha256_of(text))
 
     def test_the_replay_line_keeps_the_house_checks(self) -> None:

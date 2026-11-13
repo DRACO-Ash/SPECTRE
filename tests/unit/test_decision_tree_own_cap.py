@@ -26,6 +26,7 @@ from spectre.domain import decision_tree
 from spectre.domain.decision import (
     EVALUATION_BUDGET_S,
     MAX_SAMPLE_HOURS,
+    ConvergenceRule,
     Scenario,
     SelectorStrategy,
     TreeCap,
@@ -80,8 +81,16 @@ def _two_by_two(n: int, turns: int, turn_h: float) -> Scenario:
     )
 
 
-#: 200 samples over three 2 h turns: about 19,777 sample-hours, over the shared cap and under the tree's own.
-_BETWEEN = functools.partial(_two_by_two, 200, 3, 2.0)
+def _one_seed(scenario: Scenario) -> Scenario:
+    """*scenario* on one seed, as the trees SPC-188 measured were costed: its first turn charged once, not twice for
+    the second seed SPC-224 checks convergence on, under which 200 samples over three 2 h turns is over the own cap."""
+    return dataclasses.replace(scenario, convergence_rule=ConvergenceRule.ONE_SEED)
+
+
+#: 200 samples over three 2 h turns, on one seed: about 19,777 sample-hours, over the shared cap and under the tree's
+#: own.
+def _between() -> Scenario:
+    return _one_seed(_two_by_two(200, 3, 2.0))
 #: 250 samples over three 2 h turns: about 24,144 sample-hours, over the tree's own cap.
 _OVER = functools.partial(_two_by_two, 250, 3, 2.0)
 
@@ -113,7 +122,7 @@ def _register_text() -> str:
 
 class TestATreeIsCheckedAgainstItsOwnCap:
     def test_a_tree_between_the_two_caps_now_fits(self) -> None:
-        scenario = _BETWEEN()
+        scenario = _between()
         assert MAX_SAMPLE_HOURS < tree_cost(scenario) < MAX_TREE_SAMPLE_HOURS
         assert tree_cap(scenario) == MAX_TREE_SAMPLE_HOURS
         assert refused_before_run(scenario) is None
@@ -144,10 +153,10 @@ class TestATreeIsCheckedAgainstItsOwnCap:
 
 class TestARecordFromBeforeKeepsTheSharedCap:
     def test_this_code_writes_version_6_holding_the_trees_own_cap(self) -> None:
-        assert (VERSION, VERSIONS) == (6, (1, 2, 3, 4, 5, 6))
+        assert (VERSION, VERSIONS) == (7, (1, 2, 3, 4, 5, 6, 7))   # version 7 adds the convergence rule (SPC-224)
         document = json.loads(store_inputs(evaluate_scenario(cases.scenario([cases.still()], [cases.hold()],
                                                                              turns=1)))[0])
-        assert (document["version"], document["scenario"]["tree_cap"]) == (6, "own")
+        assert (document["version"], document["scenario"]["tree_cap"]) == (7, "own")
 
     def test_versions_1_to_5_read_under_the_shared_cap(self) -> None:
         stored = stored_of(_records(_V3)["tree"])
@@ -155,7 +164,7 @@ class TestARecordFromBeforeKeepsTheSharedCap:
         assert tree_cap(stored.scenario) == MAX_SAMPLE_HOURS
 
     def test_under_the_shared_cap_the_tree_between_is_refused_as_it_was(self) -> None:
-        shared = dataclasses.replace(_BETWEEN(), tree_cap=TreeCap.SHARED)
+        shared = dataclasses.replace(_between(), tree_cap=TreeCap.SHARED)
         refusal = refused_before_run(shared)
         assert refusal is not None and "against a cap of 12,000" in refusal
         assert largest_tree(shared) == 2
@@ -172,13 +181,15 @@ class TestARecordFromBeforeKeepsTheSharedCap:
         shared cap: refused then, one turn shown. Replayed, it is refused again under the shared cap and matches;
         checked against the tree's own cap the same scenario would be built, and the tree's pick would differ."""
         monkeypatch.setattr(decision_tree, "continue_series", _never)
-        shared = dataclasses.replace(_BETWEEN(), tree_cap=TreeCap.SHARED)
+        shared = dataclasses.replace(_between(), tree_cap=TreeCap.SHARED)
         result = evaluate_tree(shared, SelectorStrategy.MINIMAX, sampler=_Fake())
         assert result.tree is not None and result.tree.roots == () and result.tree.selection is None
-        own = dataclasses.replace(result, scenario=dataclasses.replace(result.scenario, tree_cap=TreeCap.OWN))
+        own = dataclasses.replace(result, scenario=dataclasses.replace(
+            result.scenario, tree_cap=TreeCap.OWN, convergence_rule=ConvergenceRule.TWO_SEEDS,
+        ))
         row = new_record(own, Operator(7, "alice"), EPOCH, primary=SelectorStrategy.MINIMAX)
         document = json.loads(row.inputs or "")
-        del document["scenario"]["tree_cap"]
+        del document["scenario"]["tree_cap"], document["scenario"]["convergence_rule"]
         document["version"] = 5
         row.inputs = canonical_json(document)
         row.inputs_sha256 = sha256_of(row.inputs)
@@ -216,11 +227,11 @@ class TestARecordFromBeforeKeepsTheSharedCap:
         document = json.loads(store_inputs(evaluate_scenario(cases.scenario([cases.still()], [cases.hold()],
                                                                              turns=1)))[0])
         text = canonical_json({**document, "version": 5})
-        with pytest.raises(InputsRefusedError, match="unknown field tree_cap"):
+        with pytest.raises(InputsRefusedError, match="unknown field convergence_rule, tree_cap"):
             read_inputs(text, sha256_of(text))
 
     def test_the_hash_leaves_the_cap_out_where_it_sets_nothing_or_is_the_shared_one(self) -> None:
-        tree = _BETWEEN()
+        tree = _between()
         assert _hashed(tree)["tree_cap"] == TreeCap.OWN
         assert "tree_cap" not in _hashed(dataclasses.replace(tree, tree_cap=TreeCap.SHARED))
         assert "tree_cap" not in _hashed(dataclasses.replace(tree, turns=1))

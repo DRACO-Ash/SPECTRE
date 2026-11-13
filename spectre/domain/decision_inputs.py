@@ -33,6 +33,12 @@ Version 6 (SPC-188) adds the scenario's tree cost cap: a game tree checked again
 load. Versions 1 to 5, written by 0.28.0 to 0.37.0, are read under the matrix's cap those releases checked every tree
 against, TreeCap.SHARED, so a tree they refused for its cost is refused again on replay, and one they built is built.
 
+Version 7 (SPC-224) adds the scenario's convergence rule: each sampled row's convergence checked on its hypothesis's
+own seed and on a second, and converged only when both draws are, each row charged twice against the sample-hour cap.
+Versions 1 to 6, written by 0.28.0 to 0.41.0, are read under the one seed those releases judged convergence on,
+ConvergenceRule.ONE_SEED, so a row they sampled is sampled again on replay, and one they refused is refused. Each
+hypothesis's seed was stored already, in every version.
+
 The text is canonical (keys sorted, no spaces, ASCII with every other character escaped, no NaN), so the same inputs
 give the same text and its SHA-256 identifies them; a U+0000 is stored escaped, so PostgreSQL's text takes it.
 
@@ -65,6 +71,7 @@ from spectre.domain.decision import (
     AdversaryAction,
     AdversaryHypothesis,
     BoundElset,
+    ConvergenceRule,
     FriendlyResponse,
     HypothesisSource,
     MissRule,
@@ -87,15 +94,16 @@ from spectre.domain.provenance import Basis, FigureBasis
 from spectre.domain.threat_assessment import Band
 from spectre.domain.threat_understanding import Cue, Dimension, Understanding
 
-#: What the document is, and the version of it this code writes (SPC-188: the tree's cost cap).
+#: What the document is, and the version of it this code writes (SPC-224: the convergence rule).
 SCHEMA = "spectre.decision-inputs"
-VERSION = 6
+VERSION = 7
 #: Every version this code reads: version 1, written by 0.28.0, holds no veto, and reads as nothing vetoed; versions
 #: 1 and 2, written by 0.28.0 and 0.29.0, hold no probability rule, and read under the rule they were evaluated by;
 #: versions 1 to 3, written by 0.28.0 to 0.31.0, hold no miss rule, and read under the rule they were evaluated by;
 #: versions 1 to 4, written by 0.28.0 to 0.36.0, hold no turn rule, and read as the equal turns they were built over;
-#: versions 1 to 5, written by 0.28.0 to 0.37.0, hold no tree cap, and read under the matrix's cap trees shared then.
-VERSIONS = (1, 2, 3, 4, 5, 6)
+#: versions 1 to 5, written by 0.28.0 to 0.37.0, hold no tree cap, and read under the matrix's cap trees shared then;
+#: versions 1 to 6, written by 0.28.0 to 0.41.0, hold no convergence rule, and read as the one seed they sampled on.
+VERSIONS = (1, 2, 3, 4, 5, 6, 7)
 #: The response fields version 2 added (SPC-195), which a version 1 document never holds.
 _VETO_FIELDS = frozenset({"vetoed", "veto_reason"})
 #: The scenario field version 3 added (SPC-203), and the rule a document without it was evaluated by.
@@ -110,11 +118,14 @@ _TURNS_BEFORE: dict[str, Any] = {_TURN_FIELD: TurnRule.EQUAL}
 #: The scenario field version 6 added (SPC-188), and the cap a document without it checked its tree against.
 _CAP_FIELD = "tree_cap"
 _CAP_BEFORE: dict[str, Any] = {_CAP_FIELD: TreeCap.SHARED}
+#: The scenario field version 7 added (SPC-224), and the rule a document without it judged convergence by.
+_SEEDS_FIELD = "convergence_rule"
+_SEEDS_BEFORE: dict[str, Any] = {_SEEDS_FIELD: ConvergenceRule.ONE_SEED}
 #: The document's own fields, every one required: version 3 adds the remainder of P (SPC-203).
 _TOP = ("schema", "version", "code_version", "rule", "scenario", "scores", "budget_ran_out")
 _TOPS: dict[int, tuple[str, ...]] = {
     1: _TOP, 2: _TOP, 3: (*_TOP, "remainder"), 4: (*_TOP, "remainder"), 5: (*_TOP, "remainder"),
-    6: (*_TOP, "remainder"),
+    6: (*_TOP, "remainder"), 7: (*_TOP, "remainder"),
 }
 #: The first version holding the remainder of P (SPC-203).
 _REMAINDER_SINCE = 3
@@ -425,6 +436,27 @@ def _read_cap(value: Any, where: str) -> TreeCap:
     return TreeCap.OWN
 
 
+def _write_seeds(rule: ConvergenceRule) -> str:
+    """The two-seed rule, the one version 7 holds. A scenario under one seed is only ever a replay of a record 0.28.0
+    to 0.41.0 wrote, and a replay writes no record, so one is never stored again (SPC-224)."""
+    if rule is not ConvergenceRule.TWO_SEEDS:
+        raise ValueError(
+            "a scenario whose convergence is judged on one seed, as 0.28.0 to 0.41.0 judged it, is never stored "
+            "again: version 7 holds the two-seed rule alone, and only versions 1 to 6, which those releases wrote, "
+            "read as one seed"
+        )
+    return rule.value
+
+
+def _read_seeds(value: Any, where: str) -> ConvergenceRule:
+    """The two-seed rule, and no other: a version 7 document on one seed would replay as sampled before SPC-224,
+    which no version 7 record was."""
+    if value != ConvergenceRule.TWO_SEEDS.value:
+        raise _refuse(where, f"version 7 holds the two-seed convergence rule alone, not {value!r}; one seed is read "
+                             "only from versions 1 to 6, which 0.28.0 to 0.41.0 wrote")
+    return ConvergenceRule.TWO_SEEDS
+
+
 #: Version 3's probability rule: the remainder rule, written and read, and no other (SPC-203).
 _REMAINDER_RULE: Codec = (_write_rule, _read_rule)
 #: Version 4's miss rule: the element-set error rule, written and read, and no other (SPC-202).
@@ -433,31 +465,39 @@ _ELSET_RULE: Codec = (_write_miss, _read_miss)
 _ENGINE_TURNS: Codec = (_write_turns, _read_turns)
 #: Version 6's tree cost cap: the tree's own, written and read, and no other (SPC-188).
 _OWN_CAP: Codec = (_write_cap, _read_cap)
+#: Version 7's convergence rule: two seeds, written and read, and no other (SPC-224).
+_TWO_SEEDS: Codec = (_write_seeds, _read_seeds)
 #: The scenario as each version holds it: version 1's responses carry no veto; neither version 1 nor 2 holds the
 #: probability rule, so each reads as the rule 0.28.0 and 0.29.0 evaluated by (SPC-203); none of versions 1 to 3
 #: holds the miss rule, so each reads as the rule 0.28.0 to 0.31.0 evaluated by (SPC-202); none of versions 1 to 4
-#: holds the turn rule, so each reads as the equal turns 0.28.0 to 0.36.0 built every tree over (SPC-187); and none of
+#: holds the turn rule, so each reads as the equal turns 0.28.0 to 0.36.0 built every tree over (SPC-187); none of
 #: versions 1 to 5 holds the tree's cost cap, so each reads under the matrix's cap 0.28.0 to 0.37.0 checked every tree
-#: against (SPC-188).
+#: against (SPC-188); and none of versions 1 to 6 holds the convergence rule, so each reads as the one seed 0.28.0 to
+#: 0.41.0 judged convergence on (SPC-224).
 _SCENARIOS: dict[int, _Shape] = {
     1: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE_V1.codec, list)},
-              omit=frozenset({_RULE_FIELD, _MISS_FIELD, _TURN_FIELD, _CAP_FIELD}),
-              fill={**_RULE_BEFORE, **_MISS_BEFORE, **_TURNS_BEFORE, **_CAP_BEFORE}),
+              omit=frozenset({_RULE_FIELD, _MISS_FIELD, _TURN_FIELD, _CAP_FIELD, _SEEDS_FIELD}),
+              fill={**_RULE_BEFORE, **_MISS_BEFORE, **_TURNS_BEFORE, **_CAP_BEFORE, **_SEEDS_BEFORE}),
     2: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list)},
-              omit=frozenset({_RULE_FIELD, _MISS_FIELD, _TURN_FIELD, _CAP_FIELD}),
-              fill={**_RULE_BEFORE, **_MISS_BEFORE, **_TURNS_BEFORE, **_CAP_BEFORE}),
+              omit=frozenset({_RULE_FIELD, _MISS_FIELD, _TURN_FIELD, _CAP_FIELD, _SEEDS_FIELD}),
+              fill={**_RULE_BEFORE, **_MISS_BEFORE, **_TURNS_BEFORE, **_CAP_BEFORE, **_SEEDS_BEFORE}),
     3: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list),
-                         _RULE_FIELD: _REMAINDER_RULE}, omit=frozenset({_MISS_FIELD, _TURN_FIELD, _CAP_FIELD}),
-              fill={**_MISS_BEFORE, **_TURNS_BEFORE, **_CAP_BEFORE}),
+                         _RULE_FIELD: _REMAINDER_RULE},
+              omit=frozenset({_MISS_FIELD, _TURN_FIELD, _CAP_FIELD, _SEEDS_FIELD}),
+              fill={**_MISS_BEFORE, **_TURNS_BEFORE, **_CAP_BEFORE, **_SEEDS_BEFORE}),
     4: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list),
                          _RULE_FIELD: _REMAINDER_RULE, _MISS_FIELD: _ELSET_RULE},
-              omit=frozenset({_TURN_FIELD, _CAP_FIELD}), fill={**_TURNS_BEFORE, **_CAP_BEFORE}),
+              omit=frozenset({_TURN_FIELD, _CAP_FIELD, _SEEDS_FIELD}),
+              fill={**_TURNS_BEFORE, **_CAP_BEFORE, **_SEEDS_BEFORE}),
     5: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list),
                          _RULE_FIELD: _REMAINDER_RULE, _MISS_FIELD: _ELSET_RULE, _TURN_FIELD: _ENGINE_TURNS},
-              omit=frozenset({_CAP_FIELD}), fill=_CAP_BEFORE),
+              omit=frozenset({_CAP_FIELD, _SEEDS_FIELD}), fill={**_CAP_BEFORE, **_SEEDS_BEFORE}),
     6: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list),
                          _RULE_FIELD: _REMAINDER_RULE, _MISS_FIELD: _ELSET_RULE, _TURN_FIELD: _ENGINE_TURNS,
-                         _CAP_FIELD: _OWN_CAP}),
+                         _CAP_FIELD: _OWN_CAP}, omit=frozenset({_SEEDS_FIELD}), fill=_SEEDS_BEFORE),
+    7: _Shape(Scenario, {**_SCENARIO_CODECS, "friendly_responses": _many(_RESPONSE.codec, list),
+                         _RULE_FIELD: _REMAINDER_RULE, _MISS_FIELD: _ELSET_RULE, _TURN_FIELD: _ENGINE_TURNS,
+                         _CAP_FIELD: _OWN_CAP, _SEEDS_FIELD: _TWO_SEEDS}),
 }
 
 

@@ -846,6 +846,7 @@ def parse_tle_history(
     satno: int | None = None,
     metadata: dict[str, tuple[str, str]] | None = None,
     rms_metadata: dict[str, float | None] | None = None,
+    now: datetime | None = None,
 ) -> list[TLERecord]:
     """Parse a block of historical TLEs into chronologically-sorted TLERecords.
 
@@ -857,21 +858,25 @@ def parse_tle_history(
         Maps TLE line-1 strings to RMS fit residuals from UDL (optional).
         Stored on each record as ``rms_residual`` for quality-based selection
         in :func:`~spectre.astro.tle_filter.filter_tle_history`.
+    now:
+        The time the history is read at: a set dated more than FUTURE_EPOCH_TOLERANCE after it is refused (SPC-226).
     """
-    records, _ = parse_tle_history_counted(tle_text, satno, metadata, rms_metadata)
+    records, _ = parse_tle_history_counted(tle_text, satno, metadata, rms_metadata, now)
     return records
 
 
-def _drop_reason(
+# PLR0913: one argument per thing a pair is judged on, the clock among them.
+def _drop_reason(  # noqa: PLR0913
     l1: str, l2: str, satno: int | None, seen: set[str],
-    apply_metadata: Callable[[TLERecord, str], bool],
+    apply_metadata: Callable[[TLERecord, str], bool], *, now: datetime | None = None,
 ) -> tuple[TLERecord | None, str, tuple[str, ...]]:
     """The record for one pair, or None, the ParseCounts field it counts under and, when the acceptance check refused
     it, what the check found.
 
     A malformed pair raises ValueError or ZeroDivisionError, caught and counted so that it drops out rather than
     stopping the parse. The check runs before the duplicate test, so a corrupted set never takes the epoch of the
-    sound set it was copied from (evaluation probe P-14 changed one digit and kept the epoch).
+    sound set it was copied from (evaluation probe P-14 changed one digit and kept the epoch). With *now*, a set dated
+    in the future is refused there too, counted and named as the check names it (SPC-226).
     """
     try:
         if satno is not None and _catalogue_number(l1) != satno:
@@ -880,7 +885,7 @@ def _drop_reason(
     except (ValueError, ZeroDivisionError):
         return None, "malformed", ()
     # The record keeps each line to its 69 columns (text past them is not element-set data), so that is what is checked.
-    check = check_elset(f"{l1[:_TLE_LINE_COLUMNS]}\n{l2[:_TLE_LINE_COLUMNS]}")
+    check = check_elset(f"{l1[:_TLE_LINE_COLUMNS]}\n{l2[:_TLE_LINE_COLUMNS]}", now=now)
     if not check.accepted:
         return None, "refused", check.failures
     if not _first_at_its_epoch(rec, seen):
@@ -895,6 +900,7 @@ def parse_tle_history_counted(
     satno: int | None = None,
     metadata: dict[str, tuple[str, str]] | None = None,
     rms_metadata: dict[str, float | None] | None = None,
+    now: datetime | None = None,
 ) -> tuple[list[TLERecord], ParseCounts]:
     """As :func:`parse_tle_history`, also counting what was dropped and why.
 
@@ -905,7 +911,8 @@ def parse_tle_history_counted(
     accepted and ignored (audit F-206). A set the element-set acceptance
     check refuses is dropped and counted, with what it found (SPC-201): the
     history feeds custody, the burn-normality verdict and the sweep, and a
-    corrupted set read as a burn that never happened.
+    corrupted set read as a burn that never happened. With *now*, a set dated more than FUTURE_EPOCH_TOLERANCE after
+    it is refused and counted the same way, named by the check (SPC-226, evaluation F-38).
     """
     records: list[TLERecord] = []
     seen: set[str] = set()
@@ -913,7 +920,7 @@ def parse_tle_history_counted(
     refusals: list[str] = []
     for l1, l2 in _tle_line_pairs(tle_text):
         rec, reason, failures = _drop_reason(
-            l1, l2, satno, seen, lambda r, line1: _apply_metadata(r, line1, metadata, rms_metadata),
+            l1, l2, satno, seen, lambda r, line1: _apply_metadata(r, line1, metadata, rms_metadata), now=now,
         )
         refusals += failures
         if rec is None:

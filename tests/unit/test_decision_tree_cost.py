@@ -76,9 +76,10 @@ class TestTheBranchCap:
 
 class TestTheCostCap:
     def test_a_tree_over_the_cap_is_refused_before_anything_runs(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """12: plane_change with a 1,000-sample Evasive over two 3 h turns; the one-turn matrix stands."""
+        """12: plane_change with a 700-sample Evasive over two 3 h turns; the one-turn matrix stands. 1,000 samples
+        until SPC-224, whose second seed puts the 6 h matrix row itself over the matrix's cap at 1,000."""
         monkeypatch.setattr(decision_tree, "continue_series", _never)
-        scenario = _two_by_two(1000, 2, 3.0, PLANE_CHANGE, target=None)
+        scenario = _two_by_two(700, 2, 3.0, PLANE_CHANGE, target=None)
         total = tree_cost(scenario)
         assert total > MAX_TREE_SAMPLE_HOURS
         refusal = TREE_OVER_CAP.format(
@@ -90,7 +91,7 @@ class TestTheCostCap:
         assert result.tree is not None
         assert result.tree.refusal == refusal
         assert result.tree.roots == ()
-        assert len(fake.calls) == 1   # the one-turn row, with no turn boundary kept
+        assert len(fake.calls) == 2   # the one-turn row, with no turn boundary kept, on both seeds (SPC-224)
         assert result.outcome_matrix[1][0].ca_percentiles is not None
         one = evaluate_scenario(scenario, sampler=_Fake())
         assert [c.composite_score for c in result.outcome_matrix[1]] == [c.composite_score for c in one.outcome_matrix[1]]
@@ -118,7 +119,7 @@ class TestTheCostModelAgainstTheMeasuredTrees:
             (200, 2, 2.0, COPLANAR_LEO, True),     # 38.6 s loaded
             (500, 2, 1.0, PLANE_CHANGE, True),     # 50.2 s loaded, Avoid not burning: the slowest, 90.8 a second
             (300, 3, 0.5, PLANE_CHANGE, True),     # 76.5 s loaded, Avoid not burning
-            (200, 3, 2.0, COPLANAR_LEO, True),     # over the shared cap of 0.37.0, under the tree's own
+            (200, 3, 2.0, COPLANAR_LEO, False),    # under the tree's own cap until SPC-224 charged turn 1 twice
             (250, 3, 2.0, COPLANAR_LEO, False),    # over the tree's own cap
         ],
     )
@@ -126,9 +127,10 @@ class TestTheCostModelAgainstTheMeasuredTrees:
         assert (tree_cost(_two_by_two(n, turns, turn_h, case)) <= MAX_TREE_SAMPLE_HOURS) is fits
 
     def test_the_largest_tree_that_fits(self) -> None:
-        """At 200 samples 3 turns of coplanar_leo fit; at 250, 2 fit and 3 do not; at 1,500 no tree fits.
+        """At 200 and 250 samples 2 turns of coplanar_leo fit and 3 do not, since turn 1 is charged twice for the
+        second seed its convergence is checked on (SPC-224; 200 fitted 3 before); at 1,500 no tree fits.
         plane_change's short turns fit 3. Under the shared cap of 0.37.0, 150 samples fitted 2 and 1,000 none."""
-        assert largest_tree(_two_by_two(200, 3, 2.0)) == 3
+        assert largest_tree(_two_by_two(200, 3, 2.0)) == 2
         assert largest_tree(_two_by_two(250, 3, 2.0)) == 2
         assert largest_tree(_two_by_two(100, 3, 0.5, PLANE_CHANGE)) == 3
         assert largest_tree(_two_by_two(1500, 2, 2.0)) == 1
