@@ -2663,7 +2663,7 @@
   "needs_owner": true,
   "human_minutes": 30,
   "task": "Live UDL checks for the archive-first fetch: what /elset/current answers with no source, archive query time for a busy GEO object, and each provider's ephemType",
-  "note": "0.34.0 rests on charming-dirac's field observation that /elset/current with no source answers for 18th SPCS alone; HEAD's old comment said one set per provider. Also unknown: how long the 72-hour /elset query takes for a busy GEO object with 10 refreshes in parallel, and which providers file SGP4-XP (an XP set as the newest refuses the fetch, by design). Needs the owner's UDL account; scripts/udl_probe.py (SPC-033) is the place to add the checks.",
+  "note": "0.34.0 rests on charming-dirac's field observation that /elset/current with no source answers for 18th SPCS alone; HEAD's old comment said one set per provider. Also unknown: how long the 72-hour /elset query takes for a busy GEO object with 10 refreshes in parallel, and which providers file SGP4-XP (an XP set as the newest refuses the fetch, by design). Needs the owner's UDL account; scripts/udl_probe.py (SPC-033) is the place to add the checks. 2026-11-13, owner's probe on 41866 (GOES-16): /elset/current with no source returned one 18th SPCS set (check 1 confirmed for this object). The 72 h /elset archive held EXO (ephemType 2 on every set, every 15 to 30 min), NorthStar (0), KBR (0) and 18th SPCS (0, posted about 5 to 6 h after epoch); no ephemType 4 (check 3 answered for this object). Query time not yet reported (check 2 open). Finding: EXO's type 2 sets are refused, and being often a millisecond newer than KBR and NorthStar they block the fetch; see SPC-243.",
   "files": [
    "spectre/web/routes/udl.py"
   ]
@@ -2700,5 +2700,18 @@
   "est": 120,
   "version": "0.44.0",
   "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-243",
+  "priority": "high",
+  "order": 8,
+  "group": "port",
+  "minutes": 180,
+  "task": "A refused newer element set must not block the UDL fetch: take the newest accepted set and name the newer ones refused",
+  "note": "Found from the owner's SPC-240 probe on 41866, 2026-11-13. EXO files every set with ephemType 2, which check_elset refuses, and its epochs are often a millisecond newer than the matching KBR and NorthStar sets, so they are not tied at the newest. Replaying four real records at 13:00 UTC: the newest is EXO alone, it is refused, and the fetch returns nothing although KBR and NorthStar pass. Fix: take the newest set the check accepts, and state each newer set refused, its provider and why, on screen and in the log; staleness limits still apply. Reverses the 0.34.0 rule that an older set is not taken instead (Claude's design call, not an owner ruling). Whether UDL's ephemType 2 means plain SGP4 is unconfirmed; it stays refused until a source says so.",
+  "files": [
+   "spectre/web/routes/udl.py",
+   "spectre/astro/elset_check.py"
+  ]
  }
 ]
