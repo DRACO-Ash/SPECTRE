@@ -419,16 +419,20 @@ class TestDecideBy:
         assert resp.status_code == 200
         return " ".join(resp.text.split())
 
-    def test_the_default_is_named_as_the_default(self, client: Any, auth_cookie: str, leo: Any,
-                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_with_no_response_time_set_it_asks_for_one_and_shows_no_time(
+        self, client: Any, auth_cookie: str, leo: Any, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """SPC-211 (evaluation F-23): no default stands in for the operator's response time."""
         records = _events_history(_RECENT_RAISE)
         _arrange(leo, monkeypatch, records)
         leo.response_time_h = None
+        monkeypatch.setattr(leo, "response_time_by_target", {})
         _spy(monkeypatch, {_confirmed(records)[-1].tle_before.tle: 14.0, records[-1].tle: 3.0})
         page = _sweep(client, auth_cookie)
-        # Arrival 3 h after the burn at now, inside the 12 h default.
-        assert "Decide-by has passed for BLUE-LEO" in page
-        assert "the default response time of 12 h, which you have not set" in page
+        assert ("No decide-by: it needs your response time, the hours you need to plan, approve and carry out a "
+                "response, and none is set for BLUE-LEO.") in page
+        assert "Decide-by has passed" not in page and "Decide by " not in page
+        assert "default response time" not in page
 
     def test_the_operator_sets_their_own(self, client: Any, auth_cookie: str, leo: Any,
                                          monkeypatch: pytest.MonkeyPatch) -> None:

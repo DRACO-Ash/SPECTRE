@@ -20,6 +20,9 @@ cautious and the probability-weighted picks differed. Every result is now read u
   changes the primary rule's pick, weight_stability's own, the record's too; and the chosen rule's beside it when that
   is another rule. A game tree's picks are not covered, and a line says so.
 ● The collect-first advice judged by the primary rule's pick, the recommendation shown (SPC-204, evaluation F-14).
+● A tie (SPC-206, evaluation F-13): responses whose values under a rule lie within TIE_TOLERANCE of each other are
+  each named wherever that rule's pick is, the headline says it is a tie, and rules that find the same tie agree.
+  find_robust_response still returns the first, so the pick a record holds is unchanged.
 
 Nothing here changes a figure, a pick or the rule the evaluation ran under: every pick is read from the result.
 Imports the Decision Engine and its tree selectors, never the reverse; nothing here imports the web layer.
@@ -38,11 +41,14 @@ from spectre.domain.decision import (
     ScenarioResult,
     SelectorStrategy,
     find_robust_response,
+    named_list,
     permitted_responses,
+    tie_line,
+    tied_responses,
 )
 from spectre.domain.provenance import FigureBasis
 from spectre.domain.threat_understanding import CollectionAdvice
-from spectre.domain.tree_selectors import select
+from spectre.domain.tree_selectors import TurnPick, select
 from spectre.domain.weight_stability import (
     STABILITY_BASIS,
     STABILITY_MARK,
@@ -118,6 +124,8 @@ class RulePick:
     response: FriendlyResponse | None
     #: Why the rule has no pick, when it has none: every row at P 0, or every response marked not permitted.
     none:     str = NO_PICK
+    #: The pick and every response tied with it under the rule (SPC-206); empty when not worked out.
+    tied:     tuple[FriendlyResponse, ...] = ()
 
     @property
     def words(self) -> str:
@@ -129,8 +137,10 @@ class RulePick:
 
     @property
     def pick_text(self) -> str:
-        """The pick as the page names it, or that the rule has none and why."""
-        return self.none.removeprefix("has ") if self.response is None else label(self.response)
+        """The pick as the page names it, a tie naming each tied response, or that the rule has none and why."""
+        if self.response is None:
+            return self.none.removeprefix("has ")
+        return tie_words(self.tied) if len(self.tied) > 1 else label(self.response)
 
 
 @dataclass(frozen=True)
@@ -167,6 +177,10 @@ class RuleComparison:
     basis:        str = PICKS_BASIS
     stability_basis: str = STABILITY_BASIS
     stability_mark: FigureBasis = STABILITY_MARK
+    #: The primary rule's pick and every response tied with it (SPC-206), and the sentence saying it is a tie, None
+    #: when there is none.
+    headline_tied: tuple[FriendlyResponse, ...] = ()
+    tie_line:     str | None = None
 
     @property
     def differs(self) -> bool:
@@ -194,20 +208,51 @@ def pick_words(scenario: Scenario, response: FriendlyResponse | None) -> str:
     return no_pick(scenario).removeprefix("has ") if response is None else label(response)
 
 
-def tree_turn_one_picks(result: ScenarioResult) -> dict[SelectorStrategy, FriendlyResponse | None]:
+def _tree_turn_one(result: ScenarioResult) -> dict[SelectorStrategy, TurnPick]:
     """Each rule's turn-1 pick over *result*'s tree as built, by select over its turns built in full; empty for one
     turn or a tree with no selection. The matrix pick passed to select is each rule's own, which only its lines read."""
     tree = result.tree
     if tree is None or tree.selection is None:
         return {}
     scenario, matrix = result.scenario, matrix_picks(result)
-    picks: dict[SelectorStrategy, FriendlyResponse | None] = {}
+    picks: dict[SelectorStrategy, TurnPick] = {}
     for rule in RULES:
         pick = matrix[rule]
         own = None if pick is None else _index(scenario, pick)
-        first = select(scenario, tree.roots, tree.complete_turns, rule, matrix_pick=own).picks[0].pick
-        picks[rule] = None if first is None else scenario.friendly_responses[first]
+        picks[rule] = select(scenario, tree.roots, tree.complete_turns, rule, matrix_pick=own).picks[0]
     return picks
+
+
+def tree_turn_one_ties(result: ScenarioResult) -> dict[SelectorStrategy, tuple[FriendlyResponse, ...]]:
+    """Each rule's turn-1 pick over *result*'s tree with every response tied with it, in the order entered (SPC-206),
+    so rules that find the same tie agree whichever of it each picks; none for a rule with no pick, and empty for one
+    turn or a tree with no selection."""
+    scenario = result.scenario
+    return {rule: tuple(scenario.friendly_responses[j] for j in first.choices)
+            for rule, first in _tree_turn_one(result).items()}
+
+
+def tree_turn_one_picks(result: ScenarioResult) -> dict[SelectorStrategy, FriendlyResponse | None]:
+    """Each rule's turn-1 pick over *result*'s tree as built, the one with the lowest value, as select picks it; empty
+    for one turn or a tree with no selection."""
+    scenario = result.scenario
+    return {rule: None if first.pick is None else scenario.friendly_responses[first.pick]
+            for rule, first in _tree_turn_one(result).items()}
+
+
+def matrix_ties(result: ScenarioResult) -> dict[SelectorStrategy, tuple[FriendlyResponse, ...]]:
+    """Each rule's pick on *result*'s matrix with every response tied with it (SPC-206); none with no pick."""
+    return {rule: tied_responses(result.scenario, result.outcome_matrix, rule) for rule in RULES}
+
+
+def tie_words(tied: Sequence[FriendlyResponse]) -> str:
+    """A tie as the page names it: "a tie between X (x1) and Y (y1)"."""
+    return f"a tie between {named_list([label(r) for r in tied])}"
+
+
+def _picked(tied: Sequence[FriendlyResponse]) -> str:
+    """A pick as the page names it: the one response, or the tie."""
+    return label(tied[0]) if len(tied) == 1 else tie_words(tied)
 
 
 def expected_value_caveat(result: ScenarioResult) -> str | None:
@@ -218,25 +263,27 @@ def expected_value_caveat(result: ScenarioResult) -> str | None:
 
 def compare_rules(result: ScenarioResult, primary: SelectorStrategy) -> RuleComparison:
     """Every rule's pick on *result*, whether they agree, and *primary*'s pick as the headline beside the chosen
-    rule's."""
-    scenario, matrix = result.scenario, matrix_picks(result)
+    rule's; a tie under a rule is named wherever its pick is (SPC-206)."""
+    scenario, matrix, ties = result.scenario, matrix_picks(result), matrix_ties(result)
     none = no_pick(scenario)
-    picks = tuple(RulePick(rule, matrix[rule], none) for rule in RULES)
-    agree, groups = _grouped(scenario, [(p.rule, p.response) for p in picks])
-    tree = tree_turn_one_picks(result)
+    picks = tuple(RulePick(rule, matrix[rule], none, ties[rule]) for rule in RULES)
+    agree, groups = _grouped(scenario, [(rule, ties[rule]) for rule in RULES])
+    tree = tree_turn_one_ties(result)
     tree_agree, tree_line = _tree_line(result, tree)
+    tree_picks = tree_turn_one_picks(result)
     chosen = result.robust_strategy
     return RuleComparison(
         picks=picks, agree=agree, line=_agreement(scenario, agree, groups),
-        tree_picks=tuple(tree.items()), tree_line=tree_line, tree_agree=tree_agree,
-        primary=primary, chosen=chosen, headline=matrix[primary],
-        primary_line=_primary_line(primary, chosen, matrix, none),
-        star_line=_star_line(result, primary, matrix), caveat=expected_value_caveat(result),
+        tree_picks=tuple(tree_picks.items()), tree_line=tree_line,
+        tree_agree=tree_agree, primary=primary, chosen=chosen, headline=matrix[primary],
+        primary_line=_primary_line(primary, chosen, ties, none),
+        star_line=_star_line(result, primary, ties), caveat=expected_value_caveat(result),
         stability=weight_stability(result, primary),
         chosen_stability=None if chosen is primary else weight_stability(
             result, chosen, subject=CHOSEN_SUBJECT.format(Rule=RULE_WORDS[chosen].capitalize())),
         tree_not_covered=TREE_NOT_COVERED if result.scenario.turns > 1 else None,
         collection=result.collection_under(primary), collection_rows=result.collection_rows_under(primary),
+        headline_tied=ties[primary], tie_line=tie_line(primary, ties[primary]),
     )
 
 
@@ -258,29 +305,29 @@ def label(response: FriendlyResponse) -> str:
 
 
 def _grouped(
-    scenario: Scenario, picks: Sequence[tuple[SelectorStrategy, FriendlyResponse | None]],
+    scenario: Scenario, picks: Sequence[tuple[SelectorStrategy, tuple[FriendlyResponse, ...]]],
 ) -> tuple[bool, str]:
-    """Whether every rule picks the same response, and the words: that response when they agree, else each response
-    with the rules that pick it, in RULES order, and any rule with no pick."""
-    groups: dict[int | None, list[str]] = {}
-    for rule, response in picks:
-        groups.setdefault(None if response is None else _index(scenario, response), []).append(RULE_WORDS[rule])
+    """Whether every rule picks the same response, or finds the same tie (SPC-206), and the words: that pick when
+    they agree, else each pick with the rules that make it, in RULES order, and any rule with no pick."""
+    groups: dict[tuple[int, ...], list[str]] = {}
+    for rule, tied in picks:
+        groups.setdefault(tuple(_index(scenario, r) for r in tied), []).append(RULE_WORDS[rule])
     (only, *others) = groups
-    if not others and only is not None:
-        return True, label(scenario.friendly_responses[only])
-    return False, "; ".join(_group(scenario, place, rules) for place, rules in groups.items())
+    if not others and only:
+        return True, _picked([scenario.friendly_responses[j] for j in only])
+    return False, "; ".join(_group(scenario, places, rules) for places, rules in groups.items())
 
 
-def _group(scenario: Scenario, place: int | None, rules: list[str]) -> str:
+def _group(scenario: Scenario, places: tuple[int, ...], rules: list[str]) -> str:
     named = " and ".join(rules)
-    if place is None:
+    if not places:
         return f"{named} {NO_PICK}"
     verb = "pick" if len(rules) > 1 else "picks"
-    return f"{named} {verb} {label(scenario.friendly_responses[place])}"
+    return f"{named} {verb} {_picked([scenario.friendly_responses[j] for j in places])}"
 
 
 def _tree_line(
-    result: ScenarioResult, tree: dict[SelectorStrategy, FriendlyResponse | None],
+    result: ScenarioResult, tree: dict[SelectorStrategy, tuple[FriendlyResponse, ...]],
 ) -> tuple[bool | None, str | None]:
     """Whether the rules agree on turn 1 of the tree, and that in words, naming the turns asked and, when the budget
     stopped it sooner, the turns built in full; (None, None) with no tree picks. With every response marked not
@@ -295,42 +342,47 @@ def _tree_line(
     return agree, TREE_AGREE.format(**words, pick=groups) if agree else TREE_DISAGREE.format(**words, groups=groups)
 
 
-def _its(response: FriendlyResponse | None, none: str) -> str:
+def _its(tied: Sequence[FriendlyResponse], none: str) -> str:
     """What a rule picks, in the primary line's words; *none* says why it has no pick."""
-    return f"it {none}" if response is None else f"it picks {label(response)}"
+    return f"it picks {_picked(tied)}" if tied else f"it {none}"
 
 
 def _primary_line(
-    primary: SelectorStrategy, chosen: SelectorStrategy, matrix: dict[SelectorStrategy, FriendlyResponse | None],
+    primary: SelectorStrategy, chosen: SelectorStrategy, ties: dict[SelectorStrategy, tuple[FriendlyResponse, ...]],
     none: str,
 ) -> str:
     """The primary rule and its pick, and the chosen rule's beside it when they are not the same rule; *none* says
-    why a rule has no pick."""
-    pick = matrix[primary]
+    why a rule has no pick. A tie names each tied response (SPC-206)."""
+    pick = ties[primary]
     if chosen is primary:
-        if pick is None:
+        if not pick:
             return PRIMARY_CHOSEN_NONE.format(primary=RULE_WORDS[primary], none=none)
-        return PRIMARY_CHOSEN.format(primary=RULE_WORDS[primary], pick=label(pick))
+        return PRIMARY_CHOSEN.format(primary=RULE_WORDS[primary], pick=_picked(pick))
     return PRIMARY_DIFFERS.format(
         primary=RULE_WORDS[primary], said=_its(pick, none), chosen=RULE_WORDS[chosen],
-        chosen_said=_its(matrix[chosen], none), shown=SHOWN_NONE if pick is None else SHOWN,
+        chosen_said=_its(ties[chosen], none), shown=SHOWN if pick else SHOWN_NONE,
     )
 
 
+def _starred(tied: Sequence[FriendlyResponse]) -> str:
+    """What the star marks: the one response, or each tied response, said to be tied (SPC-206)."""
+    return label(tied[0]) if len(tied) == 1 else f"{named_list([label(r) for r in tied])}, tied"
+
+
 def _star_line(
-    result: ScenarioResult, primary: SelectorStrategy, matrix: dict[SelectorStrategy, FriendlyResponse | None],
+    result: ScenarioResult, primary: SelectorStrategy, ties: dict[SelectorStrategy, tuple[FriendlyResponse, ...]],
 ) -> str:
-    """What the matrix's star and the ranking's highlights mark: the rule chosen's pick, said beside the primary's;
-    nothing, with every response marked not permitted, or under expected value with every row at P 0."""
-    best = result.robust_best_response
+    """What the matrix's star and the ranking's highlights mark: the rule chosen's pick, or every response tied with
+    it, said beside the primary's; nothing, with every response marked not permitted, or under expected value with
+    every row at P 0."""
     chosen = result.robust_strategy
-    if best is None:
+    if result.robust_best_response is None:
         return STAR_NO_WEIGHT.format(chosen=RULE_WORDS[chosen]) if permitted_responses(result.scenario) else STAR_NOTHING
-    starred = label(best)
+    starred = _starred(result.tied_responses)
     if chosen is primary:
         return STAR_PRIMARY.format(pick=starred, chosen=RULE_WORDS[chosen])
-    primary_pick = matrix[primary]
+    primary_pick = ties[primary]
     words = {"pick": starred, "chosen": RULE_WORDS[chosen], "primary": RULE_WORDS[primary]}
-    if primary_pick is None:
+    if not primary_pick:
         return STAR_CHOSEN_NO_PRIMARY.format(**words)
-    return STAR_CHOSEN.format(**words, primary_pick=label(primary_pick))
+    return STAR_CHOSEN.format(**words, primary_pick=_picked(primary_pick))

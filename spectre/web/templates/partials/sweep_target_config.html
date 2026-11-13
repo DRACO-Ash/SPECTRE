@@ -126,7 +126,8 @@
 {% endif %}
 
 {# Response time for one named target (SPC-022). Sent with the sweep; decide-by
-   uses a target's own time, else the one above, else the 12 h default. Guarded,
+   uses a target's own time, else the one above; with neither, decide-by says it needs one and shows no time
+   (SPC-211). Guarded,
    because the template tests render with StrictUndefined. #}
 {% if interceptor_name %}
 {% set held_times = response_times if response_times is defined and response_times else {} %}
@@ -139,7 +140,7 @@
     {% endif %}
   </summary>
   <p class="label-dim" style="font-size:0.7rem; margin:0.4rem 0">
-    The hours you need to respond for one target. Decide-by uses it for that target, your response time above for any other, and 12 hours if neither is set. It is held when you sweep; blank hours keep what is held. A time held for a target can be changed, and is kept until you sign out.
+    The hours you need to respond for one target. Decide-by uses it for that target and your response time above for any other; if neither is set, decide-by says it needs one and shows no time. It is held when you sweep; blank hours keep what is held. A time held for a target can be changed, and is kept until you sign out.
   </p>
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.4rem">
     <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
@@ -151,7 +152,7 @@
     <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
       Response time (h)
       <input type="number" name="target_response_h" id="ts-target-response-h" class="form-control"
-             placeholder="12" step="0.5" min="0.5" max="168"
+             placeholder="hours" step="0.5" min="0.5" max="168"
              style="margin-top:0.2rem; padding:0.3rem 0.4rem; font-size:0.8rem; width:100%">
     </label>
   </div>

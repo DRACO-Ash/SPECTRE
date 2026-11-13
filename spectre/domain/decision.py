@@ -294,6 +294,19 @@ class TurnRule(StrEnum):
     EQUAL = "equal"
 
 
+class TreeCap(StrEnum):
+    """Which cost cap a game tree is checked against before it runs (design D6; SPC-188, the owner's ruling of
+    2026-11-05 to measure trees under load and set their own cap).
+
+    OWN: the tree's own cap, spectre.domain.decision_tree.MAX_TREE_SAMPLE_HOURS, set from trees measured under load.
+    SHARED: the rule of 0.23.0 to 0.37.0, the matrix's cap, MAX_SAMPLE_HOURS, which the tree shared; it is read only
+    from a record those releases wrote, so the replay refuses or builds its tree as it did then.
+    """
+
+    OWN = "own"
+    SHARED = "shared"
+
+
 class SelectorStrategy(Enum):
     MINIMAX           = "minimax"           # minimise worst-case cost
     EXPECTED_VALUE    = "expected_value"    # minimise expected cost (uses probability)
@@ -1713,7 +1726,8 @@ class ThreatPicture:
     Context for the operator and the collect-first advice only: it moves no figure, no score and no field of an
     adversary row. *red* names the red track it was assessed for; *decide_at* is the sweep's decide-by, None when it
     set none, *decide_by* its sentence, *target* the blue asset it was set for and *arrival* the intercept it was set
-    against, None when unknown. *assessed_at* is when the sweep assessed it, which every picture states: the engine
+    against, None when unknown. When decide-by needs a response time (SPC-211), *target* is the first target in reach
+    with no response time set, and *decide_at* and *arrival* are None. *assessed_at* is when the sweep assessed it, which every picture states: the engine
     reads it at any age and shows that age beside every figure and sentence it feeds (SPC-181).
     """
 
@@ -1858,6 +1872,9 @@ class Scenario:
     # How a game tree's turns are set (SPC-187): BURNS, by the engine from the rows' burn times, unless the scenario
     # was read from a record 0.23.0 to 0.36.0 wrote, which is replayed with the equal turns it was built with, EQUAL.
     turn_rule:          TurnRule = TurnRule.BURNS
+    # Which cost cap a game tree is checked against (SPC-188): OWN, the tree's own measured cap, unless the scenario was
+    # read from a record 0.23.0 to 0.37.0 wrote, which is checked against the matrix's cap it shared then, SHARED.
+    tree_cap:           TreeCap = TreeCap.OWN
 
     def __post_init__(self) -> None:
         # A zero horizon divided by zero in the score (audit F-112).
@@ -2103,6 +2120,18 @@ class ScenarioResult:
 
     def _bases(self) -> list[OutcomeBases]:
         return [_cell_bases(cell) for row in self.outcome_matrix for cell in row]
+
+    @property
+    def tied_responses(self) -> tuple[FriendlyResponse, ...]:
+        """The rule used's pick and every response tied with it, in the order entered (SPC-206): one when there is no
+        tie, none with no pick. robust_best_response is still the response with the lowest score, as 0.37.0 did, which
+        need not be the first entered of them."""
+        return tied_responses(self.scenario, self.outcome_matrix, self.robust_strategy)
+
+    @property
+    def tie_line(self) -> str | None:
+        """That the rule used finds a tie, naming every tied response; None when it finds none (SPC-206)."""
+        return tie_line(self.robust_strategy, self.tied_responses)
 
     @property
     def modelled(self) -> bool:
@@ -4778,6 +4807,96 @@ def _expected_value_pick(
     return min(allowed, key=lambda j: _expected(shares, outcome_matrix, j))
 
 
+# ── Ties (SPC-206, evaluation F-13) ──────────────────────────────────────────
+
+#: How close two responses' values under a rule may come and still tie (SPC-206, evaluation F-13): half a unit in
+#: the sixth decimal place, to which the engine rounds every composite score. Each score is kept only to within this
+#: of the value before rounding, so a difference no larger is below the precision the scores hold, and the rule has
+#: no ground to prefer one response to the other. Reasoned from the engine's own rounding, not sourced; Claude's
+#: choice, not a ruling. Minimax and minimin read rounded scores, so for them it is equality.
+TIE_TOLERANCE: float = 5e-7
+#: The places a difference between two values is rounded to before it is set against TIE_TOLERANCE, so a difference of
+#: exactly the tolerance ties whatever the values' size: floating-point error in a difference of scores near 1 is about
+#: 1e-16, far below the 12th place, and the 12th place is far below the tolerance. At the tolerance it is a tie.
+_TIE_PLACES = 12
+#: What the recommendation says of a tie: every tied response, and that the rule does not choose between them.
+TIE_LINE = (
+    "A tie under {rule}: {names} score within {tolerance:g} of each other, the precision every composite score is "
+    "kept to, so {rule} does not choose between them. Each is shown in the order entered; the choice is yours."
+)
+
+
+def rule_values(
+    scenario: Scenario, outcome_matrix: Sequence[Sequence[OutcomeMetrics]], strategy: SelectorStrategy,
+) -> tuple[float | None, ...]:
+    """Each response's value under *strategy*, lower being better, as find_robust_response works it out: its worst
+    score over the rows under minimax, its best under minimin, its expected score under expected value. None for a
+    response marked not permitted, which no rule values (SPC-195), and for every response under expected value when
+    every share is 0, which leaves it no weight (SPC-200)."""
+    rows = range(len(scenario.adversary_actions))
+    if strategy is SelectorStrategy.EXPECTED_VALUE:
+        shares = row_shares(scenario)
+        if sum(shares) <= 0.0:
+            return (None,) * len(scenario.friendly_responses)
+        return expected_scores(scenario, outcome_matrix)
+    aggregate = max if strategy is SelectorStrategy.MINIMAX else min
+    return tuple(
+        None if response.vetoed else aggregate(outcome_matrix[i][j].composite_score for i in rows)
+        for j, response in enumerate(scenario.friendly_responses)
+    )
+
+
+def tied_with(values: Sequence[float | None]) -> tuple[int, ...]:
+    """The places of every finite value within TIE_TOLERANCE of the least finite one, in order, the difference rounded
+    to _TIE_PLACES so a difference of exactly the tolerance is a tie; none when no finite value is known. A value that
+    is not finite never ties."""
+    known = [v for v in values if v is not None and math.isfinite(v)]
+    if not known:
+        return ()
+    best = min(known)
+    return tuple(
+        j for j, v in enumerate(values)
+        if v is not None and math.isfinite(v) and round(v - best, _TIE_PLACES) <= TIE_TOLERANCE
+    )
+
+
+def ties_of(values: Sequence[float | None], pick: int | None) -> tuple[int, ...]:
+    """The places tied with *pick*, the pick among them, in order: tied_with's, when they hold the pick; the pick
+    alone when they do not, as with a score that is not finite; none with no pick. A pick never loses its tie set."""
+    if pick is None:
+        return ()
+    places = tied_with(values)
+    return places if pick in places else (pick,)
+
+
+def tied_responses(
+    scenario: Scenario, outcome_matrix: Sequence[Sequence[OutcomeMetrics]], strategy: SelectorStrategy,
+) -> tuple[FriendlyResponse, ...]:
+    """The pick of *strategy* and every permitted response tied with it within TIE_TOLERANCE, in the order entered
+    (SPC-206): one response when there is no tie, none when the rule has no pick. find_robust_response still returns
+    the response with the lowest score, as 0.37.0 did, so a record's pick and its replay are unchanged; it need not be
+    the first entered of the tie, which is said beside it."""
+    pick = find_robust_response(scenario, list(map(list, outcome_matrix)), strategy)
+    place = None if pick is None else next(j for j, r in enumerate(scenario.friendly_responses) if r is pick)
+    places = ties_of(rule_values(scenario, outcome_matrix, strategy), place)
+    return tuple(scenario.friendly_responses[j] for j in places)
+
+
+def named_list(names: Sequence[str]) -> str:
+    """Names joined in words: "A", "A and B", "A, B and C"."""
+    return names[0] if len(names) == 1 else " and ".join((", ".join(names[:-1]), names[-1]))
+
+
+def tie_line(strategy: SelectorStrategy, tied: Sequence[FriendlyResponse]) -> str | None:
+    """The sentence saying *tied* tie under *strategy*, each named with its id; None for one response or none."""
+    if len(tied) <= 1:
+        return None
+    return TIE_LINE.format(
+        rule=strategy.value.replace("_", " "), names=named_list([f"{r.name} ({r.id})" for r in tied]),
+        tolerance=TIE_TOLERANCE,
+    )
+
+
 # ── Whether a collection can change the recommended response (SPC-204, evaluation F-14) ──
 
 def _with_none_can_change(
@@ -5314,7 +5433,8 @@ def _hashed(scenario: Scenario) -> dict[str, Any]:
     and the 0.29.0 rule is left out, so a record 0.28.0 or 0.29.0 wrote hashes as it did then (SPC-203); so is the
     miss rule of 0.28.0 to 0.31.0, so a record those releases wrote hashes as it did then (SPC-202); and so is the turn
     rule where it sets nothing, one turn, or is the equal turns of 0.23.0 to 0.36.0, so a record those releases wrote,
-    and any one-turn scenario, hashes as it did then (SPC-187)."""
+    and any one-turn scenario, hashes as it did then (SPC-187); and so is the tree's cost cap where it sets nothing, one
+    turn, or is the shared cap of 0.23.0 to 0.37.0, for the same reason (SPC-188)."""
     plain = dataclasses.asdict(without_remainder(scenario))
     for response in plain["friendly_responses"]:
         if not response["vetoed"]:
@@ -5327,6 +5447,8 @@ def _hashed(scenario: Scenario) -> dict[str, Any]:
         del plain["miss_rule"]
     if scenario.turns == 1 or scenario.turn_rule is TurnRule.EQUAL:
         del plain["turn_rule"]
+    if scenario.turns == 1 or scenario.tree_cap is TreeCap.SHARED:
+        del plain["tree_cap"]
     return plain
 
 

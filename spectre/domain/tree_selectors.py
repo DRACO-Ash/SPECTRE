@@ -12,11 +12,15 @@ set, and one pick must serve every branch in it. Each rule is applied by backwar
 ● Minimin takes the best sequence and picks the least: the optimistic rule, not a robust one.
 
 The leaves are each sequence's score, the one-turn weighted sum on its figures, a lookup; lower is better. A tree
-built in part is picked over the turns built in full. The first response wins a tie, as in one turn. A response
-marked not permitted (SPC-195) is never valued, so no turn picks it and a tie never brings it back; with every
-response so marked, turn 1 has no pick and says why. Its branches are still built and shown. Nothing here writes a
-probability into a row, and the update is shown only under expected value, the one rule that reads P.
-Imports the Decision Engine, never the reverse; nothing here imports the web layer.
+built in part is picked over the turns built in full. Responses whose values lie within TIE_TOLERANCE of the best
+tie (SPC-206, evaluation F-13): the pick is still the one with the lowest value, as in one turn, but the line names
+every tied response, in the order entered, and says the rule does not choose between them, and the plan follows
+each. A response marked not permitted
+(SPC-195) is never valued, so no turn picks it and a tie never brings it back; with every response so marked, turn 1
+has no pick and says why. Its branches are still built and shown. Every information set keeps its pick, so under a
+response the rule does not pick the best continuation is known too and the view marks it apart from the plan
+(SPC-189, design D14). Nothing here writes a probability into a row, and the update is shown only under expected
+value, the one rule that reads P. Imports the Decision Engine, never the reverse; nothing here imports the web layer.
 """
 
 from __future__ import annotations
@@ -25,7 +29,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import NamedTuple, Protocol, cast
 
-from spectre.domain.decision import Scenario, SelectorStrategy, permitted_responses, row_shares
+from spectre.domain.decision import (
+    TIE_TOLERANCE,
+    Scenario,
+    SelectorStrategy,
+    named_list,
+    permitted_responses,
+    row_shares,
+    ties_of,
+)
 from spectre.domain.provenance import Basis, FigureBasis
 from spectre.domain.turn_update import (
     Posterior,
@@ -61,6 +73,15 @@ RULES: dict[SelectorStrategy, str] = {
 PARTIAL = "The picks stop at turn {k}, the deepest of the {turns} turns built in full."
 PICK_FIRST = "Turn 1: {pick}."
 PICK_LATER = "Turn {k}, if {history}: {pick}."
+# Responses whose values lie within TIE_TOLERANCE tie (SPC-206): each is named, and the plan follows each.
+PICK_TIED_FIRST = (
+    "Turn 1: a tie between {names}, within {tolerance:g} of each other under the rule, so it does not choose "
+    "between them; the picks below follow each."
+)
+PICK_TIED_LATER = (
+    "Turn {k}, if {history}: a tie between {names}, within {tolerance:g} of each other under the rule, so it does "
+    "not choose between them."
+)
 NO_PICK_FIRST = "Turn 1: no pick, since every row has P 0."
 NO_PICK = "Turn {k}, if {history}: no pick, since every row that fits it has P 0."
 # A response marked not permitted (SPC-195): never a pick in any turn, and with every response so marked, no pick.
@@ -96,7 +117,8 @@ _SPAN = "the {turns} turns"
 
 #: Every sentence the result may carry, for the house checks.
 SENTENCES: tuple[str, ...] = (
-    *RULES.values(), PARTIAL, PICK_FIRST, PICK_LATER, NO_PICK_FIRST, NO_PICK, NO_PICK_VETOED_FIRST, EXCLUDED,
+    *RULES.values(), PARTIAL, PICK_FIRST, PICK_LATER, PICK_TIED_FIRST, PICK_TIED_LATER, NO_PICK_FIRST, NO_PICK,
+    NO_PICK_VETOED_FIRST, EXCLUDED,
     MATRIX_DIFFERS, SCORE_LINE,
     PROBABILITY_IGNORED, NO_OBSERVATION, OBSERVED, OBSERVED_NOT_GIVEN, OBSERVED_NO_LATER_TURN, OBSERVED_UNUSED,
     OBSERVED_NO_PICK,
@@ -125,12 +147,20 @@ After = tuple[tuple[int, Seen], ...]
 class TurnPick(NamedTuple):
     """The pick for *turn* after *after*, and each response's value there under the rule, lower being better;
     None for a pick or a value that has no weight under expected value, and None for the value of a response marked
-    not permitted, which is never valued (SPC-195)."""
+    not permitted, which is never valued (SPC-195). *tied* holds every other response whose value lies within
+    TIE_TOLERANCE of the pick's, in order, none when there is no tie (SPC-206)."""
 
     turn:   int
     after:  After
     pick:   int | None
     values: tuple[float | None, ...]
+    tied:   tuple[int, ...] = ()
+
+    @property
+    def choices(self) -> tuple[int, ...]:
+        """The pick and every response tied with it, in the order entered, so a tie reads alike whichever of them
+        the rule picks; none with no pick."""
+        return () if self.pick is None else tuple(sorted((self.pick, *self.tied)))
 
 
 @dataclass(frozen=True)
@@ -138,7 +168,9 @@ class TreeSelection:
     """A rule's picks over a tree: turn 1's, then each later turn's after each thing it may have seen, following our
     own picks; what turn 1 shows under each row; the update after turn 1 for each thing it may show, under expected
     value only; the lines of the recommendation, then of the update; and the update for what the operator stated
-    turn 1 showed, None when nothing was stated or nothing was updated (SPC-142)."""
+    turn 1 showed, None when nothing was stated or nothing was updated (SPC-142). *every* is the pick in every
+    information set, under responses the rule does not pick too, from which the best continuation under each is
+    read (SPC-189)."""
 
     strategy:       SelectorStrategy
     turns:          int
@@ -149,6 +181,7 @@ class TreeSelection:
     update:         tuple[str, ...]
     basis:          FigureBasis
     stated:         Posterior | None = None
+    every:          tuple[TurnPick, ...] = ()
 
     @property
     def lines(self) -> tuple[str, ...]:
@@ -183,7 +216,8 @@ class _Selector:
         )
         known = [j for j, v in enumerate(values) if v is not None]
         pick = min(known, key=lambda j: cast("float", values[j])) if known else None
-        self.found[after] = TurnPick(k, after, pick, values)
+        tied = tuple(j for j in ties_of(values, pick) if j != pick)
+        self.found[after] = TurnPick(k, after, pick, values, tied)
         return None if pick is None else values[pick]
 
     def _take(self, members: Sequence[_Member], k: int, after: After, r: int) -> float | None:
@@ -212,14 +246,14 @@ class _Selector:
         return sum(w * cast("float", v) for v, w in outcomes if w > 0.0) / total
 
     def own(self) -> tuple[TurnPick, ...]:
-        """Turn 1's pick, then each later turn's after each thing it may show, following our own picks, turn by turn."""
+        """Turn 1's pick, then each later turn's after each thing it may show, following our own picks, turn by turn,
+        and each response tied with a pick as well as the pick (SPC-206)."""
         picks: list[TurnPick] = []
         frontier: list[After] = [()]
         while frontier:
             pick = self.found[frontier.pop(0)]
             picks.append(pick)
-            if pick.pick is not None:
-                frontier += [key for key in self.found if key and key[:-1] == pick.after and key[-1][0] == pick.pick]
+            frontier += [key for key in self.found if key and key[:-1] == pick.after and key[-1][0] in pick.choices]
         return tuple(picks)
 
 
@@ -237,17 +271,22 @@ def _pick_line(scenario: Scenario, pick: TurnPick) -> str:
         return NO_PICK_VETOED_FIRST
     if pick.pick is None:
         return NO_PICK_FIRST if pick.turn == 1 else NO_PICK.format(k=pick.turn, history=_history(scenario, pick.after))
-    name = scenario.friendly_responses[pick.pick].name
+    names = [scenario.friendly_responses[j].name for j in pick.choices]
+    if pick.tied:
+        tie = {"names": named_list(names), "tolerance": TIE_TOLERANCE}
+        if pick.turn == 1:
+            return PICK_TIED_FIRST.format(**tie)
+        return PICK_TIED_LATER.format(k=pick.turn, history=_history(scenario, pick.after), **tie)
     if pick.turn == 1:
-        return PICK_FIRST.format(pick=name)
-    return PICK_LATER.format(k=pick.turn, history=_history(scenario, pick.after), pick=name)
+        return PICK_FIRST.format(pick=names[0])
+    return PICK_LATER.format(k=pick.turn, history=_history(scenario, pick.after), pick=names[0])
 
 
 def _matrix_line(
     scenario: Scenario, strategy: SelectorStrategy, turns: int, picks: Sequence[TurnPick], matrix_pick: int | None,
 ) -> tuple[str, ...]:
     tree_pick = picks[0].pick
-    if turns == 1 or tree_pick is None or matrix_pick is None or tree_pick == matrix_pick:
+    if turns == 1 or tree_pick is None or matrix_pick is None or matrix_pick in picks[0].choices:
         return ()
     names = [f.name for f in scenario.friendly_responses]
     rule = strategy.value.replace("_", " ")
@@ -307,18 +346,43 @@ def select(
     update = _update_lines(scenario, strategy, gives, stated)
     return TreeSelection(
         strategy, turns, picks, gives, posts, recommendation, update, FigureBasis(Basis.LOOKUP, SCORE_NOTE), stated,
+        tuple(selector.found.values()),
     )
+
+
+def _afters(scenario: Scenario, steps: Sequence[tuple[int, int]]) -> list[After]:
+    """What we had seen before each turn of the sequence *steps*: our responses and what each turn showed."""
+    plan = plan_or_equal(scenario)
+    afters: list[After] = [()]
+    for k, (_, response) in enumerate(steps[:-1], start=1):
+        afters.append((*afters[-1], (response, seen_after(scenario, [a for a, _ in steps[:k]], plan))))
+    return afters
+
+
+def _off(
+    scenario: Scenario, picks: tuple[TurnPick, ...], steps: Sequence[tuple[int, int]],
+) -> list[int]:
+    """The turns of *steps* whose response is not the rule's pick, nor tied with it, for what the turns before
+    showed, by *picks*; a turn whose information set holds no pick counts too."""
+    found = {p.after: p.choices for p in picks}
+    return [
+        k for k, (after, (_, response)) in enumerate(zip(_afters(scenario, steps), steps, strict=True), start=1)
+        if response not in found.get(after, ())
+    ]
 
 
 def follows_picks(scenario: Scenario, selection: TreeSelection, steps: Sequence[tuple[int, int]]) -> bool:
     """Whether every response on the sequence *steps*, (red's move, our response) per turn, is the rule's pick for
-    its turn after what the turns before it showed: the plan the recommendation follows, whatever red does
-    (SPC-142). False where the rule has no pick."""
-    plan = plan_or_equal(scenario)
-    picks = {p.after: p.pick for p in selection.picks}
-    after: After = ()
-    for k, (_, response) in enumerate(steps, start=1):
-        if picks.get(after) != response:
-            return False
-        after = (*after, (response, seen_after(scenario, [a for a, _ in steps[:k]], plan)))
-    return True
+    its turn after what the turns before it showed, or tied with it (SPC-206): the plan the recommendation follows,
+    whatever red does (SPC-142). False where the rule has no pick."""
+    return not _off(scenario, selection.picks, steps)
+
+
+def continuation(scenario: Scenario, selection: TreeSelection, steps: Sequence[tuple[int, int]]) -> int | None:
+    """The turn of the last response on *steps* the rule does not pick, when every response after it is the rule's
+    pick for what the turns before it showed: *steps* is then the best continuation under that response (SPC-189,
+    design D14). None on the plan, for a branch whose own response the rule does not pick, and for any other."""
+    off = _off(scenario, selection.every, steps)
+    if not off or off[-1] == len(steps):
+        return None
+    return off[-1]

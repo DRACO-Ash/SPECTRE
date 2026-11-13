@@ -14,9 +14,10 @@ from typing import Any
 
 import pytest
 
-from spectre.domain.decision import EVALUATION_BUDGET_S, MAX_SAMPLE_HOURS, ActionType, Scenario
+from spectre.domain.decision import EVALUATION_BUDGET_S, ActionType, Scenario
 from spectre.domain.decision_tree import (
     MAX_TREE_BRANCHES,
+    MAX_TREE_SAMPLE_HOURS,
     SENTENCES,
     TREE_DEEPEST,
     TREE_DEPTH_BRANCHES,
@@ -54,7 +55,7 @@ class TestADepthThatFits:
     def test_a_tree_inside_both_caps_is_not_refused(self) -> None:
         scenario = _wide(2)
         assert branches(4, 3, 2) == 156
-        assert tree_cost(scenario) <= MAX_SAMPLE_HOURS
+        assert tree_cost(scenario) <= MAX_TREE_SAMPLE_HOURS
         assert depth_refusal(scenario) is None
 
 
@@ -73,22 +74,22 @@ class TestTooManyBranches:
 
 class TestOverTheCostCap:
     def test_it_is_refused_naming_the_cost_and_that_only_the_matrix_fits(self) -> None:
-        """plane_change with a 500-sample Evasive over two 3 h turns costs more than the cap; no tree fits."""
-        scenario = _two_by_two(500, 2, 3.0, PLANE_CHANGE, target=None)
+        """plane_change with a 1,000-sample Evasive over two 3 h turns costs more than the cap; no tree fits."""
+        scenario = _two_by_two(1000, 2, 3.0, PLANE_CHANGE, target=None)
         total = tree_cost(scenario)
-        assert total > MAX_SAMPLE_HOURS
+        assert total > MAX_TREE_SAMPLE_HOURS
         assert largest_tree(scenario) == 1
         refusal = depth_refusal(scenario)
         assert refusal == TREE_DEPTH_COST.format(
-            turns=2, total=math.ceil(total), cap=MAX_SAMPLE_HOURS, budget=EVALUATION_BUDGET_S,
+            turns=2, total=math.ceil(total), cap=MAX_TREE_SAMPLE_HOURS, budget=EVALUATION_BUDGET_S,
             largest=_ONLY_THE_MATRIX,
         )
         assert refusal is not None
         assert refusal.endswith(_ONLY_THE_MATRIX)
 
     def test_three_turns_over_the_cap_name_two(self) -> None:
-        scenario = _two_by_two(150, 3, 2.0)
-        assert tree_cost(scenario) > MAX_SAMPLE_HOURS
+        scenario = _two_by_two(250, 3, 2.0)
+        assert tree_cost(scenario) > MAX_TREE_SAMPLE_HOURS
         assert largest_tree(scenario) == 2
         refusal = depth_refusal(scenario)
         assert refusal is not None

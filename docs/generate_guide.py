@@ -1333,7 +1333,9 @@ def _section_13_decision_engine(doc: Document) -> None:
     )
     _add_body(doc,
         "The composite score is always a lookup. Its weights are not yet cited (SPC-151), so read a cell's figures, "
-        "not only its rank."
+        "not only its rank. No score is coloured by its value: no sourced threshold says where a score turns good "
+        "or bad, so each is shown as its number, to three places, lower being better, with its basis (SPC-208, "
+        "finding F-18 of the independent evaluation). A response marked not permitted is still greyed."
     )
     _add_body(doc,
         "Element-set error is in every closest approach the engine propagates (SPC-202, evaluation finding F-11). "
@@ -1550,8 +1552,10 @@ def _section_13_decision_engine(doc: Document) -> None:
                 "approach, not the cell's figures. A sampled cell also has a histogram of its sampled times.")
     _add_body(doc,
         "A scenario that samples or sizes a burn runs as a job inside a 300 s budget, capped at "
-        "12,000 sample-hours, the owner's ruling of 5 November 2026. The page shows progress and a Cancel button; "
-        "a stopped evaluation scores nothing."
+        "12,000 sample-hours, the owner's ruling of 5 November 2026. A game tree has a cap of its own, 21,000 "
+        "sample-hours, set from trees timed under load in the build container (SPC-188); it should be measured again "
+        "on the machine SPECTRE runs on. The page shows progress and a Cancel button; a stopped evaluation scores "
+        "nothing."
     )
 
     _add_heading_h2(doc, "Collect First and the Sweep's Threat Picture")
@@ -1569,6 +1573,14 @@ def _section_13_decision_engine(doc: Document) -> None:
         "straddles the action line and a collection that could narrow it, whose result SPECTRE can read, lands "
         "before decide-by, the sweep would collect first; otherwise it says act on the ceiling. Collections are listed beside the ranking "
         "and never scored, so the recommendation is always one of your own responses."
+    )
+    _add_body(doc,
+        "Decide-by rests on your response time: the hours you need to plan, approve and carry out a response, set on "
+        "the sweep form for every target or for one. With none set for a target in reach, the sweep says decide-by "
+        "needs one, names the target and shows no time, and no collection can be shown to land before it, so the "
+        "advice acts on the ceiling (SPC-211, finding F-23 of the independent evaluation). Until 0.38.0 a 12-hour "
+        "default, tuned, not sourced, stood in. A decision record keeps the decide-by the sweep set, so a record "
+        "from before replays as it was shown."
     )
     _add_body(doc,
         "The Decision Engine collects first only for a collection whose outcomes give different recommended "
@@ -1619,6 +1631,12 @@ def _section_13_decision_engine(doc: Document) -> None:
     _add_bullet(doc, "The evaluation still runs under the rule you chose: the matrix's star and the ranking's blue "
                 "highlights mark that rule's pick, and a line above the matrix says so, naming the primary rule's "
                 "pick beside it when the two rules differ.")
+    _add_bullet(doc, "A tie is shown as a tie (SPC-206, finding F-13 of the independent evaluation). Responses whose "
+                "values under a rule lie within 0.0000005 of each other, half the last place every composite score "
+                "is kept to, tie: the headline reads Tie: and names each, a line says the rule does not choose "
+                "between them and the choice is yours, the star marks each, and every rule's pick names the tie. "
+                "Your record still keeps the response with the lowest score, as 0.37.0 did, which need not be "
+                "the first entered, so its replay is unchanged.")
     _add_bullet(doc, "With every row at P 0, the remainder of P carries the whole weight, so expected value picks "
                 "the best response against no adversary action. Only replaying a record 0.28.0 or 0.29.0 wrote can "
                 "find expected value with no weight to pick on: the replay then says it has no pick, never counts it as "
@@ -1660,7 +1678,9 @@ def _section_13_decision_engine(doc: Document) -> None:
         "and current, and an orbit from every row, so give each manoeuvre row a hypothesis."
     )
     _add_bullet(doc, "Once the tree has what it needs, a depth the evaluation cannot fit, by branches (1,000 at "
-                "most) or by cost, is refused as soon as you press Evaluate, naming the largest depth that would "
+                "most) or by cost (21,000 sample-hours, the tree's own cap since SPC-188; a record from before is "
+                "replayed against the 12,000 it shared with the matrix then), is refused as soon as you press "
+                "Evaluate, naming the largest depth that would "
                 "fit. The remainder of P counts as one of red's moves, and the refusal says so. A tree missing what it needs still evaluates as one turn, and the results say why.")
     _add_bullet(doc, "The engine sets each turn's length from the rows' burn times, so every burn falls inside "
                 "its own turn; you never set a length. Turns are equal where every burn fits; otherwise a turn ends "
@@ -1678,7 +1698,11 @@ def _section_13_decision_engine(doc: Document) -> None:
                 "what turns 1 and 2 showed.")
     _add_bullet(doc, "The tree itself is a set of collapsible branches. Each names its turn, red's move and your "
                 "response, and the path of moves it rests on; opened, it shows its figures in m/s and km, each "
-                "with its basis. A branch on the recommended plan says so in words.")
+                "with its basis. A branch on the recommended plan says so in words. Under a response the rule "
+                "does not pick, its best continuation says so in words of its own, in italic and with no star, "
+                "for example 'Best continuation under minimax after Avoid in turn 1, which minimax does not pick "
+                "there; not on the plan' (SPC-189). Responses that tie in a turn are each named, and the plan "
+                "follows each.")
     _add_bullet(doc, "A tree that runs out of budget shows the deepest turn built in full and says so.")
     _add_body(doc,
         "What turn 1 shows of red is read through the red track's custody: lost at a burn shows a burn, held "

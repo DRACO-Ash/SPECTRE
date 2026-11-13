@@ -157,7 +157,7 @@ def _sweep_entry(dv: float = 9.0, target: str = "BLUE-COMSAT", tof: float = 31.0
 def _decide(worst: dict[str, Any] | None, understanding: ThreatUnderstanding | None,
             custody: CustodyStatus = _HELD) -> DecideBy:
     basis = SimpleNamespace(max_dv_m_s=500.0, now=_NOW)
-    state = SimpleNamespace(response_time_h=None, response_time_by_target={})
+    state = SimpleNamespace(response_time_h=12.0, response_time_by_target={})
     return threat._sweep_decide_by(state, [_sweep_entry()], custody, (worst, understanding), basis)  # type: ignore[arg-type]
 
 

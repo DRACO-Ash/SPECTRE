@@ -21,7 +21,7 @@ turns it was built over then, a row of several burns refusing it.
 
 A tree is checked before anything runs: both sides bound and current, every row with a propagated orbit to carry
 on, turns the engine can set with every burn inside its own, the branches under MAX_TREE_BRANCHES and the cost under
-the cap. A tree that
+the tree's own cap, MAX_TREE_SAMPLE_HOURS, set from trees measured under load (SPC-188, design D6). A tree that
 does not fit says so and the result is one turn. While it runs it shares the evaluation's budget: once spent, the
 tree stops at the deepest turn built in full and says so; a branch that fails or does not converge keeps the turns
 built in full and says which. Nothing is cut short silently.
@@ -104,6 +104,7 @@ from spectre.domain.decision import (
     ScenarioBinding,
     ScenarioResult,
     SelectorStrategy,
+    TreeCap,
     TurnOne,
     TurnRule,
     _Budget,
@@ -147,6 +148,23 @@ from spectre.domain.turn_update import (
 
 #: The most branches one evaluation builds: the sum over turns k of (rows x responses) to the k (design D6).
 MAX_TREE_BRANCHES = 1_000
+#: The rate a tree's cost cap assumes, in sample-hours by tree_cost per second of wall time (SPC-188, design D6):
+#: about a fifth under the slowest measured, 90.8, rounded down to 5. Measured by scripts/measure_tree_cost.py on
+#: 2026-11-12 in the build container (4 cores, Intel Xeon at 2.10 GHz, Python 3.13), every core kept busy by another
+#: process: four trees the engine builds in full under the 300 s budget, Hold course and an Evasive row against Hold
+#: and Avoid on the reference element sets, ran at 95.6 (plane_change, 300 samples, two 1 h turns, 28.7 s), 111.6
+#: (coplanar_leo, 200 samples, two 2 h turns, Avoid sized to 20 km, 38.6 s), 90.8 (plane_change, 500 samples, two
+#: 1 h turns, 50.2 s) and 98.5 (plane_change, 300 samples, three 0.5 h turns, 76.5 s); idle, 123 to 151. Turn 1, the
+#: matrix, is 7 to 28 per cent of each tree's cost, and every tree the model can cost puts at most about 30 per cent
+#: there, so the matrix's slower rate cannot dominate. At 70 a tree at the cap takes about 231 s at the slowest rate
+#: measured, leaving 69 s of the budget; a tree of 19,951 just under it (plane_change, 800 samples, three 0.5 h turns)
+#: was built in full in 206.4 s under the same load. These figures are this container's: re-measure on the deployment
+#: target and set the rate from its figures before relying on the cap.
+_SLOWEST_TREE_SAMPLE_HOURS_PER_S: float = 70.0
+#: The most sample-hours a game tree may cost before it runs (SPC-188): what EVALUATION_BUDGET_S covers at
+#: _SLOWEST_TREE_SAMPLE_HOURS_PER_S, 21,000. Until 0.38.0 a tree shared the matrix's cap, MAX_SAMPLE_HOURS, 12,000; a
+#: record written then is checked against that cap (TreeCap.SHARED), so it replays as it was evaluated.
+MAX_TREE_SAMPLE_HOURS: float = EVALUATION_BUDGET_S * _SLOWEST_TREE_SAMPLE_HOURS_PER_S
 
 _SECONDS_PER_HOUR = 3600.0
 
@@ -532,6 +550,12 @@ def tree_cost(scenario: Scenario) -> float:
     return _turn_one_cost_h(scenario) + (_turn_one_extra_s(sizes) + later) / _SECONDS_PER_HOUR
 
 
+def tree_cap(scenario: Scenario) -> float:
+    """The cost cap *scenario*'s tree is checked against, sample-hours: the tree's own, measured under load, or for a
+    record 0.23.0 to 0.37.0 wrote the matrix's, which the tree shared then (SPC-188)."""
+    return MAX_SAMPLE_HOURS if scenario.tree_cap is TreeCap.SHARED else MAX_TREE_SAMPLE_HOURS
+
+
 def largest_tree(scenario: Scenario) -> int:
     """The most turns, each set as the scenario's rule sets it, that fit the branch cap and the cost cap; 1 when
     none."""
@@ -541,7 +565,7 @@ def largest_tree(scenario: Scenario) -> int:
     for k in range(2, MAX_TURNS + 1):
         if branches(rows, responses, k) > MAX_TREE_BRANCHES:
             break
-        if tree_cost(dataclasses.replace(scenario, turns=k)) > MAX_SAMPLE_HOURS:
+        if tree_cost(dataclasses.replace(scenario, turns=k)) > tree_cap(scenario):
             break
         fits = k
     return fits
@@ -641,10 +665,10 @@ def _over_branches(scenario: Scenario) -> str | None:
 
 def _over_cap(scenario: Scenario) -> str | None:
     total = tree_cost(scenario)
-    if total <= MAX_SAMPLE_HOURS:
+    if total <= tree_cap(scenario):
         return None
     return _counted(TREE_OVER_CAP.format(
-        turns=scenario.turns, total=math.ceil(total), cap=MAX_SAMPLE_HOURS, budget=EVALUATION_BUDGET_S,
+        turns=scenario.turns, total=math.ceil(total), cap=tree_cap(scenario), budget=EVALUATION_BUDGET_S,
         fits=_fits(scenario),
     ), scenario)
 
@@ -686,9 +710,9 @@ def depth_refusal(scenario: Scenario) -> str | None:
             turns=scenario.turns, rows=rows, responses=responses, nodes=nodes, cap=MAX_TREE_BRANCHES, largest=largest,
         ), scenario)
     total = tree_cost(scenario)
-    if total > MAX_SAMPLE_HOURS:
+    if total > tree_cap(scenario):
         return _counted(TREE_DEPTH_COST.format(
-            turns=scenario.turns, total=math.ceil(total), cap=MAX_SAMPLE_HOURS, budget=EVALUATION_BUDGET_S,
+            turns=scenario.turns, total=math.ceil(total), cap=tree_cap(scenario), budget=EVALUATION_BUDGET_S,
             largest=largest,
         ), scenario)
     return None

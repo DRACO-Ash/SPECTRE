@@ -3,7 +3,8 @@
 Branches are the sum over turns k of (rows x responses) to the k. The cost is the cap's own model, in sample-hours:
 each arc integrated over what is left of the span with its set-up, each search past an arc's first at 0.3 of a
 sample, and 2 arcs and 16 trials to size each burn, counting a repeated path once. Above either cap the tree is
-refused, naming what fits, and the one-turn result stands.
+refused, naming what fits, and the one-turn result stands. Since SPC-188 the cost cap is the tree's own,
+MAX_TREE_SAMPLE_HOURS, set from trees measured under load (tests/unit/test_decision_tree_own_cap.py).
 """
 
 from __future__ import annotations
@@ -16,7 +17,6 @@ import pytest
 from spectre.domain import decision, decision_tree
 from spectre.domain.decision import (
     EVALUATION_BUDGET_S,
-    MAX_SAMPLE_HOURS,
     SET_UP_S_PER_SAMPLE,
     ActionType,
     Scenario,
@@ -24,6 +24,7 @@ from spectre.domain.decision import (
 )
 from spectre.domain.decision_tree import (
     MAX_TREE_BRANCHES,
+    MAX_TREE_SAMPLE_HOURS,
     TREE_OVER_BRANCHES,
     TREE_OVER_CAP,
     branches,
@@ -75,13 +76,13 @@ class TestTheBranchCap:
 
 class TestTheCostCap:
     def test_a_tree_over_the_cap_is_refused_before_anything_runs(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """12: plane_change with a 500-sample Evasive over two 3 h turns; the one-turn matrix stands."""
+        """12: plane_change with a 1,000-sample Evasive over two 3 h turns; the one-turn matrix stands."""
         monkeypatch.setattr(decision_tree, "continue_series", _never)
-        scenario = _two_by_two(500, 2, 3.0, PLANE_CHANGE, target=None)
+        scenario = _two_by_two(1000, 2, 3.0, PLANE_CHANGE, target=None)
         total = tree_cost(scenario)
-        assert total > MAX_SAMPLE_HOURS
+        assert total > MAX_TREE_SAMPLE_HOURS
         refusal = TREE_OVER_CAP.format(
-            turns=2, total=math.ceil(total), cap=MAX_SAMPLE_HOURS, budget=EVALUATION_BUDGET_S,
+            turns=2, total=math.ceil(total), cap=MAX_TREE_SAMPLE_HOURS, budget=EVALUATION_BUDGET_S,
             fits="No tree fits at these sizes: take fewer samples, rows or responses.",
         )
         fake = _Fake()
@@ -112,18 +113,25 @@ class TestTheCostModelAgainstTheMeasuredTrees:
             (50, 2, 2.0, COPLANAR_LEO, True),      # 10.0 s idle
             (100, 2, 0.5, PLANE_CHANGE, True),     # 5.2 s idle
             (100, 3, 0.5, PLANE_CHANGE, True),     # 19.5 s idle
+            # SPC-188, every core of the build container busy: the trees the tree's own cap is set from.
+            (300, 2, 1.0, PLANE_CHANGE, True),     # 28.7 s loaded, measured with Avoid not burning
+            (200, 2, 2.0, COPLANAR_LEO, True),     # 38.6 s loaded
+            (500, 2, 1.0, PLANE_CHANGE, True),     # 50.2 s loaded, Avoid not burning: the slowest, 90.8 a second
+            (300, 3, 0.5, PLANE_CHANGE, True),     # 76.5 s loaded, Avoid not burning
+            (200, 3, 2.0, COPLANAR_LEO, True),     # over the shared cap of 0.37.0, under the tree's own
+            (250, 3, 2.0, COPLANAR_LEO, False),    # over the tree's own cap
         ],
     )
     def test_each_measured_tree_fits_or_is_refused(self, n: int, turns: int, turn_h: float, case: Any, fits: bool) -> None:
-        assert (tree_cost(_two_by_two(n, turns, turn_h, case)) <= MAX_SAMPLE_HOURS) is fits
+        assert (tree_cost(_two_by_two(n, turns, turn_h, case)) <= MAX_TREE_SAMPLE_HOURS) is fits
 
     def test_the_largest_tree_that_fits(self) -> None:
-        """At 100 samples 3 turns of coplanar_leo fit; at 150, 2 fit and 3 do not; at 1,000 no tree fits.
-        plane_change's short turns fit 3."""
-        assert largest_tree(_two_by_two(100, 3, 2.0)) == 3
-        assert largest_tree(_two_by_two(150, 3, 2.0)) == 2
+        """At 200 samples 3 turns of coplanar_leo fit; at 250, 2 fit and 3 do not; at 1,500 no tree fits.
+        plane_change's short turns fit 3. Under the shared cap of 0.37.0, 150 samples fitted 2 and 1,000 none."""
+        assert largest_tree(_two_by_two(200, 3, 2.0)) == 3
+        assert largest_tree(_two_by_two(250, 3, 2.0)) == 2
         assert largest_tree(_two_by_two(100, 3, 0.5, PLANE_CHANGE)) == 3
-        assert largest_tree(_two_by_two(1000, 2, 2.0)) == 1
+        assert largest_tree(_two_by_two(1500, 2, 2.0)) == 1
 
     def test_more_samples_or_turns_never_cost_less(self) -> None:
         costs = [tree_cost(_two_by_two(n, 2, 2.0)) for n in (50, 100, 200)]
@@ -207,12 +215,12 @@ class TestTheCostModelTermByTerm:
 class TestTheCapsBoundary:
     def test_a_tree_at_the_cap_fits_and_one_over_it_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
         scenario = cases.scenario([cases.still()], [cases.hold()])
-        monkeypatch.setattr(decision_tree, "tree_cost", lambda _s: float(MAX_SAMPLE_HOURS))
+        monkeypatch.setattr(decision_tree, "tree_cost", lambda _s: float(MAX_TREE_SAMPLE_HOURS))
         assert refused_before_run(scenario) is None
-        monkeypatch.setattr(decision_tree, "tree_cost", lambda _s: MAX_SAMPLE_HOURS + 0.5)
+        monkeypatch.setattr(decision_tree, "tree_cost", lambda _s: MAX_TREE_SAMPLE_HOURS + 0.5)
         assert refused_before_run(scenario) == TREE_OVER_CAP.format(
-            turns=2, total=math.ceil(MAX_SAMPLE_HOURS + 0.5), cap=MAX_SAMPLE_HOURS, budget=EVALUATION_BUDGET_S,
-            fits="No tree fits at these sizes: take fewer samples, rows or responses.",
+            turns=2, total=math.ceil(MAX_TREE_SAMPLE_HOURS + 0.5), cap=MAX_TREE_SAMPLE_HOURS,
+            budget=EVALUATION_BUDGET_S, fits="No tree fits at these sizes: take fewer samples, rows or responses.",
         )
-        monkeypatch.setattr(decision_tree, "tree_cost", lambda _s: 1.5 * MAX_SAMPLE_HOURS)
+        monkeypatch.setattr(decision_tree, "tree_cost", lambda _s: 1.5 * MAX_TREE_SAMPLE_HOURS)
         assert refused_before_run(scenario) is not None

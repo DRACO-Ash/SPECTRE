@@ -386,11 +386,12 @@ class TestThreeTurnsOverATransfer:
 # ── Records written before SPC-187 ──
 
 class TestARecordWrittenBeforeReplaysUnderEqualTurns:
-    def test_this_code_writes_version_5_holding_the_rule(self) -> None:
-        assert (VERSION, VERSIONS) == (5, (1, 2, 3, 4, 5))
+    def test_this_code_writes_a_version_holding_the_rule(self) -> None:
+        """Version 5 added the turn rule; version 6 (SPC-188) keeps it and adds the tree's own cost cap."""
+        assert (VERSION, VERSIONS) == (6, (1, 2, 3, 4, 5, 6))
         scenario = cases.scenario([cases.still()], [cases.hold()], turns=1)
         document = json.loads(store_inputs(evaluate_scenario(scenario))[0])
-        assert (document["version"], document["scenario"]["turn_rule"]) == (5, "burns")
+        assert (document["version"], document["scenario"]["turn_rule"]) == (6, "burns")
 
     def test_the_0310_tree_reads_as_equal_turns_and_replays_exactly(self) -> None:
         row = _records(_V3)["tree"]
@@ -411,18 +412,19 @@ class TestARecordWrittenBeforeReplaysUnderEqualTurns:
         with pytest.raises(ValueError, match="never stored again"):
             store_inputs(evaluate_scenario(scenario))
 
-    def test_a_version_5_document_under_equal_turns_is_refused(self) -> None:
+    def test_a_version_6_document_under_equal_turns_is_refused(self) -> None:
         document = json.loads(store_inputs(evaluate_scenario(cases.scenario([cases.still()], [cases.hold()],
                                                                              turns=1)))[0])
         document["scenario"]["turn_rule"] = TurnRule.EQUAL.value
         text = canonical_json(document)
-        with pytest.raises(InputsRefusedError, match=r"refused at scenario\.turn_rule: version 5 holds"):
+        with pytest.raises(InputsRefusedError, match=r"refused at scenario\.turn_rule: version 5 and later hold"):
             read_inputs(text, sha256_of(text))
 
     def test_a_version_4_document_holding_the_rule_is_refused(self) -> None:
         document = json.loads(store_inputs(evaluate_scenario(cases.scenario([cases.still()], [cases.hold()],
                                                                              turns=1)))[0])
         document.pop("version")
+        del document["scenario"]["tree_cap"]
         text = canonical_json({**document, "version": 4})
         with pytest.raises(InputsRefusedError, match="unknown field turn_rule"):
             read_inputs(text, sha256_of(text))

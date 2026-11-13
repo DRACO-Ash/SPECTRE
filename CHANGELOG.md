@@ -9,6 +9,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-11-12
+
+**Ties named, the tree's own cost cap, and decide-by on your own response time.**
+
+### Added
+- Under each response the rule would not pick, the game tree now marks the best way on in its own words, apart from the plan (SPC-189).
+- Responses whose scores lie within 5e-07 of the best are named together and the recommendation says it is a tie, in the matrix, the rankings and each turn of the tree. Rules finding the same tie count as agreeing. The record still keeps the response with the lowest score, as 0.37.0 did (SPC-206).
+
+### Changed
+- Composite scores are no longer coloured by unsourced thresholds; each shows as its number with "lower = better for friendly" and its basis (SPC-208).
+- Game trees have their own cost cap of 21,000 sample-hours, measured under load by `scripts/measure_tree_cost.py` in the build container and to be measured again on the deployment target. Records from earlier releases are still checked against the 12,000 cap they shared, and the replay says so first (stored inputs version 6) (SPC-188).
+- Decide-by needs the response time you set. With none set for a target in reach, it says so, names the target and shows no time, instead of using an unsourced 12-hour default. Older records replay as stored (SPC-211).
+
 ## [0.37.0] - 2026-11-12
 
 **Turns set by the engine, chains counted once, and suggestions shown at once (owner rulings of 2026-11-05).**

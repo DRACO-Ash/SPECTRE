@@ -1,9 +1,12 @@
 """Decide-by: the earliest decide-at across the targets in reach (SPC-008, output 3; SPC-022).
 
 Each target's decide-at is its fastest credible arrival minus the response
-time for it: its own where the operator set one, else the sign-in's, else the
-12 h default. Hand cases: arrivals placed by construction so every expected
-time can be read off the input.
+time for it: its own where the operator set one, else the sign-in's. With
+neither set for a target in reach there is no decide-by: it says it needs a
+response time and shows no time (SPC-211, evaluation F-23, the lead's ruling;
+until 0.38.0 a 12 h default chosen by the developer, "tuned, not sourced",
+stood in). Hand cases: arrivals placed by construction so every expected time
+can be read off the input.
 """
 
 from __future__ import annotations
@@ -13,7 +16,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from spectre.domain import decide_by as decide_by_module
 from spectre.domain.decide_by import (
+    NEEDS_TIME,
     Due,
     ResponseTimes,
     decide_by,
@@ -53,11 +58,6 @@ class TestDecideBy:
             "09:00 UTC on 3 Nov, and that is your response time of 12 h."
         )
 
-    def test_the_default_says_it_is_the_default(self) -> None:
-        result = decide_by([_entry("BLUE-1", 0.0, 23.0)], ResponseTimes(), _NOW, 500.0)
-        assert result.decide_at == _NOW + timedelta(hours=11)
-        assert "the default response time of 12 h, which you have not set" in result.sentence
-
     def test_inside_the_response_time_it_has_passed(self) -> None:
         result = decide_by([_entry("BLUE-1", 0.0, 4.0)], _SET_12, _NOW, 500.0)
         assert result.due is Due.PASSED
@@ -70,12 +70,58 @@ class TestDecideBy:
         assert decide_by([_entry("A", 0.0, 12.0)], _SET_12, _NOW, 500.0).due is Due.PASSED
 
     def test_nothing_in_reach(self) -> None:
-        result = decide_by([_entry("BLUE-1", 0.0, 1.0, dv=600.0)], ResponseTimes(), _NOW, 500.0)
+        result = decide_by([_entry("BLUE-1", 0.0, 1.0, dv=600.0)], _SET_12, _NOW, 500.0)
         assert result.due is Due.NONE
         assert result.sentence == "No decide-by: no target is in reach within 500 m/s."
 
     def test_withheld_says_why(self) -> None:
         assert withheld("custody is lost").sentence == "No decide-by: custody is lost."
+
+
+class TestItNeedsAnOperatorSetResponseTime:
+    """SPC-211 (evaluation F-23): with no response time set, decide-by says it needs one and shows no time."""
+
+    def test_with_none_set_it_says_it_needs_one_and_shows_no_time(self) -> None:
+        result = decide_by([_entry("BLUE-1", 0.0, 23.0)], ResponseTimes(), _NOW, 500.0)
+        assert result.due is Due.NEEDS_TIME
+        assert (result.decide_at, result.arrival) == (None, None)
+        assert result.target == "BLUE-1"
+        assert result.sentence == (
+            "No decide-by: it needs your response time, the hours you need to plan, approve and carry out a "
+            "response, and none is set for BLUE-1. Set it on the sweep form, for every target or for one, and sweep "
+            "again."
+        )
+        assert result.sentence == NEEDS_TIME.format(targets="BLUE-1")
+        assert "UTC" not in result.sentence and "12 h" not in result.sentence
+
+    def test_a_target_in_reach_with_none_set_holds_it_back_and_is_named(self) -> None:
+        """BLUE-1 set to 1 h arrives at +6 h; BLUE-2, nothing set, at +16 h could need deciding first on any time,
+        so no time is shown, and BLUE-2 is named as the one that needs one."""
+        times = ResponseTimes(by_target={"BLUE-1": 1.0})
+        result = decide_by([_entry("BLUE-1", 0.0, 6.0), _entry("BLUE-2", 0.0, 16.0)], times, _NOW, 500.0)
+        assert (result.due, result.decide_at, result.target) == (Due.NEEDS_TIME, None, "BLUE-2")
+        assert result.sentence == NEEDS_TIME.format(targets="BLUE-2")
+
+    def test_every_target_with_none_set_is_named_in_the_order_they_arrive(self) -> None:
+        entries = [_entry("BLUE-2", 0.0, 9.0), _entry("BLUE-1", 0.0, 4.0), _entry("BLUE-3", 0.0, 7.0),
+                   _entry("BLUE-1", 1.0, 9.0)]
+        result = decide_by(entries, ResponseTimes(), _NOW, 500.0)
+        assert result.sentence == NEEDS_TIME.format(targets="BLUE-1, BLUE-3 and BLUE-2")
+
+    def test_a_target_out_of_reach_needs_none(self) -> None:
+        times = ResponseTimes(by_target={"BLUE-1": 1.0})
+        result = decide_by([_entry("BLUE-1", 0.0, 6.0), _entry("BLUE-2", 0.0, 3.0, dv=600.0)], times, _NOW, 500.0)
+        assert (result.due, result.target, result.decide_at) == (Due.SET, "BLUE-1", _NOW + timedelta(hours=5))
+
+    def test_with_nothing_in_reach_it_says_so_whatever_is_set(self) -> None:
+        result = decide_by([_entry("BLUE-1", 0.0, 1.0, dv=600.0)], ResponseTimes(), _NOW, 500.0)
+        assert result.due is Due.NONE
+        assert result.sentence == "No decide-by: no target is in reach within 500 m/s."
+
+    def test_no_default_is_left_to_stand_in(self) -> None:
+        assert not hasattr(decide_by_module, "DEFAULT_RESPONSE_H")
+        assert ResponseTimes().for_target("BLUE-1") is None
+        assert ResponseTimes(sign_in=3.0).for_target("BLUE-1") == (3.0, "your response time of 3 h")
 
 
 class TestEachTargetHasItsOwnResponseTime:
@@ -91,13 +137,6 @@ class TestEachTargetHasItsOwnResponseTime:
             "Decide by 12:00 UTC on 2 Nov for BLUE-2: its fastest intercept within 500 m/s could arrive at "
             "00:00 UTC on 3 Nov, and that is your response time for BLUE-2 of 12 h."
         )
-
-    def test_the_default_on_a_later_arrival_beats_a_short_time_set_for_an_earlier_one(self) -> None:
-        """BLUE-1 set to 1 h arrives at +6 h (decide +5 h); BLUE-2, nothing set, at +16 h on the default (+4 h)."""
-        times = ResponseTimes(by_target={"BLUE-1": 1.0})
-        result = decide_by([_entry("BLUE-1", 0.0, 6.0), _entry("BLUE-2", 0.0, 16.0)], times, _NOW, 500.0)
-        assert (result.target, result.decide_at) == ("BLUE-2", _NOW + timedelta(hours=4))
-        assert result.sentence.endswith("and that is the default response time of 12 h, which you have not set.")
 
     def test_the_sign_ins_time_covers_a_target_with_none_of_its_own(self) -> None:
         """BLUE-1 set to 3 h arrives at +9 h (decide +6 h); BLUE-2 on the sign-in's 8 h arrives at +12 h (+4 h)."""
@@ -160,7 +199,7 @@ class TestTheSweepWithholdsIt:
         from spectre.web.routes import threat
 
         basis = SimpleNamespace(max_dv_m_s=500.0, now=_NOW)
-        state = SimpleNamespace(response_time_h=None, response_time_by_target={})
+        state = SimpleNamespace(response_time_h=12.0, response_time_by_target={})
         held = CustodyStatus(Custody.HELD, "Custody held.")
         entries = [_entry("BLUE-1", 0.0, 23.0)]
         minimal = {"capability_level": "MINIMAL", "incapacity": "the recorded status 'Degraded', declared, not observed"}
@@ -171,3 +210,94 @@ class TestTheSweepWithholdsIt:
             "behind it could not be assessed, so decide-by stands.")
         high = threat._sweep_decide_by(state, entries, held, ({"capability_level": "HIGH"}, None), basis)  # type: ignore[arg-type]
         assert high.due is Due.SET and "Capability reads" not in high.sentence
+
+
+class TestARecordStoredWithTheDefaultReplaysAsStored:
+    """SPC-211: a decision record keeps the sweep's decide-by in its stored Threat picture, the time and the sentence
+    as the sweep set them, and a replay reads them back as stored; decide_by is never run again. So a record whose
+    decide-by rested on the old 12 h default replays exactly, and still says it was the default."""
+
+    _DEFAULT = (
+        "Decide by 18:00 UTC on 17 Oct for BLUE_1: its fastest intercept within 500 m/s could arrive at 06:00 UTC "
+        "on 18 Oct, and that is the default response time of 12 h, which you have not set."
+    )
+
+    def test_it_replays_exactly_with_the_decide_by_it_was_shown(self) -> None:
+        import dataclasses
+
+        from spectre.domain.decision import SelectorStrategy
+        from spectre.domain.decision_tree import evaluate_tree
+        from spectre.web.decision_record import Operator, new_record, replay_record, stored_of
+        from tests.unit.test_decision_inputs import _with_picture
+        from tests.unit.test_decision_replay import _alone
+
+        scenario = _with_picture()
+        assert scenario.threat is not None
+        old = dataclasses.replace(scenario, threat=dataclasses.replace(scenario.threat, decide_by=self._DEFAULT))
+        result = evaluate_tree(old, SelectorStrategy.MINIMAX)
+        row = new_record(result, Operator(7, "alice"), _NOW, primary=SelectorStrategy.MINIMAX)
+        row.id = 1
+        row = _alone(row)
+        stored = stored_of(row).scenario.threat
+        assert stored is not None
+        assert (stored.decide_by, stored.decide_at) == (self._DEFAULT, scenario.threat.decide_at)
+        done = replay_record(row)
+        assert done.matches, done.lines
+
+
+class TestTheFormsOfferNoDefault:
+    """SPC-211: the sweep form's response time fields neither promise a 12 h default nor show one as a placeholder."""
+
+    _TEMPLATES = ("operator.html", "partials/sweep_target_config.html")
+
+    @pytest.mark.parametrize("name", _TEMPLATES)
+    def test_no_default_is_promised_or_shown(self, name: str) -> None:
+        from pathlib import Path
+
+        text = (Path(__file__).resolve().parents[2] / "spectre" / "web" / "templates" / name).read_text("utf-8")
+        assert "12 hours" not in text and "12 h default" not in text
+        assert 'placeholder="12"' not in text
+        assert "decide-by says it needs one" in " ".join(text.split())
+
+
+class TestNoDefaultIsImpliedAnywhere:
+    """Review of 0.38.0 (SPC-211): with no response time set, nothing on the sweep says decide-by stands, and no
+    sentence or note says a default is used."""
+
+    def test_a_capability_minimal_note_is_not_added_to_a_decide_by_that_needs_a_time(self) -> None:
+        from spectre.domain.custody import Custody, CustodyStatus
+        from spectre.web.routes import threat
+
+        basis = SimpleNamespace(max_dv_m_s=500.0, now=_NOW)
+        state = SimpleNamespace(response_time_h=None, response_time_by_target={})
+        held = CustodyStatus(Custody.HELD, "Custody held.")
+        minimal = {"capability_level": "MINIMAL", "incapacity": "the recorded status 'Degraded'"}
+        args = (state, [_entry("BLUE-1", 0.0, 23.0)], held, (minimal, None), basis)
+        result = threat._sweep_decide_by(*args)  # type: ignore[arg-type]
+        assert result.due is Due.NEEDS_TIME
+        assert result.sentence == NEEDS_TIME.format(targets="BLUE-1")
+
+    def test_a_refused_response_time_does_not_claim_one_is_set(self) -> None:
+        from spectre.web.routes import threat
+
+        errors: list[str] = []
+        state = SimpleNamespace(response_time_h=None)
+        threat._take_response_time(state, "500", errors)
+        assert errors == [
+            "Response time must be more than 0 and at most 168 hours. The response time held, if any, is unchanged; "
+            "with none set, decide-by says it needs one."
+        ]
+        assert state.response_time_h is None
+
+    def test_the_session_and_the_picture_describe_no_default(self) -> None:
+        import inspect
+        from pathlib import Path
+
+        from spectre.domain.decision import ThreatPicture
+
+        root = Path(__file__).resolve().parents[2]
+        state = " ".join((root / "spectre" / "web" / "planning_state.py").read_text("utf-8").split())
+        assert "the default is used" not in state and "else the default" not in state
+        assert "decide-by says it needs one" in state
+        doc = " ".join((inspect.getdoc(ThreatPicture) or "").split())
+        assert "the first target in reach with no response time set" in doc

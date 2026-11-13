@@ -329,10 +329,10 @@ class TestARecordOf0280To0310ReplaysAsItWasEvaluated:
 
 class TestTheStoredInputsHoldTheRule:
     def test_this_code_writes_a_version_holding_it_and_reads_every_earlier_one(self) -> None:
-        # Version 4 added the miss rule; version 5 holds it too, beside the turn rule (SPC-187).
-        assert (VERSION, VERSIONS) == (5, (1, 2, 3, 4, 5))
+        # Version 4 added the miss rule; versions 5 (SPC-187) and 6 (SPC-188) hold it too.
+        assert (VERSION, VERSIONS) == (6, (1, 2, 3, 4, 5, 6))
         document = json.loads(store_inputs(evaluate_scenario(_pair_scenario(0.0, n=60)))[0])
-        assert document["version"] == 5
+        assert document["version"] == 6
         assert document["scenario"]["miss_rule"] == MissRule.ELSET_ERROR.value
 
     def test_it_reads_back_the_rule(self) -> None:

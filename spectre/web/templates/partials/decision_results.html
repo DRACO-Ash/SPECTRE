@@ -14,13 +14,17 @@
    rankings; it carries no rank and no star, and with every response so marked nothing is starred. The remainder of
    P (SPC-203), where the rows' P sum below 1, is a row of the engine's own, last, named in full and labelled as the
    engine's remainder, not the operator's row, in the matrix and the rankings; each row shows beside its P the share
-   of expected value it takes, written as its P is so the two read alike, each guarded so an older result renders. #}
+   of expected value it takes, written as its P is so the two read alike, each guarded so an older result renders.
+   A tie (SPC-206) names every tied response in the headline and stars each. No composite score is coloured by band:
+   no sourced threshold exists, so the number stands with its words (SPC-208, evaluation F-18). #}
 {% import "partials/_modelled.html" as modelled %}
 
 {% set adv = result.scenario.adversary_actions %}
 {% set fr  = result.scenario.friendly_responses %}
 {# The rule chosen's pick, which the star and the blue highlights mark; none when every response is not permitted. #}
 {% set best = result.robust_best_response %}
+{# Every response tied with that pick is starred too, so a tie is never shown as one pick (SPC-206). #}
+{% set starred_ids = (result.tied_responses | map(attribute="id") | list) if result.tied_responses is defined and result.tied_responses else ([best.id] if best is not none else []) %}
 {% set binding = result.scenario.binding if result.scenario.binding is defined else none %}
 {# The remainder row's label in words (SPC-203): the engine's, not the operator's. #}
 {% set remainder_label = result.remainder_label if result.remainder_label is defined else "" %}
@@ -202,18 +206,32 @@
      rule with every response marked not permitted (SPC-195), shows no recommendation, and the primary line below
      says why. #}
   {% set headline = rules_shown.headline if rules_shown is not none else result.robust_best_response %}
+  {# A tie (SPC-206, evaluation F-13): every response tied with the pick is named in the headline, which says it is
+     a tie, with the sentence saying the rule does not choose between them; each tied response's inputs follow. #}
+  {% if rules_shown is not none %}
+  {% set headline_set = rules_shown.headline_tied if rules_shown.headline_tied is defined and rules_shown.headline_tied else ([headline] if headline is not none else []) %}
+  {% set headline_tie = rules_shown.tie_line if rules_shown.tie_line is defined else none %}
+  {% else %}
+  {% set headline_set = result.tied_responses if result.tied_responses is defined and result.tied_responses else ([headline] if headline is not none else []) %}
+  {% set headline_tie = result.tie_line if result.tie_line is defined else none %}
+  {% endif %}
   <div class="headline-pick" style="margin-top:0.4rem; font-size:0.78rem; font-weight:700; color:var(--text-primary)">
-    {% if headline is none %}No recommendation{% else %}{{ headline.name }}{% endif %}
+    {% if headline is none %}No recommendation{% elif headline_set | length > 1 %}Tie: {% for r in headline_set %}{{ r.name }}{% if loop.revindex == 2 %} and {% elif not loop.last %}, {% endif %}{% endfor %}{% else %}{{ headline.name }}{% endif %}
   </div>
+  {% if headline is not none and headline_tie is not none %}
+  <p class="tie-line" role="note" style="margin:0.1rem 0; font-size:0.62rem; font-weight:700; color:var(--gold)">{{ headline_tie }}</p>
+  {% endif %}
   {% if headline is not none %}
+  {% for shown in headline_set %}
   {# The response's own type and inputs are the operator's judgement, and say so (SPC-196). #}
-  {% set hb = result.response_input_bases[headline.id] if result.response_input_bases is defined and headline.id in result.response_input_bases else none %}
+  {% set hb = result.response_input_bases[shown.id] if result.response_input_bases is defined and shown.id in result.response_input_bases else none %}
   <div class="headline-inputs" style="font-size:0.63rem; color:var(--text-dim); margin-top:0.1rem">
-    Type: <strong>{{ headline.action_type.value | replace('_',' ') | title }}</strong>{% if hb is not none %} {{ modelled.mark(hb.action_type) }}{% endif %} ·
-    Cost: <strong>{{ headline.cost }}</strong>{% if hb is not none %} {{ modelled.mark(hb.cost) }}{% endif %} ·
-    Reversibility: <strong>{{ headline.reversibility }}</strong>{% if hb is not none %} {{ modelled.mark(hb.reversibility) }}{% endif %} ·
-    Time to execute: <strong>{{ headline.time_to_execute_hours }}h</strong>{% if hb is not none %} {{ modelled.mark(hb.time_to_execute) }}{% endif %}
+    {% if headline_set | length > 1 %}{{ shown.name }}: {% endif %}Type: <strong>{{ shown.action_type.value | replace('_',' ') | title }}</strong>{% if hb is not none %} {{ modelled.mark(hb.action_type) }}{% endif %} ·
+    Cost: <strong>{{ shown.cost }}</strong>{% if hb is not none %} {{ modelled.mark(hb.cost) }}{% endif %} ·
+    Reversibility: <strong>{{ shown.reversibility }}</strong>{% if hb is not none %} {{ modelled.mark(hb.reversibility) }}{% endif %} ·
+    Time to execute: <strong>{{ shown.time_to_execute_hours }}h</strong>{% if hb is not none %} {{ modelled.mark(hb.time_to_execute) }}{% endif %}
   </div>
+  {% endfor %}
   {% endif %}
   {# ── The recommendation's weight stability (SPC-205, evaluation F-16): the smallest change of one weight, the others
        scaled to keep the sum 1, that changes the primary rule's pick, in words, then every weight in a details
@@ -296,7 +314,7 @@
           Adversary Action ↓
         </th>
         {% for resp in fr %}
-        {% set starred = best is not none and resp.id == best.id %}
+        {% set starred = resp.id in starred_ids %}
         {% set barred = resp.vetoed is defined and resp.vetoed %}
         <th data-permitted="{{ 'no' if barred else 'yes' }}" style="text-align:center; padding:0.2rem 0.35rem; font-weight:600;
                    color:{% if starred %}var(--ops-blue){% else %}var(--text-dim){% endif %}">
@@ -361,22 +379,16 @@
         </td>
         {% for j in range(fr | length) %}
           {% set om = result.outcome_matrix[i][j] %}
-          {% set is_best = best is not none and fr[j].id == best.id %}
+          {% set is_best = fr[j].id in starred_ids %}
           {% set barred = fr[j].vetoed is defined and fr[j].vetoed %}
           {# Guarded here: StrictUndefined raises on an attribute of an undefined value before a macro runs. #}
           {% set fbs = om.figure_bases if om.figure_bases is defined else none %}
           {% set band = om.ca_percentiles if om.ca_percentiles is defined else none %}
           {% set computed = om.ca_computed if om.ca_computed is defined else none %}
-          {# Colour: green < 0.25, amber < 0.50, red >= 0.50 #}
-          {% if om.composite_score < 0.25 %}
-            {% set score_color = "#22c55e" %}
-          {% elif om.composite_score < 0.50 %}
-            {% set score_color = "#f59e0b" %}
-          {% else %}
-            {% set score_color = "#ef4444" %}
-          {% endif %}
-          {# Greyed: a response not permitted is evaluated and shown, but its score is no candidate (SPC-195). #}
-          {% if barred %}{% set score_color = "var(--text-dim)" %}{% endif %}
+          {# No colour band: no sourced threshold says where a score turns good or bad, so the number stands with its
+             words (SPC-208, evaluation F-18). Greyed: a response not permitted is evaluated and shown, but its score
+             is no candidate (SPC-195). #}
+          {% set score_color = "var(--text-dim)" if barred else "var(--text-primary)" %}
           <td data-permitted="{{ 'no' if barred else 'yes' }}" style="text-align:center; padding:0.25rem 0.35rem;
                      background:{% if is_best %}rgba(59,139,235,0.06){% else %}transparent{% endif %}{% if barred %}; border:1px dashed var(--border); font-style:italic{% endif %}">
             <div class="figure" data-figure="composite_score"
@@ -551,6 +563,8 @@
               letter-spacing:0.05em; margin-bottom:0.45rem">
     Ranked Responses per Adversary Action
   </div>
+  {# What each card's score is, said once, as the matrix's heading says it (SPC-208): no colour stands in for it. #}
+  <p class="ranked-score-note" style="margin:0 0 0.3rem; font-size:0.6rem; color:var(--text-dim)">Each card's score is the composite score, lower = better for friendly, a lookup, as in the matrix.</p>
 
   {% for a in adv %}
   {% set i = loop.index0 %}
@@ -563,15 +577,16 @@
       {% for resp, score in result.ranked_per_adversary[i] %}
         {% set cell = ranked[loop.index0][2] if ranked | length > loop.index0 else none %}
         {% set barred = resp.vetoed is defined and resp.vetoed %}
-        {% if barred %}{% set sc = "var(--text-dim)" %}{% elif score < 0.25 %}{% set sc = "#22c55e" %}{% elif score < 0.5 %}{% set sc = "#f59e0b" %}{% else %}{% set sc = "#ef4444" %}{% endif %}
+        {# The score in one colour whatever its value, as in the matrix (SPC-208); greyed when not permitted. #}
+        {% set sc = "var(--text-dim)" if barred else "var(--text-primary)" %}
         <div data-permitted="{{ 'no' if barred else 'yes' }}" style="background:var(--bg-secondary); border:1px {{ 'dashed' if barred else 'solid' }} var(--border); border-radius:4px;
                     padding:0.3rem 0.5rem; font-size:0.62rem; min-width:7rem; max-width:16rem; overflow-wrap:anywhere">
           {# A response not permitted is listed after every permitted one and carries no rank (SPC-195). #}
           <div style="font-size:0.58rem; color:var(--text-dim)">{% if barred %}Not ranked{% else %}#{{ loop.index }}{% endif %}</div>
-          <div style="font-weight:700; color:{% if best is not none and resp.id == best.id %}var(--ops-blue){% elif barred %}var(--text-dim){% else %}var(--text-primary){% endif %}">
+          <div style="font-weight:700; color:{% if resp.id in starred_ids %}var(--ops-blue){% elif barred %}var(--text-dim){% else %}var(--text-primary){% endif %}">
             {{ resp.name | truncate(16, True, '…') }}
           </div>
-          <div style="font-family:monospace; color:{{ sc }}">{{ "%.3f" | format(score) }}</div>
+          <div class="ranked-score" style="font-family:monospace; color:{{ sc }}">{{ "%.3f" | format(score) }}</div>
           {% if cell is not none and cell.score_spread_text is defined %}
           <div class="score-spread"{% if cell.score_percentiles_text is defined and cell.score_percentiles_text is not none %} title="{{ cell.score_percentiles_text }}"{% endif %} style="font-size:0.55rem; color:var(--text-dim)">{{ cell.score_spread_text }}</div>
           {% else %}

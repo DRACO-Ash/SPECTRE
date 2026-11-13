@@ -427,7 +427,7 @@ collection_advice:
 
 **The situation at 3 November 2026, 12:00Z.**
 ● The sweep finds a deliverable approach to BLUE-COMSAT at 9 m/s, arriving in 31 hours. ACCESS is CRITICAL.
-● Decide-by is 19 hours away: 31 hours of flight time less the 12-hour default response time.
+● Decide-by is 19 hours away: 31 hours of flight time less the operator's response time of 12 hours. With no response time set, decide-by says it needs one and shows no time (SPC-211); until 0.38.0 a 12-hour default stood in.
 ● Custody is HELD. The data mode is REAL.
 
 **Today, SPECTRE 0.15.0, reads** capability CRITICAL from the intel label, verdict CRITICAL and confidence HIGH (5 inputs).
@@ -653,6 +653,7 @@ Wiring in `web/routes/threat.py`:
   ■ the **ceiling** is MINIMAL on earned COMPUTED incapacity, and Understanding is not LOW
 ● A status string alone no longer silences the clock. The withheld or shown sentence names the evidence.
 ● The arrival times are unchanged.
+● Decide-by rests on the operator's own response time (SPC-211, evaluation F-23, the lead's ruling). With none set for a target in reach, the sweep says decide-by needs one, names the target and shows no time, and no collection can be shown to land before it. The 12-hour default of 0.10.0 to 0.37.0, tuned, not sourced, is gone; a decision record keeps the decide-by the sweep set, so one from before replays as stored.
 
 ### 7.5 The Decision Engine
 

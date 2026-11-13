@@ -9,7 +9,9 @@ permitted (SPC-195); for the judgement basis, the lookup register and the code v
 and for the element-set acceptance check and the operating envelope (SPC-201, SPC-200); for what P means, a
 probability over mutually exclusive actions with the remainder weighed (SPC-203); and for collect first tied to the
 engine's own recommendation (SPC-204) and the weight stability beside it (SPC-205); and for element-set error in
-every closest approach the engine propagates (SPC-202).
+every closest approach the engine propagates (SPC-202); and for 0.38.0: a game tree's own cost cap, measured under
+load (SPC-188), the best branch under each response (SPC-189), ties shown as ties (SPC-206), scores with no colour
+bands (SPC-208) and decide-by only on the operator's own response time (SPC-211).
 The history of each step is in CHANGELOG.md and docs/CHANGE-LEDGER.md; this page says what the engine does now and
 why.*
 
@@ -102,7 +104,8 @@ F-10's closing evidence requires, so F-10 stays open until it does.
   (green below 0.25, amber below 0.50). In the 12 cells of the lookup scenario evaluation probe P-17 uses, misses of
   200 to 15,000 km, every score drops by 0.07 to 0.16 and 5 cells change band, four of them amber to green and one
   red to amber. A miss under about 10 km barely moves, and a small burn of ours scores more than before. The bands
-  themselves are finding F-18 (SPC-208) and are unchanged.
+  themselves were finding F-18: no source set their thresholds, and SPC-208 removed them in 0.38.0, so no score is
+  coloured by its value now.
 
 ## Judgement inputs, the lookup register and the code version (SPC-196)
 
@@ -293,6 +296,15 @@ section 7.5, and section 9, decision 9.
   shown as the sweep worded it. One that has passed by the evaluation is said again against the evaluation: when it
   was, and when the intercept could arrive, in hours after the evaluation, or that it could have arrived before it.
   So the line never says "Decide by" a past time, and it agrees with the advice below it.
+● **Decide-by needs the operator's response time** (SPC-211, evaluation F-23, the lead's ruling). Each target's
+  decide-at is its soonest credible arrival less the response time for it: its own where set, else the sign-in's.
+  Until 0.38.0 a 12 h default chosen by the developer, tuned, not sourced, stood in when neither was set, and moved
+  every decide-by and collect-first deadline with it. Now a target in reach with neither set gives no decide-by: the
+  sweep says decide-by needs a response time, names each such target, and shows no time, since that target's
+  decide-at is unknown and could be the earliest. With no decide-by no collection can be shown to land before it, so
+  a straddle acts on the ceiling, as with a decide-by withheld. A decision record keeps the decide-by the sweep set
+  in its stored Threat picture, the time and the sentence, and a replay reads them back as stored and never works
+  decide-by out again, so a record whose decide-by rested on the old default replays exactly and still says so.
 ● The sweep's advice is judged against the action line: the Threat band at which the owner may set that a response
   changes, HIGH by default, tuned, not sourced, said in a sentence of its own beside every advice that names it.
   When the Threat range straddles it and a collection with value above 0, whose result SPECTRE can read, lands
@@ -454,7 +466,9 @@ NOTSO-derived P) and decision 18 (how the interval reaches the pick).
   response, and the path of moves it rests on. Opened, it shows its closest approach from its turn on (with P5, P50,
   P95 and the half-width when sampled), the time of that closest approach with its uncertainty, our burn this turn in
   m/s, and its sequence's closest approach, delta-V, custody and score, each with its kind in words and the rule
-  behind it. A branch on the plan the recommendation follows says so in words.
+  behind it. A branch on the plan the recommendation follows says so in words. Under a response the rule does not
+  pick, the best continuation, every later response the rule's pick there, says so in words of its own, in italic
+  with no star, never as the plan (SPC-189). Responses that tie are each named, and the plan follows each (SPC-206).
 ● A tree built in part names the deepest turn built in full and shows nothing below it. A tree refused before it
   runs is headed as asked for and none built, and states why.
 ● The view reads at phone width, says everything in words as well as colour, and adds no script.
@@ -490,12 +504,14 @@ owner rulings): keep D1, D2, D4, D5 and D7 to D11; change D3 and D6 (SPC-187, SP
   one moves again. A sequence's closest approach is the smallest along it, P5 of each sample's own minimum where red
   was sampled; its delta-V is our burns added up, a lookup when any turn's is; its custody is the bound red track's
   with the earliest red burn on it; its score is the one-turn weighted sum on those figures, a lookup. Owner ruling, 2026-11-05: keep.
-● **D6. The caps.** At most 1,000 branches, the sum over turns k of (rows times responses) to the k, and the same
-  cost cap as the matrix, 12,000 sample-hours since the 300 s budget, with 16 sizing trials charged for every sizing.
-  So coplanar_leo at 50 samples over three 2 h turns costs about 6,700 sample-hours. It was refused under the 4,800
-  cap when the budget was 120 s, though its prototype ran in 33 s idle, and it fits now; at 150 samples it costs
-  about 15,400 and is refused. Owner ruling, 2026-11-05: raise the evaluation budget to 300 s (SPC-178, built), then measure trees under
-  load and set their own cap from the measurements (SPC-188); until then the tree shares the matrix's cap.
+● **D6. The caps.** At most 1,000 branches, the sum over turns k of (rows times responses) to the k, and a cost cap,
+  with 16 sizing trials charged for every sizing. As first built the tree shared the matrix's cost cap, 12,000
+  sample-hours since the 300 s budget. Owner ruling, 2026-11-05: raise the evaluation budget to 300 s (SPC-178,
+  built), then measure trees under load and set their own cap from the measurements (SPC-188). **Built (SPC-188):**
+  the tree's own cap is 21,000 sample-hours by the same cost model, the budget times 70 sample-hours a second, about a
+  fifth under the slowest tree measured under load. So coplanar_leo at 150 samples over three 2 h turns, about 15,400
+  sample-hours, refused under the shared cap, fits now, as does 200 samples, about 19,800; at 250 samples, about
+  24,100, it is refused. The next section gives the measurements and their basis.
 ● **D7. Refused before anything runs, the matrix kept.** An unbound or out-of-date side, a row with no orbit to carry
   on, turns the engine cannot set with every burn inside its own (SPC-187; over equal turns, a row of several burns,
   SPC-184, then a burn outside its turn), too many branches or too high a cost refuses the tree, in that order, and
@@ -507,7 +523,9 @@ owner rulings): keep D1, D2, D4, D5 and D7 to D11; change D3 and D6 (SPC-187, SP
   red moves that show the same thing are one information set and one pick must serve every branch in it. Minimax
   takes the worst sequence over every red move and every branch in the set, minimin the best, and expected value the
   mean weighted by P and by the update. A set with no weight has no pick and says so. The first response wins a tie.
-  Owner ruling, 2026-11-05: keep.
+  Owner ruling, 2026-11-05: keep. Since SPC-206 (evaluation F-13) a tie is said: the pick the record holds is still
+  the response with the lowest value, but every response within the tie tolerance is named in the line, in the order
+  entered, and the plan follows each.
 ● **D10. The likelihood model is the engine's own custody rule.** Custody lost at a burn in the turn shows a burn,
   not which; held through it shows no burn; degraded, lost for another reason, or not read, shows nothing. Each row
   gives one of these for certain. This was chosen over a new detection model with made-up rates. The update is a
@@ -557,9 +575,65 @@ The owner ruled on each on 2026-11-05: keep D12 and D13; change D14 and D15 (SPC
 ● **D14. The plan, marked in words.** A branch is marked when every response on it is the rule's pick for what the
   turns before it showed. The selector picks in every information set, but the recommendation and its marks follow
   our own picks: a branch reached only through a response the rule would not choose carries no mark. Owner ruling, 2026-11-05: mark
-  the best branch under each response, including responses the rule would not pick (SPC-189).
+  the best branch under each response, including responses the rule would not pick (SPC-189). **Built (SPC-189):**
+  the section after next says how.
 ● **D15. Plain details and summary.** The tree is server-rendered with no script and no new library, so nothing is
   added to track or scan. Owner ruling, 2026-11-05: an interactive tree diagram (SPC-190).
+
+### The tree's own cost cap (SPC-188)
+
+**Status: built.** Owner ruling, 2026-11-05, on D6: measure trees under load and set their own cap from the
+measurements.
+
+● **How it was measured.** `scripts/measure_tree_cost.py` runs four trees the engine builds in full, Hold course and
+  an Evasive row against Hold and Avoid on the reference element sets, each by `evaluate_tree` under the 300 s budget
+  as the console runs it, while one other process per core keeps every core busy. On 2026-11-12, in the build
+  container (4 cores, Intel Xeon at 2.10 GHz, Python 3.13), the rates by `tree_cost` were:
+
+| Tree | Cost, sample-hours | Turn 1's share | Wall, s, loaded | Rate, a second |
+|--------|--------|--------|--------|--------|
+| plane_change, 300 samples, two 1 h turns, Avoid not burning | 2,749 | 24% | 28.7 | 95.6 |
+| coplanar_leo, 200 samples, two 2 h turns, Avoid sized to 20 km | 4,307 | 28% | 38.6 | 111.6 |
+| plane_change, 500 samples, two 1 h turns, Avoid not burning | 4,559 | 24% | 50.2 | 90.8 |
+| plane_change, 300 samples, three 0.5 h turns, Avoid not burning | 7,529 | 7% | 76.5 | 98.5 |
+
+  Idle, the same trees ran at 123 to 151. The script takes about 4 minutes.
+● **The cap.** The slowest, 90.8, less about a fifth, the matrix's own margin, rounded down to 5, is 70
+  (`decision_tree._SLOWEST_TREE_SAMPLE_HOURS_PER_S`), so the cap is 300 s times 70, 21,000 sample-hours
+  (`MAX_TREE_SAMPLE_HOURS`). A tree at the cap takes about 231 s at the slowest rate measured, leaving 69 s. Turn 1,
+  the matrix, is at most about 30 per cent of any tree's cost by the model, so the matrix's slower rate cannot
+  dominate a tree; the matrix's own rows are still checked against the matrix's cap. Its at-cap option runs one tree just
+  under the cap, plane_change with 800 samples over three 0.5 h turns, 19,951 sample-hours, refused under the shared
+  cap: under the same load it was built in full in 206.4 s, 96.7 a second, inside the 300 s budget.
+● **Where the figures hold.** They are this container's, not a deployment target's. Run the script on the target
+  and set the rate from its figures before relying on the cap there; the code comment and the lookup register say
+  the same.
+● **Records from before.** A tree 0.28.0 to 0.37.0 recorded was checked against the shared cap. Stored inputs
+  version 6 holds the tree's cap (`TreeCap.OWN`); versions 1 to 5 read as `TreeCap.SHARED`, so the replay checks
+  such a tree against the matrix's cap again and refuses or builds it as it did then, and says so before it compares
+  anything. The provenance hash leaves the cap out for one turn and for the shared cap, so those records' input
+  hashes still match. A scenario under the shared cap is never stored again.
+
+Decisions taken building it, Claude's and not rulings: the margin of about a fifth, as the matrix's cap takes; the
+four cases, chosen to build in full and converge in under 9 minutes together; and one busy process per core as the
+load.
+
+### The best branch under each response (SPC-189)
+
+**Status: built.** Owner ruling, 2026-11-05, on D14: mark the best branch under each response, including responses
+the rule would not pick.
+
+● The selector already picks in every information set, under responses it would not choose too, so the mark is read
+  from those picks (`tree_selectors.continuation`): a branch is the best continuation under a response the rule does
+  not pick when every response after that one is the rule's pick for what the turns before it showed. The mark names
+  that response and its turn: "Best continuation under minimax after Avoid in turn 1, which minimax does not pick
+  there; not on the plan".
+● It is said in words of its own, in italic, with no star, and never on a branch on the plan, so the plan's own
+  mark, "On the plan minimax recommends" with its star, is unchanged and the two never read alike.
+● A branch whose own response the rule does not pick is that response, not a continuation, and carries no mark;
+  below it, its best continuation does. Under a response marked not permitted (SPC-195) nothing is valued, so no
+  branch below it is marked.
+● Nothing a record holds changes: the marks are worked out from the selection when the view is built.
 
 ## The decision record (SPC-192)
 
@@ -751,8 +825,9 @@ response by response, with a reason in words.
   The veto and its reason are fields of the response, `vetoed` and `veto_reason`, not permitted by default.
 ● **Removed before aggregation** (Claude's choice). `find_robust_response` ranks only the responses not marked not
   permitted, under every rule, so a vetoed response is never any rule's pick: not the headline, not a pick beside it,
-  not a pick in the record. A tie is broken among the permitted responses alone, the first of them winning as
-  before, so a tie never brings a vetoed response back. With every row at P 0, expected value still has no pick.
+  not a pick in the record. A tie is broken among the permitted responses alone, the one with the lowest score still
+  the pick a record holds, and since SPC-206 every tied permitted response is named, so a tie never brings a vetoed
+  response back. With every row at P 0, expected value still has no pick.
   The NOTSO interval lines read the same permitted responses. On a game tree, a response not permitted is never
   valued in any information set, so no turn picks it and no plan mark falls on its branches; the recommendation per
   turn names each such response as never picked.
@@ -1190,6 +1265,36 @@ that rating stands until the security lead has signed the model and the evaluati
   and never against `window`. A fragment's start-up code runs on htmx's load event, once for each element. htmx runs
   with `allowEval` and `allowScriptTags` off. Inline style is still allowed.
 
+## Ties shown, and scores with no colour bands (SPC-206, SPC-208)
+
+**Status: built.** Evaluation findings F-13 and F-18.
+
+● **A tie is a tie** (SPC-206, evaluation F-13). A tie went to the response entered first and was not shown, so two
+  responses equal under the rule were reported as one recommendation chosen by typing order (probe P-05). Now
+  responses whose values under a rule lie within `TIE_TOLERANCE` of the best tie: half a unit in the sixth decimal
+  place, to which the engine rounds every composite score, so a smaller difference is below the precision the scores
+  are kept to (reasoned, in the lookup register; Claude's choice, not a ruling). The headline reads "Tie:" and names
+  each tied response, with a sentence saying the rule does not choose between them and the choice is the operator's;
+  each tied response's inputs follow, the star marks each, every rule's pick names the tie, and rules that find the
+  same tie agree. Over a game tree a tied turn's line names each response and the plan follows each.
+  `tests/unit/test_decision_ties.py` reproduces P-05 from the evaluation's description, X and Y entered in either
+  order, and shows both.
+● **What a record holds.** `find_robust_response` still returns the response with the lowest score, as 0.37.0 did,
+  the first entered only among exactly equal scores, so the record's pick columns and their replay are unchanged; a
+  response tied with it may have been entered first, since an expected-value score is not rounded and a near-tie
+  within the tolerance can favour the later one. The tie itself is named in the order entered, on the matrix and
+  over a tree alike, so rules that find the same tie agree whichever of it each picks. A difference of exactly the
+  tolerance is a tie: each difference is rounded to 12 decimal places first, so floating-point error cannot decide
+  it, and a score that is not finite never ties. A game tree's recommendation lines, which the record keeps as shown,
+  name the tie. A tie on the one-turn matrix is not yet held in a column of its own (Claude's
+  choice, for the owner).
+● **No colour bands** (SPC-208, evaluation F-18; the lead's ruling). Composite scores were coloured green below 0.25,
+  amber below 0.50 and red above, with no source for the thresholds, so colour implied a safety judgement the score
+  had not earned. No sourced thresholds exist, so the bands are gone: every score is shown in the text colour, in the
+  matrix and on the ranking cards, its number to three places with its words, lower being better, and its basis.
+  A response marked not permitted is still greyed, which says it is no candidate, not how good its score is.
+  `tests/unit/test_decision_score_colours.py` pins it.
+
 ## What remains out of scope
 
 ● **The composite weights are uncited** (SPC-151). Until an analyst sources them the score stays a lookup and the
@@ -1225,3 +1330,8 @@ that rating stands until the security lead has signed the model and the evaluati
 | SPC-205 | The smallest change of one weight that changes the recommendation, beside it and on the record | Built |
 | SPC-202 | Element-set error drawn in every sample, and a band beside every computed miss whose lower edge the score reads | Built |
 | SPC-199 | The panel's and the results' script in first-party files under a policy with no inline script or eval; a draft threat model for the security lead | Built; threat model a draft |
+| SPC-188 | A game tree's own cost cap, measured under load, 21,000 sample-hours; records from before checked against the shared cap | Built; re-measure on the deployment target |
+| SPC-189 | The best branch under each response, marked in words apart from the plan | Built |
+| SPC-206 | A tie within a stated tolerance named as a tie, every tied response shown | Built |
+| SPC-208 | Composite scores with no colour bands | Built |
+| SPC-211 | Decide-by only on the operator's own response time; with none set it says it needs one | Built |

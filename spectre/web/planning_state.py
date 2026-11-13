@@ -127,10 +127,12 @@ class SessionState:
     # operator looked up (spectre.web.interaction_store, SPC-173).
     interaction_store: Any | None = None
     # The operator's response time in hours, for decide-by (SPC-008); None
-    # until they set it, when the default is used and said to be the default.
+    # until they set it. With neither it nor a target's own set for a target
+    # in reach, decide-by says it needs one and shows no time (SPC-211).
     response_time_h: float | None = None
     # Response times set for named targets, by target name (SPC-022). A target
-    # here takes its own; any other takes response_time_h, else the default.
+    # here takes its own; any other takes response_time_h, else has none, and
+    # then decide-by says it needs one (SPC-211).
     response_time_by_target: dict[str, float] = field(default_factory=dict)
     # The Threat range and Understanding the sweep last showed, as an analyst
     # may adjudicate them, and the adjudications this sign-in recorded

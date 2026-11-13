@@ -3,7 +3,9 @@
 The tree is server-rendered as nested details and summary elements: D3 is not vendored here. This module turns a
 result's GameTree into plain values the template prints without doing any sum: each node's figures and its
 sequence's, each with its basis kind and rule, the path of red moves and our responses it rests on, and whether it
-is on the plan the recommendation follows. Delta-V is converted to m/s here, at the route boundary, and only here.
+is on the plan the recommendation follows, or, under a response the rule does not pick, the best continuation from
+it, marked in words of its own and never as the plan (SPC-189, design D14). Delta-V is converted to m/s here, at the
+route boundary, and only here.
 The per-turn recommendation and the update after turn 1 are the selection's own lines, in two parts; under a rule
 that reads no probability the second part is headed as what each turn lets us see, since nothing is updated. A
 branch whose own response is marked not permitted (SPC-195) says so, with the reason, beside its heading; a later
@@ -21,7 +23,7 @@ from spectre.domain.decision import REMAINDER_LABEL, ScenarioResult, SelectorStr
 from spectre.domain.decision_figures import TcaUncertainty
 from spectre.domain.decision_tree import GameNode, GameTree, PathFigures
 from spectre.domain.provenance import FigureBasis
-from spectre.domain.tree_selectors import OBSERVED_NO_PICK, TreeSelection, follows_picks
+from spectre.domain.tree_selectors import OBSERVED_NO_PICK, TreeSelection, continuation, follows_picks
 from spectre.web.format_units import format_m_s, to_m_s
 
 _SECONDS_PER_HOUR = 3600.0
@@ -37,6 +39,11 @@ FIGURE_LABELS = (
     "Sequence score",
 )
 PLAN_MARK = "On the plan {rule} recommends"
+#: Beside the best branch under a response the rule does not pick (SPC-189, design D14): in words of its own, never
+#: the plan's, and with no star.
+CONTINUATION_MARK = (
+    "Best continuation under {rule} after {response} in turn {k}, which {rule} does not pick there; not on the plan"
+)
 HEADING = "Game tree: {turns} turns"
 HEADING_NOT_BUILT = "Game tree: {turns} turns asked for, none built"
 UPDATE_HEADING = "The update after turn 1"
@@ -105,6 +112,9 @@ class NodeView:
     not_permitted: str = ""
     #: REMAINDER_BESIDE when this branch's red move is the remainder of P, the engine's row (SPC-203); else empty.
     remainder: str = ""
+    #: CONTINUATION_MARK when this branch is the best continuation under a response the rule does not pick
+    #: (SPC-189); else empty. Never set on a branch on the plan.
+    continuation: str = ""
 
 
 @dataclass(frozen=True)
@@ -192,8 +202,18 @@ class _Builder:
             ),
             on, plan, self.figures(node),
             tuple(self.node(child, steps) for child in node.children),
-            self.vetoes[node.response] or self.follows(before), self.beside[node.action],
+            self.vetoes[node.response] or self.follows(before), self.beside[node.action], self.best(steps),
         )
+
+    def best(self, steps: Sequence[tuple[int, int]]) -> str:
+        """CONTINUATION_MARK when *steps* is the best continuation under a response the rule does not pick, naming
+        that response and its turn; else empty (SPC-189)."""
+        selection = self.tree.selection
+        turn = None if selection is None else continuation(self.result.scenario, selection, steps)
+        if selection is None or turn is None:
+            return ""
+        rule = selection.strategy.value.replace("_", " ")
+        return CONTINUATION_MARK.format(rule=rule, response=self.responses[steps[turn - 1][1]], k=turn)
 
     def follows(self, before: Sequence[tuple[int, int]]) -> str:
         """That a branch follows a response marked not permitted in an earlier turn, the first such; else empty."""

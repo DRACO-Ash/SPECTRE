@@ -1334,3 +1334,13 @@ Turns set by the engine, chains counted once, and suggestions shown at once (own
 | Code Quality | **EVIDENCED** | Changes to `decision_tree.py`, `turn_update.py`, `threat_understanding.py`, `decision.py`, `decision_prior.py`, `interaction_graph.py`, the Decision Engine routes and panel | `scripts/sonar_rules.py 6ff5e5e`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 0.36.0: complexity none over 15, changed-line coverage 100%, duplication 0%. | Then the gate raises a rule the checker does not yet encode; the report names it, and `docs/SONAR-RULES.md` gives the steps for adding it. |
 | DAST | **HYGIENE** | One form control and one hidden field removed from the Decision Engine panel | Fewer inputs; seed names are autoescaped; no inline script. | Then a page reflects a field unescaped; the report names the page. |
 | Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.38.0
+
+Ties named, the tree's own cost cap, and decide-by on your own response time.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `decision.py`, `decision_tree.py`, `tree_selectors.py`, `rule_comparison.py`, `decision_inputs.py`, `decision_replay.py`, `decide_by.py`, `tree_view.py`, the threat routes, the Decision Engine and sweep templates; new `scripts/measure_tree_cost.py` | `scripts/sonar_rules.py 3070ce7`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 0.37.0: complexity none over 15, changed-line coverage 100%, duplication 0%. | Then the gate raises a rule the checker does not yet encode; the report names it, and `docs/SONAR-RULES.md` gives the steps for adding it. |
+| DAST | **HYGIENE** | Score colours removed, one label added to the rankings, the response-time placeholders changed | No new input; all new text is autoescaped; no inline script. | Then a page reflects a field unescaped; the report names the page. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |

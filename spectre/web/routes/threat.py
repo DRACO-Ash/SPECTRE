@@ -48,6 +48,7 @@ from spectre.domain.actor_eligibility import WORKING_LIFE_YEARS, Exclusion, why_
 from spectre.domain.custody import Custody, CustodyStatus, age_text
 from spectre.domain.decide_by import (
     DecideBy,
+    Due,
     ResponseTimes,
     decide_by,
     parse_response_hours,
@@ -2741,7 +2742,8 @@ def _sweep_decide_by(
     times = ResponseTimes(sign_in=state.response_time_h,  # type: ignore[attr-defined]
                           by_target=dict(state.response_time_by_target))  # type: ignore[attr-defined]
     result = decide_by(entries, times, basis.now, basis.max_dv_m_s)
-    if worst_coa is not None and worst_coa.get("capability_level") == "MINIMAL":
+    # With no response time set there is no decide-by to stand, so the note that it stands is not added (SPC-211).
+    if result.due is not Due.NEEDS_TIME and worst_coa is not None and worst_coa.get("capability_level") == "MINIMAL":
         return replace(result, sentence=f"{result.sentence} {_not_silenced(worst_coa, understanding)}")
     return result
 
@@ -2750,7 +2752,8 @@ def _take_response_time(state: object, raw: str, errors: list[str]) -> None:
     """Hold the response time the sweep form carries; blank keeps the last one set."""
     hours, problem = parse_response_hours(raw)
     if problem:
-        errors.append(f"{problem} Decide-by uses the response time already set.")
+        errors.append(f"{problem} The response time held, if any, is unchanged; with none set, decide-by says it "
+                      "needs one.")
     elif hours is not None:
         state.response_time_h = hours  # type: ignore[attr-defined]
 

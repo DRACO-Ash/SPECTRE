@@ -1811,7 +1811,11 @@
   ],
   "deps": [
    "SPC-178"
-  ]
+  ],
+  "state": "built",
+  "version": "0.38.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists",
+  "est": 240
  },
  {
   "ref": "SPC-189",
@@ -1824,7 +1828,11 @@
   "files": [
    "spectre/domain/tree_selectors.py",
    "spectre/web/tree_view.py"
-  ]
+  ],
+  "state": "built",
+  "version": "0.38.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists",
+  "est": 180
  },
  {
   "ref": "SPC-190",
@@ -2108,7 +2116,11 @@
   "files": [
    "spectre/domain/decision.py",
    "spectre/domain/tree_selectors.py"
-  ]
+  ],
+  "state": "built",
+  "version": "0.38.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists",
+  "est": 120
  },
  {
   "ref": "SPC-207",
@@ -2132,7 +2144,11 @@
   "note": "Evaluation finding F-18 (Medium, L5), evaluation/EVALUATION.md. Remediation: remove the colours, or tie them to sourced thresholds. Closing evidence: the page without unsourced colour bands.",
   "files": [
    "spectre/web/templates/partials/decision_results.html"
-  ]
+  ],
+  "state": "built",
+  "version": "0.38.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists",
+  "est": 120
  },
  {
   "ref": "SPC-209",
@@ -2168,7 +2184,11 @@
   "note": "Evaluation finding F-23 (Medium, §1f, L1), evaluation/EVALUATION.md. Remediation: require an operator-set response time before decide-by shows, or source the default. Closing evidence: a test, or a cited default.",
   "files": [
    "spectre/domain/decide_by.py"
-  ]
+  ],
+  "state": "built",
+  "version": "0.38.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists",
+  "est": 120
  },
  {
   "ref": "SPC-212",

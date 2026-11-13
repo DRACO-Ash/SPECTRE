@@ -22,7 +22,9 @@ inputs read under that rule, so the replay reproduces what the operator was show
 So does a record written by 0.28.0 to 0.31.0, evaluated before SPC-202 with no element-set error in any closest
 approach: it is replayed under that rule, and the report says so first. So does a record of a game tree written by
 0.28.0 to 0.36.0, built over equal turns before SPC-187 let the engine set them from the rows' burn times: it is
-replayed over equal turns, as it was built. Nothing here imports the web layer.
+replayed over equal turns, as it was built. So does a record of a game tree written by 0.28.0 to 0.37.0, checked
+before SPC-188 against the matrix's cost cap, which the tree shared then: it is checked against that cap again, so a
+tree refused for its cost is refused again. Nothing here imports the web layer.
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ from spectre.domain.decision import (
     Scenario,
     ScenarioResult,
     SelectorStrategy,
+    TreeCap,
     TurnRule,
 )
 from spectre.domain.decision_inputs import StoredInputs
@@ -71,6 +74,12 @@ LEGACY_TURNS = (
     "This record's game tree was built before SPC-187, over equal turns, the span searched split equally among them. "
     "Its stored inputs say so, and the replay builds it over those turns, as it was built then; this code sets each "
     "turn from the rows' burn times, so every burn falls inside its own turn."
+)
+#: Said first for a record of a game tree 0.28.0 to 0.37.0 wrote: it is checked against the shared cap (SPC-188).
+LEGACY_CAP = (
+    "This record's game tree was checked before SPC-188 against the matrix's cost cap, which the tree shared then. Its "
+    "stored inputs say so, and the replay checks it against that cap, as it was checked then; this code checks a tree "
+    "against a cap of its own, set from trees measured under load."
 )
 BUDGET_RAN_OUT = (
     "The evaluation recorded ran out of its time budget, so part of it was not sampled or built; the replay runs in "
@@ -149,6 +158,8 @@ class Replay:
     legacy_point:     bool = False
     #: Whether the record is a game tree built over the equal turns of 0.28.0 to 0.36.0 (SPC-187).
     legacy_turns:     bool = False
+    #: Whether the record is a game tree checked against the shared cost cap of 0.28.0 to 0.37.0 (SPC-188).
+    legacy_cap:       bool = False
 
     @property
     def across_versions(self) -> bool:
@@ -163,7 +174,7 @@ class Replay:
         """What is said before anything is compared: the version line, the lines saying a record of 0.28.0 to 0.36.0
         is replayed under the rules it was evaluated by, and the budget line when it ran out."""
         return _first_lines(self.recorded_version, self.running_version, budget_ran_out=self.budget_ran_out,
-                            legacy=(self.legacy_shares, self.legacy_point, self.legacy_turns))
+                            legacy=(self.legacy_shares, self.legacy_point, self.legacy_turns, self.legacy_cap))
 
     @property
     def report(self) -> tuple[str, ...]:
@@ -193,9 +204,11 @@ def version_line(recorded: str, running: str) -> str:
 
 
 def _first_lines(
-    recorded: str, running: str, *, budget_ran_out: bool, legacy: tuple[bool, bool, bool] = (False, False, False),
+    recorded: str, running: str, *, budget_ran_out: bool,
+    legacy: tuple[bool, bool, bool, bool] = (False, False, False, False),
 ) -> tuple[str, ...]:
-    said = [line for line, held in zip((LEGACY_SHARES, LEGACY_POINT, LEGACY_TURNS), legacy, strict=True) if held]
+    lines = (LEGACY_SHARES, LEGACY_POINT, LEGACY_TURNS, LEGACY_CAP)
+    said = [line for line, held in zip(lines, legacy, strict=True) if held]
     return (version_line(recorded, running), *said, *((BUDGET_RAN_OUT,) if budget_ran_out else ()))
 
 
@@ -214,13 +227,19 @@ def _legacy_turns(stored: StoredInputs) -> bool:
     return stored.scenario.turns > 1 and stored.scenario.turn_rule is TurnRule.EQUAL
 
 
+def _legacy_cap(stored: StoredInputs) -> bool:
+    """Whether *stored* is a game tree checked against the shared cost cap of 0.28.0 to 0.37.0 (SPC-188); one turn has
+    no tree to check."""
+    return stored.scenario.turns > 1 and stored.scenario.tree_cap is TreeCap.SHARED
+
+
 def said_first(stored: StoredInputs, running: str) -> tuple[str, ...]:
     """What a replay of *stored* says before it evaluates anything, read from the hashed inputs alone: the version
     that wrote them against *running*, whether it was evaluated under the rule 0.28.0 and 0.29.0 weighed P by, whether
-    under the miss rule of 0.28.0 to 0.31.0, whether a game tree built over equal turns, and whether the evaluation
-    recorded ran out of its time budget."""
+    under the miss rule of 0.28.0 to 0.31.0, whether a game tree built over equal turns, whether one checked against
+    the shared cost cap, and whether the evaluation recorded ran out of its time budget."""
     return _first_lines(stored.code_version, running, budget_ran_out=stored.budget_ran_out,
-                        legacy=(_legacy(stored), _legacy_point(stored), _legacy_turns(stored)))
+                        legacy=(_legacy(stored), _legacy_point(stored), _legacy_turns(stored), _legacy_cap(stored)))
 
 
 def input_hashes(result: ScenarioResult) -> list[dict[str, str | None]]:
@@ -339,5 +358,5 @@ def replay(
         (*_checks(stored, recorded, kept), *_picks(stored, recorded, result, kept), *_hashes(recorded, result),
          *_scores(stored, result)),
         budget_ran_out=stored.budget_ran_out, legacy_shares=_legacy(stored), legacy_point=_legacy_point(stored),
-        legacy_turns=_legacy_turns(stored),
+        legacy_turns=_legacy_turns(stored), legacy_cap=_legacy_cap(stored),
     )

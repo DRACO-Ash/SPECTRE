@@ -336,13 +336,13 @@ class TestStrictRefusal:
 
     def test_an_unknown_version_is_refused(self) -> None:
         _assert_refused(
-            *_stored({**_document(), "version": VERSION + 1}), "version 6", "knows versions 1, 2, 3, 4 and 5",
+            *_stored({**_document(), "version": VERSION + 1}), "version 7", "knows versions 1, 2, 3, 4, 5 and 6",
         )
 
     def test_a_version_that_is_not_a_whole_number_is_refused(self) -> None:
         text, sha256 = _stored({**_document(), "version": 2.0})
         assert '"version":2.0' in text
-        _assert_refused(text, sha256, "version 2.0", "knows versions 1, 2, 3, 4 and 5")
+        _assert_refused(text, sha256, "version 2.0", "knows versions 1, 2, 3, 4, 5 and 6")
 
     def test_a_truth_value_is_not_a_score(self) -> None:
         document = _document()
