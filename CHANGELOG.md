@@ -9,6 +9,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- `opentelemetry-api` 1.45.1 to 1.45.2, for CVE-2026-126360: a crafted `traceparent` value could make the trace-context propagator's regular expression run in quadratic time. It reaches SPECTRE only as a FastAPI dependency; only that pin moved in the lock files, which were recompiled with the repository's own command and a targeted upgrade.
+
 ## [0.43.0] - 2026-11-13
 
 **The force model measured against a higher-fidelity one, and every sampled note saying where it holds.**
