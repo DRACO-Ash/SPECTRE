@@ -381,7 +381,7 @@ def _newest_accepted(ordered: list[Any], satno: int) -> _Walk:
         if unchecked:
             logger.warning(
                 "%s: the newest %d of %d element sets were all refused; the %d older were not checked",
-                subject, len(checks), len(ordered), unchecked,
+                log_safe(subject), len(checks), len(ordered), unchecked,
             )
         return _Walk(None, "", (), checks[0], len(checks), unchecked)
     rec, tle = taken
