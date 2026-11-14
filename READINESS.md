@@ -290,8 +290,8 @@ the house standard. *Fix:* extend the pattern in
 **2. The OS patch step could not be exercised here.** *(medium)*
 Owner: `security-hardening`, `deploy-recipes`. `deb.debian.org` is blocked by
 this network's egress policy, so `apt-get upgrade` reported **SKIPPED**, loudly,
-naming its compensating control (the base image pinned by digest
-`sha256:6a0e06f5...`). It is written to distinguish "applied" from "skipped" and
+naming its compensating control (the base image pinned by digest, now
+`sha256:935c3c5b...`, Python 3.12.16). It is written to distinguish "applied" from "skipped" and
 never to report patched when nothing was checked. *Fix:* run
 `scripts/verify-container.sh` once from a network that can reach the Debian
 security repository and confirm the log reads `OS PATCH: applied`. If the
@@ -348,7 +348,9 @@ guidance.
 
 ## Before you submit
 
-1. Run `scripts/verify-container.sh`, which must end **all checks passed**, and
+1. Run `scripts/verify-container.sh`, which must end **all checks passed** with the
+   Grype image scan a PASS (a SKIPPED scan is not a pass; a finding usually means a
+   base digest bump), and
    `scripts/check-quality.sh`, which must end with every condition green.
 2. Confirm the App Store Environment Variables tab holds exactly `SECRET_KEY`,
    `SPECTRE_ADMIN_USER`, `SPECTRE_ADMIN_PASS`, saved as the complete set, then

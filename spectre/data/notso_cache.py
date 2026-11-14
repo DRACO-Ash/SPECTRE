@@ -62,6 +62,10 @@ _EPOCH_ZERO = "1970-01-01T00:00:00.000000Z"
 # "Jday 002 1934z": day of year and UTC time at the head of Event_Description.
 _JDAY = re.compile(r"\bJ\s*day\s*(\d{1,3})\s+(\d{2})(\d{2})\s*z", re.IGNORECASE)
 _SATNO = re.compile(r"^\d{1,9}$")
+#: How far either side of a record the cache is taken to cover (SPC-130). Tuned, not sourced: in the bundled cache
+#: the longest spell with no record for any object inside a synced stretch is under 4 days, and the shortest gap
+#: between stretches is 19 days, so a week with none is a gap.
+COVER_REACH = timedelta(days=3.5)
 
 
 def default_cache_path() -> Path:
@@ -146,6 +150,30 @@ def message_text(rec: dict[str, Any], satno: int | str) -> str:
     return "\n".join(lines)
 
 
+def event_class(rec: dict[str, Any]) -> str:
+    """The notice's kind: the head of ``Event_Class`` before " / ", or the legacy ``msgType``."""
+    body = rec.get("msgBody") or {}
+    full = " ".join(str(body.get("Event_Class") or rec.get("msgType") or "").split())
+    return full.split(" / ")[0].strip()
+
+
+def is_manoeuvre_notice(rec: dict[str, Any]) -> bool:
+    """Whether the notice reports a manoeuvre, in either spelling; not an RPO or a photometric change alone."""
+    kind = event_class(rec).lower()
+    return "maneuver" in kind or "manoeuvre" in kind
+
+
+def event_time(rec: dict[str, Any]) -> datetime | None:
+    """When the notice says the event began, or ``None`` when it gives no event time."""
+    body = rec.get("msgBody") or {}
+    return _event_start(str(body.get("Event_Description") or ""), _parse_iso(rec.get("createdAt")))
+
+
+def notice_time(rec: dict[str, Any]) -> datetime | None:
+    """When the notice says the event began, else when the record was created."""
+    return event_time(rec) or _parse_iso(rec.get("createdAt"))
+
+
 def _parse_iso(s: str | None) -> datetime | None:
     if not s:
         return None
@@ -227,6 +255,32 @@ class NotsoCache:
             return None
         # Records are appended in ascending order; last entry is newest.
         return _parse_iso(records[-1].get("createdAt"))
+
+    def covered_periods(self, now: datetime) -> tuple[tuple[datetime, datetime], ...]:
+        """The periods of time the cache covers, in order, never before its first record or past *now* (SPC-130).
+
+        The JCO files several notices a day across all objects, so a record shows the feed was synced through the
+        COVER_REACH either side of it, and more than twice that with no record for any object is a gap in what was
+        synced, not a quiet spell: a sync can stop part way, and the next starts after the newest record, so an
+        earlier gap is never filled. The cover ends at the last sync or the newest record, whichever is later, but
+        the sync stamps its time on any append, so only the reach of a record covers the time after it. A record
+        with no readable creation time says nothing of when the cache was filled and is passed over.
+        """
+        created = sorted(t for t in (_parse_iso(r.get("createdAt")) for r in self._data["records"]) if t is not None)
+        if not created:
+            return ()
+        first = created[0]
+        end = min(max(_parse_iso(self.last_sync_utc()) or first, created[-1]), now)
+        periods: list[tuple[datetime, datetime]] = []
+        for moment in created:
+            low, high = max(moment - COVER_REACH, first), min(moment + COVER_REACH, end)
+            if high < low:
+                continue
+            if periods and low <= periods[-1][1]:
+                periods[-1] = (periods[-1][0], max(periods[-1][1], high))
+            else:
+                periods.append((low, high))
+        return tuple(periods)
 
     def total_records(self) -> int:
         return len(self._data["records"])

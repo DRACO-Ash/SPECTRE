@@ -20,8 +20,12 @@
 <p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
   No HRR objects in regime <strong>{{ interceptor_regime }}</strong> — select a different red satellite or fetch a fresh HRR watchlist.
 </p>
-{% elif interceptor_regime is none %}
-{# The interceptor TLE gave no regime, so nothing was filtered (audit F-245). #}
+{% else %}
+{% if interceptor_regime is none %}
+{# The interceptor TLE gave no regime, so nothing was filtered (audit F-245).
+   The groups below are still offered, unfiltered: this sentence sat in a
+   branch of its own, which said "not filtered" and then offered no target
+   group at all (found by the SPC-010 route tests). #}
 <p class="label-dim" style="font-size:0.72rem; margin:0.2rem 0 0.4rem">
   Regime unknown for {{ interceptor_name }}: the target list is not filtered by orbit.
 </p>
@@ -29,6 +33,7 @@
 <p class="label-dim" style="font-size:0.72rem; margin:0.2rem 0 0.4rem">
   Regime: <strong style="color:var(--ops-blue)">{{ interceptor_regime }}</strong> — targets filtered to match interceptor orbit.
 </p>
+{% endif %}
 <div style="display:flex; gap:0.6rem; align-items:flex-end; flex-wrap:wrap">
   <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim); flex:1; min-width:10rem">
     Target Group
@@ -86,7 +91,7 @@
       <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
         Confidence
         <select name="manual_confidence" id="ts-manual-conf"
-                style="margin-top:0.2rem; width:100%; padding:0.3rem 0.4rem; font-size:0.8rem; border-radius:4px; border:1px solid var(--border); background:var(--bg-input, var(--bg-card)); color:var(--text-primary)">
+                style="margin-top:0.2rem; width:100%; padding:0.3rem 0.4rem; font-size:0.8rem; border-radius:4px; border:1px solid var(--border); background:var(--bg-input, var(--bg)); color:var(--text-primary)">
           <option value="CONFIRMED">CONFIRMED</option>
           <option value="HIGH">HIGH</option>
           <option value="MEDIUM" selected>MEDIUM</option>
@@ -111,12 +116,53 @@
             hx-target="#manual-tle-list"
             hx-swap="outerHTML"
             hx-include="[name='manual_name'],[name='manual_tle'],[name='manual_confidence']"
-            hx-on::after-request="if (event.detail.successful) { document.getElementById('ts-manual-name').value=''; document.getElementById('ts-manual-tle').value=''; }"
+            data-after-request="clearManualTarget"
             style="margin-bottom:0.4rem">Add TLE</button>
   </div>
 
   {# Current list — replaced by add/remove responses (partial wraps its own #manual-tle-list div) #}
   {% include "partials/sweep_manual_tles.html" %}
+</details>
+{% endif %}
+
+{# Response time for one named target (SPC-022). Sent with the sweep; decide-by
+   uses a target's own time, else the one above; with neither, decide-by says it needs one and shows no time
+   (SPC-211). Guarded,
+   because the template tests render with StrictUndefined. #}
+{% if interceptor_name %}
+{% set held_times = response_times if response_times is defined and response_times else {} %}
+<details id="ts-target-response" style="margin-top:0.6rem; border-top:1px solid var(--border); padding-top:0.5rem">
+  <summary style="cursor:pointer; font-size:0.72rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; list-style:none; display:flex; align-items:center; gap:0.4rem; user-select:none">
+    <span style="display:inline-block; transition:transform 0.15s; font-size:0.65rem">&#9654;</span>
+    Response Time per Target
+    {% if held_times %}
+    <span style="background:var(--ops-blue); color:#fff; font-size:0.65rem; padding:0.1rem 0.4rem; border-radius:3px; font-weight:700">{{ held_times | length }}</span>
+    {% endif %}
+  </summary>
+  <p class="label-dim" style="font-size:0.7rem; margin:0.4rem 0">
+    The hours you need to respond for one target. Decide-by uses it for that target and your response time above for any other; if neither is set, decide-by says it needs one and shows no time. It is held when you sweep; blank hours keep what is held. A time held for a target can be changed, and is kept until you sign out.
+  </p>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.4rem">
+    <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
+      Target Name
+      <input type="text" name="target_response_name" id="ts-target-response-name" class="form-control"
+             placeholder="e.g. BLUE-1" maxlength="80"
+             style="margin-top:0.2rem; padding:0.3rem 0.4rem; font-size:0.8rem; width:100%">
+    </label>
+    <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
+      Response time (h)
+      <input type="number" name="target_response_h" id="ts-target-response-h" class="form-control"
+             placeholder="hours" step="0.5" min="0.5" max="168"
+             style="margin-top:0.2rem; padding:0.3rem 0.4rem; font-size:0.8rem; width:100%">
+    </label>
+  </div>
+  {% if held_times %}
+  <ul class="label-dim" style="font-size:0.7rem; margin:0.4rem 0 0; padding-left:1rem">
+    {% for name, hours in held_times | dictsort %}
+    <li>{{ name }}: {{ "%g" | format(hours) }} h</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
 </details>
 {% endif %}
 

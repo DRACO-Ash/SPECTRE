@@ -41,10 +41,25 @@ def test_a_decision_result_names_its_scenario() -> None:
 def test_a_threat_verdict_names_its_evidence() -> None:
     access = AccessEvidence(best_delta_v_m_s=12.0, time_to_arrival_hours=6.0, method="hohmann", regime="GEO")
     p = _populated(assess_threat(access, CapabilityEvidence(intel_threat_level="LOW")).provenance)
-    assert [i.label for i in p.inputs] == ["access", "capability"]
+    assert [i.label for i in p.inputs] == ["access", "capability", "confidence context"]
     other = assess_threat(access, CapabilityEvidence(intel_threat_level="HIGH")).provenance
     assert other is not None
     assert other.inputs[1].sha256 != p.inputs[1].sha256
+
+
+def test_a_threat_verdict_names_what_its_confidence_rested_on() -> None:
+    """SPC-160: the data mode and custody set the confidence, so they are inputs too."""
+    from spectre.domain.custody import Custody
+    from spectre.domain.threat_assessment import ConfidenceContext
+
+    access = AccessEvidence(best_delta_v_m_s=12.0, time_to_arrival_hours=6.0, method="hohmann", regime="GEO")
+    capability = CapabilityEvidence(intel_threat_level="LOW")
+    live = assess_threat(access, capability, ConfidenceContext("REAL", Custody.HELD)).provenance
+    synthetic = assess_threat(access, capability, ConfidenceContext("SYNTHETIC", Custody.HELD)).provenance
+    again = assess_threat(access, capability, ConfidenceContext("REAL", Custody.HELD)).provenance
+    assert live is not None and synthetic is not None and again is not None
+    assert live.inputs[2].sha256 != synthetic.inputs[2].sha256
+    assert live.inputs == again.inputs, "same inputs, same hash"
 
 
 def test_a_pattern_of_life_assessment_names_every_tle_and_its_epoch() -> None:

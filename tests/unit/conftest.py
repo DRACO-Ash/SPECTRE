@@ -22,6 +22,8 @@ def client() -> object:
     from fastapi.testclient import TestClient
 
     from spectre.web.app import app
+    from tests.conftest import keep_each_connection_on_its_own_loop
 
+    keep_each_connection_on_its_own_loop()
     with TestClient(app, raise_server_exceptions=True) as c:
         yield c

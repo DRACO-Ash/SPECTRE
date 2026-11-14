@@ -13,6 +13,15 @@
       {{ "%.1f" | format(elapsed_s) }}s
     </span>
   </div>
+  {# Who was left out as not able to act, and why: a stage or an old payload must not vanish unsaid (1357a67). #}
+  {% if not_screened is defined and not_screened %}
+  <p class="field-meta" role="note">{{ not_screened }}</p>
+  {% endif %}
+  {#- Each live set taken over newer ones the check refused (SPC-243): a plain note, never the provenance banner,
+      which calls its sets illustrative. -#}
+  {% for note in (passed_over_notes if passed_over_notes is defined else []) %}
+  <p class="field-meta elset-passed-over" role="note"><span class="badge-warn">Newer set refused</span> {{ note }}</p>
+  {% endfor %}
 
   {% include "partials/_provenance_banner.html" %}
 
@@ -37,10 +46,16 @@
          least readable thing on the panel. .spectre-band-badge carries the
          darkened fill token instead, which clears 4.5:1 in both themes. #}
       <span class="spectre-band-badge spectre-band-{{ worst.verdict_label | lower }}">&#9888; {{ worst.verdict_label }}</span>
-      <span style="font-size:0.78rem; font-weight:600; color:var(--ops-gold)">MOST DANGEROUS ACTOR</span>
+      <span style="font-size:0.78rem; font-weight:600; color:var(--gold)">MOST DANGEROUS ACTOR</span>
       <strong style="font-size:0.82rem">{{ worst.actor_name }}</strong>
       <span style="font-size:0.72rem; color:var(--text-muted)">[{{ worst.actor_satno }}]{% if worst.country %} &#183; {{ worst.country }}{% endif %}</span>
     </div>
+    {# Only with the verdict switch on (SPC-175): why the badge reads the band
+       it does, and what the current rule reads, in one line (I13). The
+       rationale below is the current rule's, which this line names. #}
+    {% if worst.switched %}
+    <div class="verdict-switch">{{ worst.switched.reason }}</div>
+    {% endif %}
 
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:0.4rem; margin-bottom:0.5rem">
       <div class="stat-card">
@@ -93,6 +108,13 @@
   </div>
   {% endif %}
 
+  {# ── An actor whose verdict its own Threat range does not bear out (SPC-169) ── #}
+  {% if screening.understanding_disagreement %}
+  <div class="screen-understanding-disagreement" style="border-left:4px solid var(--spectre-status-violet); background:rgba(var(--spectre-status-violet-rgb), 0.07); border-radius:6px; padding:0.6rem 0.9rem; margin:0.5rem 0">
+    <p style="margin:0; font-size:0.73rem; color:var(--text-dim)">{{ screening.understanding_disagreement }}</p>
+  </div>
+  {% endif %}
+
   {# ── Ranked actor table ───────────────────────────────────────────────── #}
   <div class="hrr-scroll" style="max-height:340px; margin-top:0.5rem">
     <table class="hrr-table" style="font-size:0.68rem">
@@ -103,6 +125,8 @@
           <th scope="col">SATNO</th>
           <th scope="col">Country</th>
           <th scope="col">Verdict</th>
+          <th scope="col">Range</th>
+          <th scope="col">Understanding</th>
           <th scope="col">Access</th>
           <th scope="col">Capability</th>
           <th scope="col">Posture</th>
@@ -116,15 +140,44 @@
         {% set vc = band_colours.get(v.verdict_label, ("var(--spectre-status-unknown)", "rgba(var(--spectre-status-unknown-rgb), 0.06)")) %}
         {% set profiles = profiles_by_actor.get(v.actor_satno, []) %}
         {% set row_id = 'scr-' ~ loop.index0 %}
-        <tr class="threat-parent" data-row="{{ row_id }}" onclick="scrToggle(this.dataset.row)" style="cursor:pointer"
-            tabindex="0" onkeydown="spectreActivate(event)"
+        <tr class="threat-parent" data-row="{{ row_id }}" data-action="scrToggle" style="cursor:pointer"
+            tabindex="0" data-activate
             title="Open the profiles behind this verdict">
           <td class="col-dim">{{ loop.index }}</td>
           {% set badge_mode = actor_modes.get(v.actor_satno, "REAL") %}
           <td><strong>{{ v.actor_name }}</strong>{% if badge_mode not in ("REAL", "MANUAL") %}{% include "partials/_provenance_badge.html" %}{% endif %}</td>
           <td class="col-dim">{{ v.actor_satno }}</td>
           <td class="col-dim">{{ v.country or "-" }}</td>
+          {# With the verdict switch on (SPC-175) the verdict is concept section
+             4.8's, and the cell opens on why and what the current rule reads:
+             a details element, so a keyboard or touch user reaches it too. #}
+          {% if v.switched %}
+          <td class="screen-verdict"><details><summary><span style="color:{{ vc[0] }}; font-weight:700">{{ v.verdict_label }}</span></summary>
+            <div>{{ v.switched.reason }}</div></details></td>
+          {% else %}
           <td><span style="color:{{ vc[0] }}; font-weight:700">{{ v.verdict_label }}</span></td>
+          {% endif %}
+          {# Threat Understanding beside the verdict (SPC-169): the range the
+             actor's held evidence earns and how well founded it is. #}
+          {% if v.understanding %}
+          <td class="screen-range" style="color:var(--spectre-status-{{ v.understanding.ceiling.label | lower }})">{{ v.understanding.range_label }}</td>
+          {# The statement and the cue in a details element, so a keyboard or
+             screen reader reaches them; collapsed by default. #}
+          {% if v.understanding.statement or v.understanding.cue %}
+          <td class="screen-understanding col-dim">
+            <details>
+              <summary>{{ v.understanding.understanding_label }}</summary>
+              <div>{{ v.understanding.statement }}</div>
+              {% if v.understanding.cue %}<div>Raise it by: {{ v.understanding.cue }}.</div>{% endif %}
+            </details>
+          </td>
+          {% else %}
+          <td class="screen-understanding col-dim">{{ v.understanding.understanding_label }}</td>
+          {% endif %}
+          {% else %}
+          <td class="screen-range col-dim">not assessed</td>
+          <td class="screen-understanding col-dim">not assessed</td>
+          {% endif %}
           <td class="col-dim">{{ v.assessment.access_label }}</td>
           <td class="col-dim">{{ v.assessment.capability_label }}</td>
           <td class="col-dim">{{ v.assessment.posture_label }}</td>
@@ -138,7 +191,7 @@
         <tr class="scr-child {{ row_id }}" style="display:none">
           <td></td>
           <td class="col-dim" colspan="3">{{ e.burn_location }} &#183; {{ e.burn_epoch.strftime('%Y-%m-%d %H:%M') }}Z</td>
-          <td class="col-dim" colspan="4">{{ e.posture_label }}</td>
+          <td class="col-dim" colspan="6">{{ e.posture_label }}</td>
           <td style="text-align:right" class="col-dim">{{ e.tof_hours | tof }}</td>
           <td class="mnv-dv" style="text-align:right">{{ e.delta_v_m_s | m_s }}</td>
           <td class="col-dim">{{ e.method }}</td>
@@ -182,13 +235,5 @@
 
 </div>
 
-<script>
-  /* Open one actor's profiles. Kept here rather than in the page shell so the
-     behaviour arrives with the fragment that needs it. */
-  function scrToggle(cls) {
-    document.querySelectorAll('.scr-child.' + cls).forEach(function (row) {
-      row.style.display = row.style.display === 'none' ? '' : 'none';
-    });
-  }
-</script>
+{# Opening one actor's profiles is scrToggle in /static/js/sweep.js (SPC-199). #}
 {% endif %}

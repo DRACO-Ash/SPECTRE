@@ -5,32 +5,7 @@
 </div>
 {% else %}
 
-<script>
-function hrrSort(th) {
-  var table = th.closest('table');
-  var col = th.cellIndex;
-  var asc = th.dataset.dir !== 'asc';
-  table.querySelectorAll('th').forEach(function(h) { h.dataset.dir = ''; });
-  th.dataset.dir = asc ? 'asc' : 'desc';
-  var tbody = table.querySelector('tbody');
-  var rows = Array.from(tbody.rows);
-  rows.sort(function(a, b) {
-    var av = (a.cells[col].dataset.val !== undefined ? a.cells[col].dataset.val : a.cells[col].textContent).trim();
-    var bv = (b.cells[col].dataset.val !== undefined ? b.cells[col].dataset.val : b.cells[col].textContent).trim();
-    var an = parseFloat(av), bn = parseFloat(bv);
-    if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
-    return asc ? av.localeCompare(bv) : bv.localeCompare(av);
-  });
-  rows.forEach(function(r) { tbody.appendChild(r); });
-  table.querySelectorAll('.hrr-sort-ind').forEach(function(s) { s.textContent = ''; });
-  th.querySelector('.hrr-sort-ind').textContent = asc ? ' ▲' : ' ▼';
-  /* Same fact as the glyph, for an operator who cannot see it. Only the
-     headers that carry aria-sort are reset, so the leading actions column
-     is never told it is an unsorted sortable column. */
-  table.querySelectorAll('th[aria-sort]').forEach(function(h) { h.setAttribute('aria-sort', 'none'); });
-  th.setAttribute('aria-sort', asc ? 'ascending' : 'descending');
-}
-</script>
+{# hrrSort is in /static/js/operator.js (SPC-199). #}
 
 {% if hrr_blue %}
 <div class="hrr-scroll">
@@ -38,11 +13,11 @@ function hrrSort(th) {
     <thead>
       <tr>
         <th class="no-sort"></th>
-        <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Name<span class="hrr-sort-ind"></span></th>
-        <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">SATNO<span class="hrr-sort-ind"></span></th>
-        <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Country<span class="hrr-sort-ind"></span></th>
-        <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Orbit<span class="hrr-sort-ind"></span></th>
-        <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Rank<span class="hrr-sort-ind"></span></th>
+        <th data-action="hrrSort" data-activate tabindex="0" scope="col" aria-sort="none">Name<span class="hrr-sort-ind"></span></th>
+        <th data-action="hrrSort" data-activate tabindex="0" scope="col" aria-sort="none">SATNO<span class="hrr-sort-ind"></span></th>
+        <th data-action="hrrSort" data-activate tabindex="0" scope="col" aria-sort="none">Country<span class="hrr-sort-ind"></span></th>
+        <th data-action="hrrSort" data-activate tabindex="0" scope="col" aria-sort="none">Orbit<span class="hrr-sort-ind"></span></th>
+        <th data-action="hrrSort" data-activate tabindex="0" scope="col" aria-sort="none">Rank<span class="hrr-sort-ind"></span></th>
       </tr>
     </thead>
     <tbody>
@@ -89,11 +64,11 @@ function hrrSort(th) {
       <thead>
         <tr>
           <th class="no-sort"></th>
-          <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Name<span class="hrr-sort-ind"></span></th>
-          <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">SATNO<span class="hrr-sort-ind"></span></th>
-          <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Country<span class="hrr-sort-ind"></span></th>
-          <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Orbit<span class="hrr-sort-ind"></span></th>
-          <th onclick="hrrSort(this)" onkeydown="spectreActivate(event)" tabindex="0" scope="col" aria-sort="none">Rank<span class="hrr-sort-ind"></span></th>
+          <th data-action="hrrSort" data-activate tabindex="0" scope="col" aria-sort="none">Name<span class="hrr-sort-ind"></span></th>
+          <th data-action="hrrSort" data-activate tabindex="0" scope="col" aria-sort="none">SATNO<span class="hrr-sort-ind"></span></th>
+          <th data-action="hrrSort" data-activate tabindex="0" scope="col" aria-sort="none">Country<span class="hrr-sort-ind"></span></th>
+          <th data-action="hrrSort" data-activate tabindex="0" scope="col" aria-sort="none">Orbit<span class="hrr-sort-ind"></span></th>
+          <th data-action="hrrSort" data-activate tabindex="0" scope="col" aria-sort="none">Rank<span class="hrr-sort-ind"></span></th>
         </tr>
       </thead>
       <tbody>

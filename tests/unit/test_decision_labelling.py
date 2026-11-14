@@ -11,6 +11,7 @@ not the cautious maximin one (audit F-S05-01).
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -96,7 +97,7 @@ class TestTheOperatorIsTold:
         html = _render("partials/decision_results.html", {"result": evaluate_scenario(scenario)})
         assert "Modelled estimate, not a computed solution" in html
         assert "Robust Recommendation" not in html
-        assert "(model)" in html, "the closest-approach figure in each cell must be marked as modelled"
+        assert "(lookup)" in html, "the closest-approach figure in each cell must be marked with its basis"
 
     def test_the_panel_offers_no_maximin(self) -> None:
         panel = (_TEMPLATE_DIR / "partials" / "decision_panel.html").read_text(encoding="utf-8")
@@ -123,7 +124,8 @@ class TestEveryModelledCellSaysSo:
     def test_every_custody_mark_is_labelled_modelled(self) -> None:
         scenario, _ = _two_by_two()
         result = evaluate_scenario(scenario)
-        html = " ".join(_render("partials/decision_results.html", {"result": result}).split())
+        html = _render("partials/decision_results.html", {"result": result})
+        text = " ".join(re.sub(r"<[^>]+>", "", html).split())
         cells = sum(len(row) for row in result.outcome_matrix)
-        assert html.count("custody (model)") == cells
-        assert html.count("km (model)") == cells
+        assert text.count("custody (lookup)") == cells
+        assert text.count("km (lookup)") == cells

@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import math
 import re
 from datetime import UTC, datetime
 from typing import Annotated, Any
@@ -204,7 +205,8 @@ async def export_intercepts(
             r.blue_name,
             f"{r.total_delta_v_m_s:.3f}",
             r.arrival_epoch.strftime("%Y-%m-%d %H:%M:%S"),
-            f"{r.intercept_range_km:.3f}",
+            # A flown miss the search could not compute is NaN: written "not computed", never "nan" (SPC-238).
+            f"{r.intercept_range_km:.3f}" if math.isfinite(r.intercept_range_km) else "not computed",
             len(r.burns),
         ]
         if r.burns:

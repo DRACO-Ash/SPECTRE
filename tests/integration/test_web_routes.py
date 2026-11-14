@@ -221,8 +221,12 @@ class TestAssetAddAndRemoveF267:
     @pytest.mark.parametrize("colour", ["blue", "red"])
     def test_text_that_is_not_a_tle_is_refused(self, client: object, auth_cookie: str, colour: str) -> None:
         resp = self._post(client, auth_cookie, colour, "NotATle", "line1\nline2")
-        assert b"line 1 and line 2" in resp.content  # type: ignore[attr-defined]
-        assert b"NotATle" not in resp.content  # type: ignore[attr-defined]
+        # The acceptance check's sentence names the object and what failed (SPC-201); the object is not listed.
+        assert (
+            b"The element set for NotATle was refused: the first line does not begin with its line number, 1"
+            in resp.content  # type: ignore[attr-defined]
+        )
+        assert b"NotATle</" not in resp.content  # type: ignore[attr-defined]
 
     def test_a_name_with_a_slash_can_be_removed(self, client: object, auth_cookie: str) -> None:
         from urllib.parse import quote

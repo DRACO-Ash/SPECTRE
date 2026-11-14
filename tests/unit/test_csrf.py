@@ -139,34 +139,43 @@ class TestTemplateFormsCarryTheToken:
     _ACTION = _re.compile(r'action="([^"]+)"')
     _HX_VERBS = ("hx-post", "hx-put", "hx-patch", "hx-delete")
 
-    def _plain_post_forms(self) -> list[tuple[str, int, str, bool]]:
-        root = Path(__file__).resolve().parents[2] / "spectre" / "web" / "templates"
+    def _forms_in(self, name: str, body_text: str) -> list[tuple[str, int, str, bool]]:
+        """Each plain POST form in *body_text*: (file, line, action, carries the token)."""
         found = []
-        for path in sorted(root.rglob("*.html")):
-            body_text = path.read_text(encoding="utf-8")
-            for match in self._FORM_TAG.finditer(body_text):
-                tag = match.group(0)
-                if any(verb in tag for verb in self._HX_VERBS):
-                    continue  # HTMX supplies the header
-                if 'method="post"' not in tag.lower():
-                    continue
-                close = body_text.find("</form>", match.end())
-                inner = body_text[match.end() : close if close != -1 else None]
-                action_match = self._ACTION.search(tag)
-                found.append((
-                    str(path.relative_to(root)),
-                    body_text[: match.start()].count("\n") + 1,
-                    action_match.group(1) if action_match else "",
-                    "csrf_token" in inner,
-                ))
+        for match in self._FORM_TAG.finditer(body_text):
+            tag = match.group(0)
+            if any(verb in tag for verb in self._HX_VERBS):
+                continue  # HTMX supplies the header
+            if 'method="post"' not in tag.lower():
+                continue
+            close = body_text.find("</form>", match.end())
+            inner = body_text[match.end() : close if close != -1 else None]
+            action_match = self._ACTION.search(tag)
+            found.append((
+                name,
+                body_text[: match.start()].count("\n") + 1,
+                action_match.group(1) if action_match else "",
+                "csrf_token" in inner,
+            ))
         return found
 
-    def test_every_plain_post_form_carries_the_token(self) -> None:
-        offenders = [
+    def _plain_post_forms(self) -> list[tuple[str, int, str, bool]]:
+        root = Path(__file__).resolve().parents[2] / "spectre" / "web" / "templates"
+        return [
+            form for path in sorted(root.rglob("*.html"))
+            for form in self._forms_in(str(path.relative_to(root)), path.read_text(encoding="utf-8"))
+        ]
+
+    @staticmethod
+    def _offenders(forms: list[tuple[str, int, str, bool]]) -> list[str]:
+        return [
             f"{name}:{line} action={action or '(none)'}"
-            for name, line, action, has_token in self._plain_post_forms()
+            for name, line, action, has_token in forms
             if not has_token and action not in _EXEMPT_PATHS
         ]
+
+    def test_every_plain_post_form_carries_the_token(self) -> None:
+        offenders = self._offenders(self._plain_post_forms())
         assert not offenders, (
             "these forms submit without a CSRF token and will be rejected with 403: "
             f"{offenders}. Add <input type=\"hidden\" name=\"csrf_token\" "
@@ -180,3 +189,19 @@ class TestTemplateFormsCarryTheToken:
         assert any(action == "/login" for _, _, action, _ in forms), (
             "the login form should be among them, as the exempt-path case"
         )
+
+    def test_the_guard_rejects_the_form_that_stranded_operators_in_training(self) -> None:
+        """SPC-074: the state watched red by hand (``training.html:131 action=/training/leave``), committed.
+
+        The companion case above proves only that the scanner has input; this
+        proves it refuses a bad form and lets each good form through.
+        """
+        planted = (
+            '<form method="post" action="/login"><input name="username"></form>\n'
+            '<form method="POST" action="/training/leave">\n  <button>Return to Operations</button>\n</form>\n'
+            '<form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">'
+            "</form>\n"
+            '<form hx-post="/plan/threat/sweep" method="post"><button>Sweep</button></form>\n'
+            '<form method="get" action="/search"><input name="q"></form>\n'
+        )
+        assert self._offenders(self._forms_in("training.html", planted)) == ["training.html:2 action=/training/leave"]

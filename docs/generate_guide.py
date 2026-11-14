@@ -181,7 +181,7 @@ def _add_body(doc: Document, text: str) -> None:
 def _add_bullet(doc: Document, text: str, level: int = 0) -> None:
     """Add a bullet point with alternating blue/gold markers."""
     colour = OPS_BLUE if level % 2 == 0 else COMMAND_GOLD
-    marker = "\u2022 " if level == 0 else "  \u25E6 "
+    marker = "\u25CF " if level == 0 else "  \u25A0 "
     indent = "    " * level
     p = doc.add_paragraph()
     p.paragraph_format.space_after = Pt(2)
@@ -396,10 +396,12 @@ def _section_01_introduction(doc: Document) -> None:
         "references Notice to Space Operators messages against detected manoeuvres to build "
         "operator behavioural profiles; Photometry Analysis detects brightness anomalies "
         "from light-curve data that may indicate attitude changes or physical alterations. "
-        "The Decision Engine applies game-theoretic scenario evaluation to support "
-        "commander-level response selection, and the Training Environment provides a "
-        "sandboxed gamified environment for operator skill development across five "
-        "progressive levels."
+        "The Decision Engine applies decision analysis over operator-entered rows to "
+        "support commander-level response selection, with a worst-case floor (minimax), a "
+        "best case (minimin) and expected value. Randomised (mixed) responses are not "
+        "considered, so minimax is a guaranteed floor over pure responses, not a game "
+        "solution. The Training Environment provides a sandboxed gamified environment for "
+        "operator skill development across five progressive levels."
     )
     _add_body(doc,
         "Integration with the Unified Data Library (UDL) provides authoritative live TLE "
@@ -449,6 +451,8 @@ def _section_02_system_overview(doc: Document) -> None:
             ["Authentication", "SQLAlchemy + bcrypt", "Operator credential management"],
             ["TLE Source", "UDL (Unified Data Library)", "Authoritative TLE retrieval via HTTPS"],
             ["Charting", "Chart.js 4.x", "Trade-space scatter plots in the browser"],
+            ["Browser Scripts", "First-party files in /static/js",
+             "Every control's behaviour; the Content Security Policy allows no inline script and no eval"],
             ["Design System", "Bluestaq Dark Ops", "Navy/gold operational colour scheme"],
         ],
     )
@@ -501,11 +505,36 @@ def _section_03_getting_started(doc: Document) -> None:
 
     _add_heading_h2(doc, "TLE Source Provider")
     _add_body(doc,
-        "UDL aggregates TLEs from multiple source providers (e.g., 18 SDS, LeoLabs). "
-        "When you connect, SPECTRE automatically discovers available sources for your "
-        "account by probing the ISS elset. A 'TLE Source' selector appears in the "
-        "UDL panel. Leave it blank to accept UDL's default, or select a specific "
-        "provider to pin all subsequent TLE fetches to that source."
+        "UDL holds element sets from several providers (for example 18th SPCS, ExoAnalytic, KBR, KRTL, LeoLabs "
+        "and NorthStar). A latest fetch, whether from the TLE panel, a quick-add, a sweep or the refresh at "
+        "connect, asks UDL's element set archive over the last 72 hours first and takes the newest set any "
+        "provider filed; only when the archive holds none in that window does it ask UDL's current catalogue. "
+        "If that newest set is refused, for example because it is an SGP4-XP set or filed with ephemeris type 2, "
+        "the sets are checked newest first and the newest that passes is taken; only when none passes is nothing "
+        "stored, and you are told why."
+    )
+    _add_body(doc,
+        "When a newer set was refused and an older one taken, you are told so in one sentence, for example: "
+        "'A newer element set for GOES-16 (41866), from PROVIDER-A with epoch 2026-11-13 12:28:48.002 UTC, was "
+        "refused: its ephemeris type is 2, not 0, the SGP4 type every propagator here assumes. The set used is "
+        "PROVIDER-B's, epoch 2026-11-13 12:28:48.000 UTC, 0.002 s older.' It appears in the TLE panel, beside a "
+        "quick-add, among the sweep's notes, as a note on the screen's result, beside an intercept result's Data "
+        "Mode badge, which stays REAL, in the burn watch's note, in the refresh note at connect and in the run log. "
+        "Epochs are given to the millisecond, since providers' sets for one orbit can be that close. The age shown "
+        "for the object is always the age of the set used, never of the newer one refused. Up to 500 sets are "
+        "checked; past that the fetch is refused, and the refusal says the older sets were not checked."
+    )
+    _add_body(doc,
+        "When you connect, SPECTRE lists the providers that filed for the ISS over the last day, and adds every "
+        "provider the refresh at connect finds on the sets you hold. The list is cleared when you disconnect. A "
+        "'TLE Source' selector appears in the UDL panel: leave it blank to take the newest set from every "
+        "provider, or choose one to narrow every latest fetch to that provider."
+    )
+    _add_body(doc,
+        "A set fetched from UDL keeps the provider that filed it. The red card shows it beside the data mode "
+        "(Provider: LeoLabs \u00b7 REAL, for example), or says the set was entered by hand, and the sweep names "
+        "the interceptor's provider beside its element set age. Editing a fetched set's text makes it your own, "
+        "so its data mode and provider are dropped."
     )
 
     _add_heading_h2(doc, "Setting Scenario Time")
@@ -1157,9 +1186,37 @@ def _section_10_intercept_calculations(doc: Document) -> None:
             ["Manoeuvre Start", "UTC epoch for the first burn", "Current UTC time"],
             ["Coast Hours", "Coast duration before first burn (hours)", "1.0"],
             ["Intercept Hours", "Time of flight for Lambert solver (hours)", "6.0"],
-            ["Max ΔV", "Upper bound on acceptable ΔV (m/s)", "500"],
+            ["Targeting", "Search: try burning now and at the red satellite's next apogee, perigee and nodes, with a range of times of flight, revolutions and hops, and keep each red approach's cheapest plan that arrives. Typed: solve each method once with the values below.", "Search for the cheapest approach"],
+            ["Approach within", "How close, in metres, a red approach must come to the target to count; 0 means 50 km.", "0 (50 km)"],
+            ["Max ΔV", "ΔV budget (m/s) for evasion, the envelope and typed minimum-time, and the reference for each row's budget share. The default is the most any satellite in JCO's NOTSO record spent on station in 14 days (owner ruling, 12 November 2026).", "171.8"],
             ["Intercept Data Mode", "Re-fetch red/blue TLEs from UDL under this data mode before computing. Leave blank to use session TLEs.", "Session default (REAL)"],
         ],
+    )
+
+    _add_heading_h2(doc, "Red Approaches, Realism and the Most Likely Course of Action")
+    _add_body(doc,
+        "Calculate All Intercepts ranks the 23 methods in three groups: red approaches first, then avoidance and "
+        "defence (COLA, Evasion and Formation Defence, blue's options, never ranked as red threats), then the "
+        "assessments, J2 drift among them."
+    )
+    _add_bullet(doc, "Flown closest approach: each red approach's burns are flown (two-body for red between burns, "
+                     "SGP4 for the target) and the closest it comes to the target is reported, with the 1-sigma "
+                     "element-set error band beside it. The V-bar and H-bar hops list every burn of the sequence, "
+                     "and are flown too. "
+                     "A figure that could not be computed reads \"not computed\" and never counts as arriving. The "
+                     "V-bar hop burns toward the target's side: inward for a target ahead, outward for one behind.")
+    _add_bullet(doc, "Realism: Seen before (within what this satellite has spent on station in its busiest 14 days), "
+                     "Possible (within 171.8 m/s, the most any satellite in the NOTSO record spent) or Unrealistic. "
+                     "The record is a floor on what satellites have done, not a ceiling on what they could do.")
+    _add_bullet(doc, "No approach: the plan never comes within the approach distance. Such rows, and Unrealistic ones, "
+                     "stay listed, dimmed, with their reason; they cannot set the worst case.")
+    _add_bullet(doc, "Most likely course of action: the cheapest red approach that arrives and is Seen before or "
+                     "Possible, with its burn point, ΔV and closest approach.")
+    _add_body(doc,
+        "Expand a row to see the burn point, coast, time of flight, revolutions or hops the search kept, how many "
+        "options it compared, the closest approach and the realism reason. When searching, minimum-time is given "
+        "36.8 m/s, what nine in ten satellites stay within over 14 days, or the red satellite's own busiest 14 days "
+        "if that is more."
     )
 
     _add_heading_h2(doc, "Interpreting the Burn Table")
@@ -1206,7 +1263,7 @@ def _section_11_trade_space(doc: Document) -> None:
         "Run intercept calculations with different methods and parameters. After "
         "the second solution, the trade-space chart appears automatically below the "
         "burn table. Hover over any point to see the method, ΔV, transfer time, and "
-        "miss distance."
+        "miss distance, or \"not computed\" where it could not be."
     )
     _add_body(doc,
         "Look for the Pareto front — solutions in the lower-left region of the chart "
@@ -1253,128 +1310,592 @@ def _section_12_scenario_planning(doc: Document) -> None:
 
 
 def _section_13_decision_engine(doc: Document) -> None:
-    """Section 13: Decision Engine & Scenario Evaluation."""
+    """Section 13: Decision Engine & Scenario Evaluation, as built at 0.24.0 (SPC-152), with SPC-191's score scales."""
     _add_page_break(doc)
     _add_eyebrow(doc, "Section 13")
     _add_heading_h1(doc, "Decision Engine & Scenario Evaluation")
 
     _add_body(doc,
-        "The SPECTRE Decision Engine applies game-theoretic analysis to space control "
-        "scenarios. Operators define a grid of adversary courses of action (COAs) against "
-        "a set of friendly response options, and the engine evaluates every combination "
-        "using deterministic SGP4 propagation and a weighted composite scoring function. "
-        "The result is a ranked response recommendation with an expected utility score "
-        "and risk-adjusted analysis."
+        "Something moved. The sweep tells you whether it can reach one of yours, how long you have and whether "
+        "it means anything. The Decision Engine answers the last part of the question: what you need to decide, "
+        "and by when. You set out what red might do next and what you could do in reply; the engine scores every "
+        "pairing, ranks your responses, shows the pick of each of its three rules side by side, and recommends "
+        "the pick of your deployment's primary rule, whichever rule you choose."
     )
     _add_body(doc,
-        "The Decision Engine panel is accessible from the Intelligence column of the main "
-        "dashboard. It is designed for commander-level use after the initial threat "
-        "assessment is complete — it answers the question 'Given what the adversary might "
-        "do, what is our best response?' rather than 'How do we intercept?'"
+        "The recommendation is a modelled estimate, not a computed solution, and the page says so. Every figure "
+        "behind it states what it rests on, so you can see how much of the answer is physics and how much is rule "
+        "of thumb."
     )
 
-    _add_heading_h2(doc, "Adversary Action Modelling")
+    _add_heading_h2(doc, "What Each Figure Rests On")
     _add_body(doc,
-        "The operator defines up to four adversary actions, each representing a distinct "
-        "course of action the adversary could take. Each action is characterised by:"
+        "Each figure in the results is marked with its basis in words, with the rule behind it beside it:"
+    )
+    _add_data_table(doc,
+        ["Basis", "What it means"],
+        [
+            ["Computed", "Propagated from the real element sets of the bound red track and blue asset, both on one "
+             "propagator, with no randomness."],
+            ["Sampled", "The P5 of many propagated runs of a hypothesised red burn, the miss only 1 run in 20 came "
+             "closer than, with its spread and how well it is known."],
+            ["Lookup", "A fixed rule of thumb or table value. It moves the ranking but rests on no orbit. Each one "
+             "is listed in docs/lookup-register.md with its source, owner and the date it was set."],
+            ["Judgement", "A value on the panel when you evaluated, set by you or kept where the panel started it. "
+             "It is not evidence, and it never lends a figure more standing than a lookup."],
+        ],
+    )
+    _add_body(doc,
+        "The composite score is always a lookup. Its weights are not yet cited (SPC-151), so read a cell's figures, "
+        "not only its rank. No score is coloured by its value: no sourced threshold says where a score turns good "
+        "or bad, so each is shown as its number, to three places, lower being better, with its basis (SPC-208, "
+        "finding F-18 of the independent evaluation). A response marked not permitted is still greyed."
+    )
+    _add_body(doc,
+        "The score adds custody lost and closest approach as separate terms, with nothing joining them (SPC-219, "
+        "finding F-20 of the independent evaluation): a close approach while custody is lost scores what the two "
+        "score apart, no more, though an approach you cannot see may be worse than the two added together. No "
+        "source for a term joining them was found, so none is added, and a note beside the matrix and the game tree "
+        "says so."
+    )
+    _add_body(doc,
+        "Training only (SPC-207, finding F-17 of the independent evaluation). Where nothing is computed or sampled, "
+        "a figure is set by one of seven relations of the lookup model: the custody rule, a sensor retask's custody "
+        "gap of half its time to execute, a closest approach by red's action type (200 km against a manoeuvre, "
+        "5,000 km against no action, 10,000 km against a sensor retask, 3,000 km against any other), our "
+        "manoeuvre's and our posture change's multipliers on that miss, our delta-V of cost times 50 m/s with no "
+        "burn sized, and a closest approach at 0.4 of the horizon. None has a source; each is listed in "
+        "docs/lookup-register.md as an unsourced judgement. A result whose figures, in the matrix or in any branch "
+        "of a game tree, rest on any of them says so at the top of the results, starting 'Training only.', and names "
+        "each relation in words: use it to train, not to decide. The label comes first in the results, before the "
+        "collect-first advice and every pick. A fully bound scenario with every figure computed "
+        "or sampled carries no label. Your decision record keeps the label as shown, and the Decision records page "
+        "shows it; a record written before the label was recorded reads 'Training-only label: not recorded'."
+    )
+    _add_body(doc,
+        "Element-set error is in every closest approach the engine propagates (SPC-202, evaluation finding F-11). "
+        "Its model is the threat sweep's rule of thumb, tuned, not sourced: 1 km at epoch plus 2 km a day by the "
+        "LEO figure, which MEO and HEO/Molniya sets take too, and 2 km plus 1 km a day by the GEO figure, for GEO and "
+        "sets beyond the GEO band, at each element set's age. In a sampled cell every sample "
+        "also draws each object's element-set error along track, red and blue each their own, so the band, P5 and "
+        "the score read the moved objects; no radial or cross-track part is drawn. A computed cell keeps its miss "
+        "as the figure and shows a band beside it, the miss less and plus both sets' error at the closest approach "
+        "in quadrature, 1 sigma, and its score reads the band's lower edge, the closer case: Claude's choice. A "
+        "sampled cell scores on P5, so the two are read at different confidence levels. Where our burn is sized, "
+        "the burn is sized on the miss, and its cell scores its own band's lower edge, so the rule can change which "
+        "response is picked. A sampled time of closest approach carries only the growth of the error after the "
+        "scenario epoch, since every sample draws the error at the epoch. A record written by 0.28.0 to 0.31.0 is "
+        "replayed under the rule it was evaluated by, with no element-set error, and the replay says so first. A "
+        "wider band needs more samples to converge: a GEO pair 15 km apart with both sets a day old needs 1,000, "
+        "where the default is 500."
+    )
+    _add_body(doc,
+        "Under the basis lines, 'Judgement inputs' lists every input on the panel that enters a score or a pick, "
+        "each marked '(judgement)': the weights, the keep-out distance, the horizon and the turns; each response's "
+        "type, cost, reversibility and time to execute, and its burn's target separation, budget and axis; each "
+        "row's type, P and Conf, and its custody gap share where the rule of thumb reads it; each manoeuvre "
+        "hypothesis and its samples; and the turn-1 observation you state for a tree. A value you kept where the "
+        "panel started it is your judgement too, and its note says where a new panel starts it; a budget left blank "
+        "is the 50 m/s default you kept. Each line says what reads it. A P you never edited is marked '(lookup)', the "
+        "panel's default, and so are a P and Conf from a NOTSO suggestion you applied. A hypothesis is marked by where "
+        "it came from: entered, or an archetype you chose, is your judgement, with an archetype's delta-V a lookup; "
+        "a burn detected in the element-set history is what red did, '(computed)'. Its line says its row was sampled "
+        "from it only when it was. A figure's own mark names the evidence and rules it rests on, taking your inputs as "
+        "given. The recommended response's type, cost, reversibility and time to execute, and each row's type, P and "
+        "Conf in the matrix, carry the same mark. The last basis line names the code version that computed the "
+        "result. Every lookup, and every value a new panel starts at, is listed in docs/lookup-register.md."
+    )
+    _add_body(doc,
+        "The score values closest approach and your delta-V in orders of magnitude. Set the keep-out distance on "
+        "the panel, 'Keep-out distance (km)', from 0.1 to 10,000 km: a miss at or inside it scores the full "
+        "closest-approach penalty, and each tenfold beyond it scores less, down to none at 50,000 km. Its default, "
+        "10 km, is Claude's choice and unsourced, and the results state the distance used. Your delta-V scores in "
+        "orders of magnitude up to 1,000 m/s, the engine's per-burn limit, so a 100 m/s burn and a 500 m/s burn "
+        "score apart. At the default weights and keep-out distance, a burn of up to about 9 m/s that opens a miss "
+        "from 1 km to 100 km scores better than doing nothing. The break-even moves with the keep-out distance: "
+        "about 38 m/s at 1 km, and none at 100 km, where both misses score the full penalty. A cleared field is "
+        "refused, not scored at the default. Neither scale has yet been signed off by the technical authority."
+    )
+
+    _add_heading_h2(doc, "Bind the Scenario to Real Objects")
+    _add_body(doc,
+        "Under 'Bind to real objects', choose a held red track and a held blue asset. The results then name them, "
+        "show each element set's epoch and its age against its limit (72 hours for GEO or a perigee beyond GEO, 24 "
+        "hours otherwise, Molniya-class and other HEO orbits included), and record both in the result's provenance. Unbound, every figure is a lookup. Bound, the "
+        "engine computes or samples what it can, and never falls back on a lookup constant where a computed or "
+        "sampled figure exists."
+    )
+    _add_body(doc,
+        "Beside each bound set the results state its regime, read from its period and eccentricity: LEO, MEO, "
+        "HEO/Molniya, GEO or other deep-space. They say whose staleness limit and element-set error rate it takes. "
+        "No figure has been sourced for any regime, so where the set takes another regime's figure the results say "
+        "so, for example \"LEO figure applied to HEO/Molniya, unsourced for this regime\". The red card, the "
+        "sweep's element-set ages and delta-V band, and the Intercept Engine's error band say the same."
+    )
+    _add_body(doc,
+        "Every element set passes one acceptance check before SPECTRE holds it, whichever way it arrives: from UDL, "
+        "pasted by you, in a Pattern of Life history, from the bundled watchlist or from a training scenario. Both "
+        "lines must carry their line numbers and good checksums in plain ASCII and one catalogue number, "
+        "which must be for the number asked when a set is fetched for one; a readable epoch; every field "
+        "written as the format writes it, B* and the drag terms included, so a 0 changed to a letter is caught "
+        "though the checksum cannot see it; every orbital element inside its range; an ephemeris type of 0, SGP4, "
+        "since SGP4 would propagate an SGP4-XP set (type 4) to a wrong orbit without an error; not an uncorrelated "
+        "track (UCT) from UDL; and an orbit SGP4 can start from. When the newest set UDL answers with is refused for "
+        "its type, the newest set that passes is taken instead, and you are told which newer set was refused and "
+        "why. A set that "
+        "fails is not stored and never replaces a set already held; you are told which object and what failed, "
+        "on the page or, where the path has no page of its own, in the run log, and the log records the same "
+        "without the set's text. A scenario checks its sets again when you bind it."
+    )
+    _add_body(doc,
+        "The conditions the engine is fit for, and where each is enforced, are in "
+        "docs/decision-engine-envelope.md. Under 'Outside the operating envelope', the results flag a bound object "
+        "on SDP4, SGP4's deep-space branch, which SGP4 uses from a period of about 225 minutes. Its figures stand. "
+        "For a GEO set, its staleness limit and element-set error model are the "
+        "GEO rules of thumb, tuned rather than sourced; for HEO, Molniya-class and other orbits on SDP4 they are rules of thumb set for LEO and GEO, "
+        "not validated for it. The flag says that the error model also sets every sample's draw, every computed "
+        "band, and the closest approach and score that read them. An object below the 100 km re-entry floor at any moment searched, or that SGP4 "
+        "reports decayed, has decayed: no closest approach is computed from it, and the results say so. With all 5 weights at 0, Evaluate is refused, since every score would be 0."
+    )
+    _add_body(doc,
+        "In the threat sweep, each entry that arrives has a Decide control. It opens the panel already bound to the "
+        "red track, with the blue asset when the target is held as one of yours, a hypothesis from that entry's own "
+        "departure burn, and a second row from the latest confirmed burn in the red track's held element-set "
+        "history when there is one. Nothing is evaluated for you, and P and Conf are never filled."
+    )
+    _add_body(doc,
+        "A transfer of several burns is carried whole on its row, as one action with one P. The departure burn "
+        "fills the row's fields, and the panel lists every burn of the transfer before you press Evaluate, each "
+        "with its own UTC time and its prograde, normal and radial parts in m/s. Each later burn's parts are "
+        "split in red's own in-track, cross-track and radial frame at its state on the transfer, where the engine "
+        "applies it. The engine applies them in time order wherever the row is sampled or our burn is sized "
+        "against it. A burn at or before the bound red element set's epoch is never applied, since that set may "
+        "already include it: the panel and the results name each such burn, and a row whose every burn is dropped "
+        "is not sampled. A later burn over 1,000 m/s is named on the panel, and Evaluate refuses the row."
+    )
+
+    _add_heading_h2(doc, "Adversary Actions")
+    _add_body(doc,
+        "Enter up to five adversary actions. Each row has:"
     )
     _add_data_table(doc,
         ["Field", "Description"],
         [
-            ["Action ID / Name", "Short identifier and descriptive label"],
-            ["Action Type", "MANOEUVRE, SENSOR_RETASK, POSTURE_CHANGE, or NO_ACTION"],
-            ["Probability", "Operator-assessed likelihood [0–1] that this COA is executed"],
-            ["Confidence", "Intelligence confidence in the probability estimate [0–1]"],
-            ["Description", "Free-text tactical description for context"],
+            ["Name and type", "A label, and Manoeuvre, Sensor Retask, Posture Change or No Action"],
+            ["P", "Your assessed chance [0 to 1] that red takes this action; the rows must be mutually "
+             "exclusive, so their P sum to at most 1, and expected value weighs each row by its P"],
+            ["Conf", "How sure the intelligence behind P is [0 to 1]; it is recorded and moves no figure"],
+            ["Custody gap share", "Wherever custody is not read: the share of the horizon [0 to 1] custody is "
+             "lost after an unanswered manoeuvre (default 0.7), a rule of thumb. A bound red track's custody "
+             "replaces it once read"],
+            ["Manoeuvre hypothesis", "Optional: an archetype, delta-V in m/s, direction, spread, samples (100 to "
+             "2,000) and burn time in hours from the moment you press Evaluate"],
         ],
     )
     _add_body(doc,
-        "The probability and confidence fields allow the operator to express both the "
-        "likelihood of an action and the quality of the intelligence supporting that "
-        "estimate. Low-confidence high-probability assessments receive reduced weighting "
-        "under the probabilistic selector strategy."
+        "P and Conf are yours. As the panel opens, each row shows a NOTSO suggestion: a suggested P and Conf from "
+        "the red track's NOTSO history with its basis and an interval on P. It writes nothing: tick it to apply it "
+        "at Evaluate, "
+        "and it is applied only while it is still the one shown. Gaps in the NOTSO cache are never read as quiet, "
+        "and nothing is offered below 3 events."
+    )
+    _add_body(doc,
+        "P is a probability over mutually exclusive actions (SPC-203, evaluation finding F-12). Before, expected "
+        "value divided each P by the sum of the rows' P, so one row at P 0.1 was weighed exactly as at P 1, as "
+        "certain, and the chance that none of your actions happens was never weighed. Now:"
+    )
+    _add_bullet(doc, "Your rows' P must sum to at most 1. Evaluate refuses a sum above 1 with a sentence naming the "
+                "sum, before anything runs. A new row starts at P 0.5, marked as the panel's default until you edit "
+                "it, so three new rows sum to 1.5 and are refused until you set their P.")
+    _add_bullet(doc, "A NOTSO suggestion you tick replaces its row's P, so the sum is read with the suggestions "
+                "applied; a sum above 1 they make is refused, naming the rows that carry them.")
+    _add_bullet(doc, "When your rows' P sum below 1, the engine adds a row of its own, last: No adversary action "
+                "(remainder of P), at 1 less the sum of your rows' P. It is evaluated as any no-action row, a lookup "
+                "or computed where bound, and minimax, minimin, expected value, the rules side by side, the game "
+                "tree and the decision record all read it. It is labelled as the engine's remainder, not your row, "
+                "and it has no Conf. A no-action row of your own is one of your actions at the P you gave it, so the "
+                "remainder still stands as a row of its own beside it. At a sum of exactly 1 nothing is added.")
+    _add_bullet(doc, "Each row shows, beside its P, the share of expected value it takes, which is its P, written "
+                "as the P beside it is.")
+    _add_bullet(doc, "A NOTSO interval on P is checked only up to where your rows' P reach 1, the remainder taking "
+                "up each move. With your rows' P at exactly 1 no remainder row is evaluated, so the interval is not "
+                "checked: a lower P would leave a remainder this evaluation holds no cells for. The results say so; "
+                "set your rows' P to sum below 1 and the interval is checked.")
+    _add_bullet(doc, "On a game tree the remainder is one of red's moves in every turn, so it adds to the tree's "
+                "branches and cost: three rows summing below 1 make four red moves. A depth refused for size or "
+                "cost says so, and rows whose P sum to 1 make one red move fewer.")
+    _add_bullet(doc, "A decision record written by 0.28.0 or 0.29.0 is replayed under the rule it was evaluated by, "
+                "each row's P over the rows' sum and no remainder, even where its P sum above 1, and the replay "
+                "command says so before it compares anything.")
+
+    _add_heading_h2(doc, "Friendly Responses and Our Burns")
+    _add_body(doc,
+        "Enter up to five friendly responses, each with a type, a cost and reversibility [0 to 1] and a time to "
+        "execute in hours. A manoeuvre response may carry a target separation in km, a delta-V budget in m/s "
+        "(50 m/s unless given) and an axis. With both sides bound, the engine sizes our burn to reach the target "
+        "within the budget, applies it to the blue asset and shows what the burn buys. A burn that cannot reach "
+        "the target within the budget flies the whole budget, and the cell says how far short it falls. A burn "
+        "that would come after the closest approach or the span searched, or whose arc fails, is refused in its cell "
+        "and its delta-V stays a lookup."
     )
 
-    _add_heading_h2(doc, "Friendly Response Options")
+    _add_heading_h2(doc, "Marking a Response Not Permitted")
     _add_body(doc,
-        "Up to four friendly response options are defined in parallel. Each response "
-        "describes what the blue force would do in reaction to the adversary action:"
+        "A response that breaks a legal, rules-of-engagement or safety constraint must never be recommended, however "
+        "well it scores (finding F-04, gate G4, SPC-195; the gate's Red rating stands until the evaluation is "
+        "repeated). Tick Not permitted on its row and give the reason in the field beside it: the reason is required "
+        "when the box is ticked, at most 500 characters on one line. A reason typed without the tick is refused "
+        "rather than dropped."
     )
-    _add_data_table(doc,
-        ["Field", "Description"],
-        [
-            ["Response ID / Name", "Short identifier and descriptive label"],
-            ["Action Type", "MANOEUVRE, SENSOR_RETASK, POSTURE_CHANGE, or NO_ACTION"],
-            ["Cost", "Normalised resource cost [0–1] — propellant, ops tempo, personnel"],
-            ["Reversibility", "How easily the action can be undone [0–1]; 1 = fully reversible"],
-            ["Time to Execute (h)", "Latency from decision to execution in hours"],
-            ["Description", "Tactical description of the friendly action"],
-        ],
+    _add_bullet(doc, "No rule ever picks a response marked not permitted: not the headline, not a pick beside it, "
+                "not a turn of the game tree, and not a pick in your decision record. A tie is broken among the "
+                "permitted responses alone, so a tie never brings it back.")
+    _add_bullet(doc, "It is still evaluated, so you see what was excluded and why. It is greyed, with Not permitted: "
+                "and your reason in words, in the matrix heading, in the rankings, where it is listed last with no "
+                "rank and is never ranked first, and beside each of its branches in the tree. Every later branch below "
+                "it in the tree is greyed too, saying it follows that response.")
+    _add_bullet(doc, "If every response is marked not permitted, nothing is recommended: the headline reads No "
+                "recommendation and the results say why, on the matrix and on the game tree alike.")
+    _add_bullet(doc, "Your record keeps which responses were marked not permitted and why. You may still record one "
+                "as your decision, but only with a rationale, and the record says it was marked not permitted. "
+                "The stored inputs are version 2 of their document, holding each veto; a record written by "
+                "0.28.0, version 1, still reads and replays, with nothing vetoed.")
+    _add_bullet(doc, "Each veto is yours, response by response. Constraint libraries drawn from doctrine or rules "
+                "of engagement are the owner's to supply later; these choices are Claude's design, awaiting the "
+                "owner's ruling.")
+
+    _add_heading_h2(doc, "What Is Refused Rather Than Guessed")
+    _add_bullet(doc, "Every row must post each of its fields, and every scoring weight must be given. A missing P, "
+                "Conf, Gap, cost, reversibility, time to execute, name or action type is refused, naming the row and "
+                "the field, and a blank or missing weight is refused, naming it: none is given a default (SPC-222). "
+                "The panel posts every field of every row, so this is met by evaluating from the panel.")
+    _add_bullet(doc, "A composite score that is not a finite number is refused before any rule picks on it: the "
+                "page says nothing is recommended and that it is a fault in the engine or a figure it was given, "
+                "not in your entries; the server log names the cell (SPC-221).")
+    _add_bullet(doc, "An element set whose epoch is more than 5 minutes after the time it is checked is refused "
+                "wherever a set enters and when it is bound, naming its epoch and how far ahead it is: a set dated "
+                "in the future would otherwise read as current. The red card and the sweep say FUTURE EPOCH for any "
+                "such set already held (SPC-226). The 5 minutes, for clock skew, is Claude's choice, unsourced.")
+
+    _add_heading_h2(doc, "How the Figures Are Worked Out")
+    _add_bullet(doc, "Closest approach, computed: for a red action that does not move red, both orbits are "
+                "propagated from their element sets with no burn, searched every 60 s and refined to 0.01 s. "
+                "Beside the miss is a band, the miss less and plus both sets' element-set error at the closest "
+                "approach in quadrature, 1 sigma, and the score reads its lower edge.")
+    _add_bullet(doc, "Closest approach, sampled: for a row with a hypothesis, each sample's burn is drawn and "
+                "propagated beside the blue asset, and each sample also draws both objects' element-set error "
+                "along track at each set's age at the scenario epoch. The row scores on P5. It is refused, and says why, for fewer "
+                "than 50 samples, an out-of-date orbit, a red element set newer than the burn, or a cost over the "
+                "cap. The row counts as converged when P5, P50 and P95 are each known to within 1 km, or 5 per "
+                "cent of P5 where larger. The basis note gives how closely P5 itself is known, its own half-width, "
+                "and names apart the widest of the three, the figure convergence is judged on. It also states the "
+                "integrator's own error against a tight reference: by 72 h up to 0.89 km per object in LEO, 0.015 "
+                "km at GEO and 0.38 km in a pair's separation, less at shorter horizons. It states the handover "
+                "from SGP4, which works on the WGS-72 constants, to RK45, which flies its states with WGS-84's: by "
+                "72 h each object moves up to 3.52 km in LEO and 1.43 km at GEO against the same flight on WGS-72, "
+                "but a pair's separation at most 0.18 km, since both drift alike (SPC-225).")
+    _add_bullet(doc, "Seeds: every sample of a row is drawn on its hypothesis's seed, 42 unless stated, and the "
+                "figures you see are that draw's. The row is drawn again on a second seed, 43, and counts as "
+                "converged only when both draws are; if they disagree the row is not converged, is not sampled, and "
+                "its cells name both seeds (SPC-224). The basis note and a line under the matrix name the seeds. The "
+                "second draw doubles a row's sampling time, so each sampled row counts twice against the cap: at "
+                "500 samples about 11.8 h fits with no burn to size. A record from 0.41.0 or earlier replays on its "
+                "one seed, as it was evaluated. On a game tree this holds for turn 1 alone: turns 2 and 3 draw each "
+                "branch's samples on a seed derived from the row's seed, the turn and the branch, and each sequence's "
+                "closest approach is judged converged on that one draw, which the tree says beside it.")
+    _add_bullet(doc, "A row of several burns is sampled from the first burn it applies, and costed from that "
+                "burn. Every later burn is drawn at its own time with the row's pointing, timing and drag spreads, "
+                "and a delta-V spread in proportion to its size. A burn due after the span searched ends is flown "
+                "by no sample. Each figure's basis names how many of the row's burns it applies.")
+    _add_bullet(doc, "A manoeuvre with no hypothesis is refused a closest approach: where red goes if it does not "
+                "move is not the outcome of a manoeuvre. Add a hypothesis.")
+    _add_bullet(doc, "Time of closest approach carries an uncertainty from both element sets' errors, and is "
+                "printed no finer than that uncertainty. A sampled one carries only the errors' growth after the "
+                "scenario epoch, since every sample draws the errors at the epoch.")
+    _add_bullet(doc, "Custody is read from the bound red track as the sweep reads it and carried over the horizon, "
+                "assuming no newer element set arrives. Degraded custody can judge your warning time but not "
+                "whether a burn is normal, so the hours it is degraded are shown as degraded, never as held or "
+                "lost, and a span under 0.1 h says so rather than 0.0 h. By the owner's ruling of 5 November 2026, "
+                "each hour degraded carries 0.25 of the custody penalty an hour lost carries, and the custody gap "
+                "counts lost hours only. Like held custody, it is lost once its element set passes its limit or a "
+                "burn is newer than it, and a manoeuvre with no burn time takes the worst case. Your response is "
+                "not applied to custody. A row of several burns is read at the earliest burn it applies.")
+    _add_bullet(doc, "Show trajectory opens the Hill-frame view of a cell's pair, which shows the shape of the "
+                "approach, not the cell's figures. A sampled cell also has a histogram of its sampled times.")
+    _add_body(doc,
+        "A scenario that samples or sizes a burn runs as a job inside a 300 s budget, capped at "
+        "12,000 sample-hours, the owner's ruling of 5 November 2026. A game tree has a cap of its own, 21,000 "
+        "sample-hours, set from trees timed under load in the build container (SPC-188); it should be measured again "
+        "on the machine SPECTRE runs on. The page shows progress and a Cancel button; a stopped evaluation scores "
+        "nothing."
     )
 
-    _add_heading_h2(doc, "Scoring Weights")
+    _add_heading_h2(doc, "Collect First and the Sweep's Threat Picture")
     _add_body(doc,
-        "The composite outcome score for each (adversary action, friendly response) pair "
-        "is computed from five weighted components. The default weights reflect a "
-        "balanced space control posture; operators can adjust them before running the "
-        "evaluation:"
+        "When the last sweep in this session was of the bound red track, the results show its Threat range, its "
+        "Understanding and decide-by at any age, each in its own sentence, and beside each the picture's age at "
+        "evaluation in words, for example \"from the sweep's picture assessed 3 h 10 min before this evaluation\". "
+        "The collect-first advice and rows and the expected-value guidance it feeds carry the same age. The session "
+        "holds one picture, so a later sweep of another red track replaces it, as does a sweep whose model failed: "
+        "sweep the bound red track again to read one. A decide-by that has passed by the evaluation is said again "
+        "against the evaluation: when it was, and when the intercept could arrive, counted from the evaluation, not "
+        "the sweep. An old picture may no longer hold: weigh its age, or sweep again. The sweep's advice is judged "
+        "against the action line, the Threat band at which the owner may set that a response changes, HIGH by "
+        "default, tuned, not sourced, and the results say so in a sentence of their own. If the Threat range "
+        "straddles the action line and a collection that could narrow it, whose result SPECTRE can read, lands "
+        "before decide-by, the sweep would collect first; otherwise it says act on the ceiling. Collections are listed beside the ranking "
+        "and never scored, so the recommendation is always one of your own responses."
     )
+    _add_body(doc,
+        "Decide-by rests on your response time: the hours you need to plan, approve and carry out a response, set on "
+        "the sweep form for every target or for one. With none set for a target in reach, the sweep says decide-by "
+        "needs one, names the target and shows no time, and no collection can be shown to land before it, so the "
+        "advice acts on the ceiling (SPC-211, finding F-23 of the independent evaluation). Until 0.38.0 a 12-hour "
+        "default, tuned, not sourced, stood in. A decision record keeps the decide-by the sweep set, so a record "
+        "from before replays as it was shown."
+    )
+    _add_body(doc,
+        "The Decision Engine collects first only for a collection whose outcomes give different recommended "
+        "responses, and that lands before decide-by (SPC-204, finding F-14 of the independent evaluation). It builds "
+        "the matrix again under each of the collection's outcomes, the benign and the hostile, through "
+        "the same cell step the evaluation ran, from plans made with no picture in them, and compares the "
+        "recommendation under each. Today the outcome matrix reads no Threat band, so the two are always the same, "
+        "and in place of collect first the results say, for example: 'Collecting \"pull its element-set history\" "
+        "would narrow the Threat range but cannot change the recommended response: the outcome matrix reads no "
+        "Threat band.' Do not delay your decision for it. Where the sweep says act on the ceiling, or that the range "
+        "is below the action line, and the picture holds a collection, the results add: "
+        "'No collection the picture holds can change the recommended response: the outcome matrix reads no Threat "
+        "band.' Should a later release let a band move a figure, the advice follows, naming the recommendation under "
+        "each outcome."
+    )
+
+    _add_heading_h2(doc, "Selector Rules")
     _add_data_table(doc,
-        ["Weight", "Default", "Meaning"],
+        ["Rule", "How it picks", "When to use it"],
         [
-            ["w_custody", "0.35", "Penalty for losing track custody of the adversary asset"],
-            ["w_closest_approach", "0.25", "Reward for maximising closest-approach distance"],
-            ["w_dv_cost", "0.20", "Penalty for friendly ΔV expenditure"],
-            ["w_time_to_exec", "0.10", "Penalty for slow response latency"],
-            ["w_reversibility", "0.10", "Reward for selecting reversible, de-escalatory actions"],
+            ["Minimax", "The response whose worst case scores least", "The default primary rule and the cautious "
+             "rule: use it when P is not well founded"],
+            ["Expected value", "The response whose probability-weighted score is least", "When P rests on "
+             "evidence; the results say whether the pick holds across a NOTSO interval"],
+            ["Minimin", "The response whose best case scores least", "The optimistic rule, not a robust one"],
         ],
     )
+    _add_body(doc,
+        "This is decision analysis over operator-entered rows, with a worst-case floor (minimax), a best case "
+        "(minimin) and expected value, each picking one of your responses. Scores are lower-is-better, so the "
+        "floor is a floor on the outcome: its score can be no worse than that. Randomised (mixed) responses are not "
+        "considered, so minimax is a guaranteed floor over pure responses, not a game solution: a mix chosen at "
+        "random can guarantee only a better expected score, against a red that cannot see the draw, than any one "
+        "response, and the engine does not look for one."
+    )
+    _add_body(doc,
+        "Every result shows all three rules' picks side by side, each with its rule's meaning in one line, worked "
+        "out on the same scores, and a line saying whether they agree or, where they do not, which picks differ. "
+        "For a game tree it also shows each rule's pick for turn 1 over the tree already built. The headline "
+        "recommendation is the deployment's primary rule's pick, set by the administrator with "
+        "SPECTRE_PRIMARY_RULE before use (minimax unless set; a value naming no rule is logged and read as "
+        "minimax). The panel's Selector Strategy starts on the primary rule; if you choose another, the results "
+        "name the primary rule and its pick beside your rule's, so no rule chosen after seeing a result can hide "
+        "the primary rule's answer. Your decision record keeps the primary rule and whether your rule differed. "
+        "This answers finding F-03 of the independent evaluation, gate G3 (all rules' results available, "
+        "disagreement flagged); the gate's Red rating stands until the evaluation is repeated."
+    )
+    _add_bullet(doc, "The evaluation still runs under the rule you chose: the matrix's star and the ranking's blue "
+                "highlights mark that rule's pick, and a line above the matrix says so, naming the primary rule's "
+                "pick beside it when the two rules differ.")
+    _add_bullet(doc, "A tie is shown as a tie (SPC-206, finding F-13 of the independent evaluation). Responses whose "
+                "values under a rule lie within 0.0000005 of each other, half the last place every composite score "
+                "is kept to, tie: the headline reads Tie: and names each, a line says the rule does not choose "
+                "between them and the choice is yours, the star marks each, and every rule's pick names the tie. "
+                "Your record still keeps the response with the lowest score, as 0.37.0 did, which need not be "
+                "the first entered, so its replay is unchanged.")
+    _add_bullet(doc, "With every row at P 0, the remainder of P carries the whole weight, so expected value picks "
+                "the best response against no adversary action. Only replaying a record 0.28.0 or 0.29.0 wrote can "
+                "find expected value with no weight to pick on: the replay then says it has no pick, never counts it as "
+                "agreeing with another rule, and nothing is starred under it.")
+    _add_bullet(doc, "When the time budget stopped a game tree before its last turn, the line on each rule's turn-1 "
+                "pick names the turns you asked for and the turns built in full.")
+    _add_body(doc,
+        "Beside the recommendation the results give its weight stability (SPC-205, finding F-16 of the independent "
+        "evaluation): the smallest change of one weight, the other four scaled in proportion to keep the sum 1 as "
+        "the panel scales them, that changes the pick, and what it makes it, for example 'The recommendation holds "
+        "unless a weight moves by at least 0.165: our delta-V's weight from 0.200 to 0.034 makes it manoeuvre "
+        "(F0).' Open 'Every weight' (a details element) for each weight lowered and raised, or that no value from 0 "
+        "to 1 changes it. It is exact, not sampled: each score is linear in the moved weight, so every point where "
+        "the pick can change is found. Each score is rounded to 6 decimal places, as the engine rounds it, and a tie "
+        "goes to the response listed first, as the engine breaks it. The change is rounded down, so 'at least' is "
+        "never more than it, and the weight's value is rounded away from the panel's, so the pick named is the "
+        "engine's there. A response marked not permitted is never the pick it names. If you chose a rule other than "
+        "the primary rule, its pick's stability is shown beside it. The game tree's picks are not covered: a line "
+        "says so when you asked for more than one turn, and on the record. Your decision record keeps the "
+        "recommendation's line in its own column, weight_stability; a record from before reads 'Weight stability: "
+        "not recorded'. A small change here means "
+        "the recommendation rests on a judgement of the weights as much as on the figures: the weights are not yet "
+        "cited (SPC-151)."
+    )
+    _add_body(doc,
+        "Under expected value, a bound row whose Understanding is LOW, or any row whose P you never edited, "
+        "carries a line saying expected value rests on a probability the evidence has not earned, and names "
+        "minimax's pick. The rule is never switched for you. The form records a P once you change it from the panel's "
+        "0.5, and keeps the record if you set it back, so to choose 0.5 deliberately, change P and then set it "
+        "to 0.5; leaving 0.5 in place, or typing 0.5 over it, is not recorded. A P from a NOTSO suggestion you "
+        "applied counts as edited. Each row says whose P and Conf it holds: a P never edited is the panel's "
+        "default."
+    )
+
+    _add_heading_h2(doc, "Looking Further Ahead: the Game Tree")
+    _add_body(doc,
+        "Turn depth, on the panel, sets how many turns the engine looks ahead: 1 is the outcome matrix alone; 2 "
+        "or 3 let red move again after each of your responses. A tree needs a red track and a blue asset bound "
+        "and current, and an orbit from every row, so give each manoeuvre row a hypothesis."
+    )
+    _add_bullet(doc, "Once the tree has what it needs, a depth the evaluation cannot fit, by branches (1,000 at "
+                "most) or by cost (21,000 sample-hours, the tree's own cap since SPC-188; a record from before is "
+                "replayed against the 12,000 it shared with the matrix then), is refused as soon as you press "
+                "Evaluate, naming the largest depth that would "
+                "fit. The remainder of P counts as one of red's moves, and the refusal says so. A tree missing what it needs still evaluates as one turn, and the results say why.")
+    _add_bullet(doc, "The engine sets each turn's length from the rows' burn times, so every burn falls inside "
+                "its own turn; you never set a length. Turns are equal where every burn fits; otherwise a turn ends "
+                "midway between the last burn it holds and the first burn of the next turn, or, "
+                "with no burn after it, midway between that burn and the end of the span searched. "
+                "A row carrying several burns of one transfer gives each burn a turn of its own, so it needs at "
+                "least as many turns as burns, and the results say so if it has fewer.")
+    _add_bullet(doc, "A transfer taken in turn 1 makes its later burns in the turns they fall in, whatever red "
+                "does next; taken again in a later turn, it makes each burn the same time after its own turn "
+                "starts, and a burn that would fall after the last turn is not made.")
+    _add_bullet(doc, "Each later turn starts where the last one left both orbits, after red's burn and yours. "
+                "Every figure in a tree is propagated by RK45 for both orbits.")
+    _add_bullet(doc, "The results show the recommendation per turn for the rule in use: turn 1's pick, then the "
+                "pick for turn 2 after each thing turn 1 may show, and in a 3-turn tree the pick for turn 3 after "
+                "what turns 1 and 2 showed.")
+    _add_bullet(doc, "The tree itself is a set of collapsible branches. Each names its turn, red's move and your "
+                "response, and the path of moves it rests on; opened, it shows its figures in m/s and km, each "
+                "with its basis. A branch on the recommended plan says so in words. Under a response the rule "
+                "does not pick, its best continuation says so in words of its own, in italic and with no star, "
+                "for example 'Best continuation under minimax after Avoid in turn 1, which minimax does not pick "
+                "there; not on the plan' (SPC-189). Responses that tie in a turn are each named, and the plan "
+                "follows each.")
+    _add_bullet(doc, "Above the branches the tree is drawn (SPC-190): a box for each branch, from turn 1 on the left "
+                "to the last turn on the right, naming red's move and your response with the branch's sequence "
+                "score and closest approach along it, each with its basis, the same figures the branch below shows. "
+                "A box on the plan, a best continuation and a branch not permitted each say so in words. Each box "
+                "with branches after it has a button that collapses or opens them, and Zoom in, Zoom out and Reset "
+                "buttons sit beside the drawing; each works from the keyboard with Tab, Enter and Space. Without "
+                "script the drawing shows in full and its buttons are hidden. The branches below stay the text "
+                "version of the drawing.")
+    _add_bullet(doc, "Beside the tree two notes say what its figures assume: each branch of the last turn shown, the "
+                "deepest built in full, is valued as if no one moves after it (SPC-220), and the score's terms are "
+                "added with nothing joining them (SPC-219).")
+    _add_bullet(doc, "A tree that runs out of budget shows the deepest turn built in full and says so.")
+    _add_body(doc,
+        "What turn 1 shows of red is read through the red track's custody: lost at a burn shows a burn, held "
+        "shows no burn, anything else, degraded included, shows nothing. You may state what turn 1 showed. Under expected value the "
+        "results then show the update after turn 1 for that observation, with its likelihood model; with none "
+        "stated they say nothing was updated. The update moves no figure and writes no P. One turn has no later "
+        "pick to update, so an observation stated with a depth of 1 is refused beside the form. Minimax and "
+        "minimin do not use probability: in place of the update the results show 'What each turn lets us see', "
+        "the same custody rule that sets what each later pick may depend on, and say nothing was updated."
+    )
+    _add_body(doc,
+        "The update's likelihood is uncalibrated (SPC-210, finding F-22 of the independent evaluation). It treats "
+        "what custody shows as certain, and no held history of what red did has been scored against it, so there "
+        "is no calibration data yet. Wherever the update's share of the weight is shown, the likelihood model's line "
+        "and the update's basis both say so. A calibration harness exists for when held histories are supplied: "
+        "scripts/calibrate_likelihood.py reads a UTF-8 comma-separated file with the header "
+        "history,predicted,observed (an identifier, the probability from 0 to 1 the update gave the outcome, and 1 "
+        "or 0 for whether it came about) and reports the Brier score, a reliability table by bin and the sample "
+        "count. It names the file by the SHA-256 of its bytes, and the code by SPECTRE's version and the SHA-256 "
+        "of the scoring module and of the command, each covering that one file only. The score measures the "
+        "probabilities in the file: it says something about the update's likelihood only if the update produced "
+        "them for real held outcomes, which the harness cannot check. Until it has been run on such histories, read "
+        "the update's shares as the custody rule's arithmetic, not as a calibrated probability."
+    )
+
+    _add_heading_h2(doc, "Recording Your Decision")
+    _add_body(doc,
+        "SPECTRE keeps one record for each finished evaluation, whether it was answered at once or ran as a job. "
+        "This is the record half of gate G1 in the independent evaluation (finding F-01); the advisory half and "
+        "the gate's Red rating were not reassessed. The record holds when it finished, in UTC, your username, the "
+        "scenario's name, the rule you used and the one-turn matrix's pick under it, the picks of all "
+        "three rules (minimax, minimin and expected value) on the same figures, the code version and a hash of "
+        "every input, the turn depth and the keep-out distance, the deployment's primary rule and whether your "
+        "rule differed. Since 0.28.0 it also holds the evaluation's inputs in full (finding F-02, gate G2, SPC-193; "
+        "the gate's Red rating stands until the evaluation is repeated): the whole "
+        "scenario, each bound element set's text with its epoch, age, limit, data mode and custody, every "
+        "hypothesis with its seed, any NOTSO suggestion applied and the Threat picture, with the rule and every "
+        "composite score, as one document with its SHA-256. An administrator can replay a record with "
+        "scripts/replay_decision.py and the record's number: it evaluates the stored scenario again under the "
+        "stored rule and reports whether the recommendation, every rule's pick and every score match exactly. "
+        "It also sets the record's own rule, code version and input hashes against the stored inputs, so an "
+        "edit to them shows even when their SHA-256 was worked out again. Before replaying it says which code "
+        "version wrote the inputs, when that is another code version than the one running, and when the "
+        "evaluation ran out of "
+        "its time budget, since the replay runs in full and what the budget left out may differ. It opens the "
+        "database to read only and writes nothing. A record written before 0.28.0 "
+        "holds no element-set text and no raw input, so it cannot be replayed. An evaluation that is refused, "
+        "cancelled, replaced, ended by sign-out or that fails before its sampling finished writes no record."
+    )
+    _add_bullet(doc, "The results end with Your decision: choose one of the scenario's own responses, None of "
+                "these, or Decision deferred, and give a rationale of at most 2,000 characters. The rationale is "
+                "required for None of these and for a response marked not permitted, and may not hold a control "
+                "character other than a tab or a line break. Record decision stores it with its own UTC time.")
+    _add_bullet(doc, "A record takes one decision, once: a second is refused with a sentence. Only the operator who "
+                "ran the evaluation may decide it; an admin reads every record but decides only their own.")
+    _add_bullet(doc, "Once a job has finished sampling it writes its record before the results show, and Cancel no "
+                "longer stops it. A record can still describe results never shown: you reloaded or closed the "
+                "console while the job ran, or a newer evaluation or a sign-out came while the record was written. "
+                "Decide it on the Decision records page. If the record cannot be written the results say so, and "
+                "no decision can be recorded against them.")
+    _add_bullet(doc, "Decision records, linked from the top of the panel, opens in a new tab and lists your own "
+                "records newest first: when, the scenario, the rule you used and its pick, the primary rule and its "
+                "pick, which was the recommendation shown, all three rules' picks, "
+                "and your decision, rationale and its time, or No decision recorded with the form to record it. "
+                "An admin sees every record and whose it is. Records are kept by account, so they are there after "
+                "you sign out and in again.")
+    _add_bullet(doc, "For a game tree the record names the one-turn matrix pick and the tree's own pick for turn 1, "
+                "which can differ, with the tree's recommendation lines. The page names the primary rule and its "
+                "pick, "
+                "says whether the rule you used differed, and repeats the warning when expected value rests on a "
+                "probability not earned. A record written before 0.28.0 says the results showed only the rule used.")
+    _add_bullet(doc, "A name holding the NUL control character, which PostgreSQL cannot store, is recorded with the "
+                "replacement character in its place.")
+    _add_bullet(doc, "No retention is applied: records stay until the owner decides otherwise. A record holds a "
+                "username, free text and the evaluation's stored inputs, element sets included, so "
+                "retention and access are the owner's decision, as data protection lead; the open ruling "
+                "(SPC-228) covers the stored inputs too.")
+    _add_bullet(doc, "Claude's design choice, awaiting the owner's ruling: a deleted account's records are kept, "
+                "and the page has no pagination.")
+
+    _add_heading_h2(doc, "What It Does Not Do")
+    _add_bullet(doc, "It does not cite its scoring weights yet (SPC-151); the score is a weighted heuristic.")
+    _add_bullet(doc, "It holds no constraint library: a response is marked not permitted only when you tick it.")
+    _add_bullet(doc, "It draws element-set error along track only, from a rule of thumb, tuned, not sourced; "
+                "error across track is not in any band.")
+    _add_bullet(doc, "It does not model J3 and J4, the Moon, the Sun or solar radiation pressure: they move each "
+                "object up to 24 km at GEO by 72 h. Two objects of the same area-to-mass ratio move largely alike, "
+                "but when they differ the separation moves too, by up to 2.4 km at GEO (SPC-209, finding F-19 of "
+                "the independent evaluation). Set against the spread a row samples, they exceed the sampled spread "
+                "with no burn, and can with a burn of 0.1 m/s in LEO and at GEO; they are under a tenth of it from "
+                "1 m/s outside LEO and from 10 m/s in LEO. Each sampled closest approach's basis note says so for "
+                "red's regime.")
+    _add_bullet(doc, "It does not model a sensor's line of sight to red.")
+    _add_bullet(doc, "It does not model how red's first move bears on its next: red's later moves are weighed by "
+                "P as entered.")
+    _add_bullet(doc, "It adds custody lost and closest approach to the score as separate terms, with nothing joining "
+                "them, so losing custody does not make a close approach count for more (SPC-219, finding F-20 of "
+                "the independent evaluation). No source for a term joining them was found; the matrix and the game "
+                "tree say so.")
+    _add_bullet(doc, "Its game tree looks at most 3 turns ahead, and each branch of the last turn is valued as if no "
+                "one moves after it, to the end of the span searched: a move red or you would make later is in no "
+                "figure (SPC-220, finding F-21 of the independent evaluation). The tree says so beside it.")
+    _add_bullet(doc, "Its game tree models one impulsive burn per adversary row per turn, so a row carrying several "
+                "burns of one transfer is evaluated as one turn.")
+    _add_bullet(doc, "It does not guess burns a sweep solution does not list: a V-bar or H-bar hop solution lists only "
+                "its entry and final burns, so its row carries the entry burn alone, and the panel says so.")
     _add_callout(doc,
-        "Increasing w_custody above 0.5 reflects a high-value asset protection posture "
-        "where losing track of the adversary is unacceptable. Increasing w_reversibility "
-        "reflects a de-escalation preference — the engine will favour manoeuvres that can "
-        "be recalled or reversed if the threat assessment changes."
-    )
-
-    _add_heading_h2(doc, "Selector Strategies")
-    _add_body(doc,
-        "After the outcome matrix is computed, SPECTRE applies a selector strategy to "
-        "identify the recommended response:"
-    )
-    _add_data_table(doc,
-        ["Strategy", "Logic", "Best For"],
-        [
-            ["MINIMAX", "Minimise worst-case composite score across all adversary actions",
-             "Conservative — guarantees a floor on worst-case outcome"],
-            ["MAXIMIN", "Maximise worst-case benefit (minimum gain across all actions)",
-             "Optimistic — focuses on preserving upside in best case"],
-            ["EXPECTED_VALUE", "Minimise expected composite score weighted by adversary action probabilities",
-             "Probabilistic — optimal when probability estimates are trustworthy"],
-        ],
-    )
-    _add_body(doc,
-        "The MINIMAX strategy is the default and is appropriate when intelligence "
-        "confidence is low and the operator wants to hedge against the worst plausible "
-        "adversary action. Switch to EXPECTED_VALUE when high-confidence probability "
-        "estimates are available from all-source intelligence."
-    )
-
-    _add_heading_h2(doc, "Output & Recommended Response")
-    _add_body(doc,
-        "The Decision Engine produces an outcome matrix table showing the composite score "
-        "for every (adversary, friendly) cell. Lower scores are better for the friendly "
-        "force. The recommended response is highlighted with its strategy label and "
-        "rationale. Key outputs include:"
-    )
-    _add_bullet(doc, "Recommended response — the friendly COA selected by the chosen strategy.")
-    _add_bullet(doc, "Robust strategy label — which decision rule was applied (MINIMAX / MAXIMIN / EXPECTED_VALUE).")
-    _add_bullet(doc, "Per-adversary ranking — for each adversary action, the friendly responses are ranked best-to-worst.")
-    _add_bullet(doc, "Computation time — confirms the engine ran to completion.")
-    _add_callout(doc,
-        "The Decision Engine output is a recommendation, not an order. Operators retain "
-        "full authority over response selection. The engine is a structured decision-support "
-        "tool — it enforces analytical rigour and surfaces non-obvious trade-offs, but "
-        "context, rules of engagement, and commander intent always take precedence."
+        "The Decision Engine output is a recommendation, not an order. Operators retain full authority over "
+        "response selection. It shows its working so you can challenge it; context, rules of engagement and "
+        "commander intent always take precedence."
     )
 
 
@@ -1409,7 +1930,7 @@ def _section_14_training(doc: Document) -> None:
             ["1", "Observer", "Default — available on first login", "Basic TLE handling, orbital events, Lambert transfers"],
             ["2", "Analyst", "Complete the introductory tutorial", "Threat assessment, manoeuvre classification, PoL basics"],
             ["3", "Planner", "100+ points in manoeuvre_planning axis", "Tactical manoeuvres, COLA, evasion, trade-space analysis"],
-            ["4", "Commander", "5 scenarios completed + 50+ decision_quality points", "Decision Engine, multi-threat scenarios, formation defence"],
+            ["4", "Commander", "5 scenarios completed and at least 50 decision_quality points", "Decision Engine, multi-threat scenarios, formation defence"],
             ["5", "Strategist", "3 challenge scenarios completed", "Full capability — all methods, gauntlet challenges, adversary modelling"],
         ],
     )
@@ -1462,7 +1983,7 @@ def _section_14_training(doc: Document) -> None:
     _add_bullet(doc, "Correct manoeuvre method selection — base 50 pts, 80% manoeuvre_planning, 20% system_proficiency.")
     _add_bullet(doc, "ΔV within 5% of optimal — base 100 pts with speed multiplier, 100% manoeuvre_planning.")
     _add_bullet(doc, "Correct threat classification — base 75 pts, 80% threat_assessment, 20% situational_awareness.")
-    _add_bullet(doc, "Decision Engine response selection matching recommended COA — base 100 pts, 100% decision_quality.")
+    _add_bullet(doc, "Decision Engine response selection matching recommended COA: base 100 pts, 100% decision_quality.")
     _add_callout(doc,
         "Tutorial completion is a prerequisite for Level 2 unlock. The introductory "
         "tutorial walks through adding assets, fetching TLEs from the synthetic UDL "
@@ -1844,18 +2365,19 @@ def _section_18_glossary(doc: Document) -> None:
         ["HRR", "High Rate Revisit — JCO satellite watchlist identifying high-priority objects by threat rank."],
         ["Pattern of Life (PoL)", "Analysis of a satellite's full TLE history to characterise manoeuvre behaviour and detect anomalies."],
         ["PoL Status", "Classification of a satellite's historical behaviour: NOMINAL (routine station-keeping), ANOMALOUS (unusual or large manoeuvres), or SUSPICIOUS (evasive or targeting behaviour)."],
-        ["TLE Source", "The UDL data provider (e.g. 18 SDS, LeoLabs) whose elsets are used for TLE fetches."],
+        ["TLE Source", "The UDL provider (for example 18th SPCS or LeoLabs) a latest fetch is narrowed to; blank takes the newest set from every provider."],
         ["Drift Phase", "A continuous period of east-west longitude drift at a measurable rate, detected from successive GEO elsets."],
         ["NOTSO", "Notice to Space Operators — formal pre-manoeuvre notification filed with USSPACECOM by spacecraft operators."],
         ["Phantom NOTSO", "A NOTSO filed but for which no corresponding manoeuvre was detected in TLE analysis."],
         ["Consistent Notifier", "Operator behavioural flag: notification rate above 90% — reliable pre-manoeuvre notification behaviour."],
         ["Stealth Operator", "Operator behavioural flag: notification rate below 30% — significant intelligence indicator."],
         ["Predictable Timing", "Operator behavioural flag: lead-time standard deviation below 6 hours — highly regular notification pattern."],
-        ["Decision Engine", "SPECTRE's game-theoretic scenario evaluation module; computes outcome matrices for adversary × friendly COA grids."],
-        ["MINIMAX", "Decision strategy that selects the friendly response minimising the worst-case composite score across all adversary actions."],
-        ["MAXIMIN", "Decision strategy that selects the response maximising the worst-case benefit."],
-        ["Expected Value", "Decision strategy that selects the response minimising the expected composite score weighted by adversary action probabilities."],
-        ["Composite Score", "Weighted sum of custody, closest-approach, ΔV cost, time-to-execute, and reversibility metrics — lower is better for blue force."],
+        ["Decision Engine", "SPECTRE's scenario evaluation module: scores every pairing of adversary action and friendly response, recommends a response, and can look up to three turns ahead."],
+        ["Minimax", "Decision rule that selects the friendly response whose worst-case composite score is least: the cautious rule and the default."],
+        ["Minimin", "Decision rule that selects the friendly response whose best-case composite score is least: the optimistic rule, not a robust one."],
+        ["Expected Value", "Decision rule that selects the response minimising the expected composite score weighted by adversary action probabilities."],
+        ["Composite Score", "Weighted sum of custody, closest approach, our delta-V, time to execute and reversibility; lower is better for the blue force. A lookup while its weights are uncited."],
+        ["Game Tree", "The Decision Engine's look ahead of 2 or 3 turns, in which red may move again after each friendly response."],
         ["Photometry", "Measurement of the brightness of a space object over time; used to detect attitude changes, physical alterations, or reflectivity anomalies."],
         ["Reduced Magnitude", "Apparent magnitude corrected for range and atmospheric extinction; enables like-for-like comparison across different observing geometries."],
         ["Phase Function Baseline", "Quadratic model of brightness vs solar phase angle fitted to historical observations; the reference against which changes are detected."],
@@ -2102,6 +2624,9 @@ def _section_22_user_management(doc: Document) -> None:
     )
     _add_bullet(doc, "An admin cannot delete their own account.")
     _add_bullet(doc, "An admin cannot delete or demote the last remaining admin account.")
+    _add_bullet(doc, "The account's decision records stay, under its username, for an admin to read; no one can "
+                "record a decision on them any more, and a later account of the same name does not see them. "
+                "Keeping them is Claude's design choice, awaiting the owner's ruling as data protection lead.")
     _add_callout(doc,
         "Deletion is permanent and immediate. There is no soft-delete or recycle bin. "
         "Ensure the correct account is selected before confirming."

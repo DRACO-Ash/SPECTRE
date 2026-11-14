@@ -9,4 +9,8 @@
   {% endif %}
   — ready to sweep.
 </p>
+{#- Each element set the acceptance check refused, named in a sentence; none was stored (SPC-201). -#}
+{% for sentence in (refused if refused is defined else []) %}
+<p class="error-msg elset-refused" style="font-size:0.72rem; margin:0.15rem 0">{{ sentence }}</p>
+{% endfor %}
 {% endif %}

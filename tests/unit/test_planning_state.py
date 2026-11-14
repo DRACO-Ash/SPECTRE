@@ -88,3 +88,16 @@ class TestStateExpiresWithItsToken:
         from spectre.web import auth
 
         assert ps._STATE_MAX_AGE_S == auth._SESSION_MAX_AGE
+
+
+class TestSigningOutTakesTheUdlPassword:
+    """V0.9 review 6: a task still holding a signed-out sign-in's state found the password in it."""
+
+    def test_the_discarded_state_holds_no_udl_credentials(self) -> None:
+        from spectre.web.planning_state import clear_account_state
+
+        signing_out = SessionKey(5, "signing-out")
+        state = get_session_state(signing_out)
+        state.udl_username, state.udl_password = "operator", "udl-secret"
+        clear_account_state(signing_out.user_id)
+        assert (state.udl_username, state.udl_password) == (None, None)

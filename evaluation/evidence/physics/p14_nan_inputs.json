@@ -1,0 +1,10 @@
+{
+  "AdversaryAction.probability=NaN": "ValueError: AdversaryAction.probability must be in [0, 1]; got nan",
+  "AdversaryAction.confidence=NaN": "ValueError: AdversaryAction.confidence must be in [0, 1]; got nan",
+  "AdversaryAction.custody_gap_fraction=NaN": "ValueError: AdversaryAction.custody_gap_fraction must be in [0, 1]; got nan",
+  "FriendlyResponse.cost=NaN": "ValueError: FriendlyResponse.cost must be in [0, 1]; got nan",
+  "FriendlyResponse.reversibility=NaN": "ValueError: FriendlyResponse.reversibility must be in [0, 1]; got nan",
+  "FriendlyResponse.time_to_execute_hours=NaN": "ValueError: FriendlyResponse.time_to_execute_hours must be finite and >= 0; got nan",
+  "Scenario.w_custody=NaN": "ValueError: Scenario.w_custody must be in [0, 1]; got nan",
+  "Scenario.horizon_hours=NaN": "ValueError: Scenario.horizon_hours must be finite and > 0; got nan"
+}

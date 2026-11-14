@@ -13,17 +13,28 @@ import logging
 import time
 from collections.abc import Coroutine
 from datetime import UTC, datetime, timedelta
-from math import inf
-from typing import Annotated, Any
+from http import HTTPStatus
+from typing import Annotated, Any, NamedTuple
 
 import httpx
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
 
+from spectre.astro.elset_check import ElsetCheck, check_elset, tle_epoch
 from spectre.config.settings import UDL_BASE_URL
 from spectre.web.auth import require_login
 from spectre.web.deps import render
-from spectre.web.elsets import refresh_held_elsets
+from spectre.web.elsets import (
+    ElsetHistory,
+    PassedOver,
+    RefusedElset,
+    log_refusal,
+    log_skipped_by_type,
+    passed_over_sentence,
+    refresh_held_elsets,
+    refused,
+)
+from spectre.web.interaction_store import hold_conjunctions
 from spectre.web.log_safety import log_safe
 from spectre.web.models import SessionKey, User
 from spectre.web.planning_state import (
@@ -35,6 +46,7 @@ from spectre.web.planning_state import (
     set_onorbit_catalog,
 )
 from spectre.web.rate_limit import udl_auth_rate_limit, udl_data_rate_limit, udl_sync_rate_limit
+from spectre.web.udl_conjunction import CONJUNCTION_PATH, CONJUNCTION_SIDE_PARAMS, read_conjunctions
 
 logger = logging.getLogger(__name__)
 
@@ -48,28 +60,18 @@ _ELSET_REFRESH_TEMPLATE = "partials/elset_refresh_note.html"
 def _parse_tle_epoch(line1: str) -> datetime | None:
     """Parse TLE line 1 epoch field (0-indexed cols 18-31, format YYDDD.FFFFFFFF) to UTC datetime.
 
-    Returns None if the field cannot be parsed.
+    Returns None if the field cannot be parsed. The element-set acceptance check reads the epoch the same way, so
+    one reading serves both (SPC-201).
     """
-    try:
-        epoch_str = line1[18:32].strip()
-        year_2d = int(epoch_str[:2])
-        day_frac = float(epoch_str[2:])
-        year = 2000 + year_2d if year_2d < 57 else 1900 + year_2d
-        day_int = int(day_frac)
-        # Day 0 or 367 is a corrupt field, not a date a timedelta should
-        # quietly roll into the neighbouring year (audit F-255).
-        if not 1 <= day_int <= _DAYS_IN_LEAP_YEAR:
-            return None
-        frac = day_frac - day_int
-        return datetime(year, 1, 1, tzinfo=UTC) + timedelta(days=day_int - 1 + frac)
-    except (ValueError, IndexError):
-        return None
+    return tle_epoch(line1)
 
 _UDL_BASE = UDL_BASE_URL
-_DAYS_IN_LEAP_YEAR = 366
-# TLE line 1 carries the epoch in 0-indexed columns 18-31, so a line shorter
-# than this cannot hold one and is logged whole rather than sliced to nothing.
-_TLE_EPOCH_FIELD_END = 32
+# The element set archive and the current catalogue, each asked from several
+# places, and the timestamp format UDL's epoch and createdAt filters take (UTC,
+# microseconds). Each is one definition rather than repeated literals (python:S1192).
+_ELSET_URL = f"{_UDL_BASE}/elset"
+_ELSET_CURRENT_URL = f"{_UDL_BASE}/elset/current"
+_UDL_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
 
 # One wording for the one action an operator can take about it, used by every
 # route that can be reached without credentials. It is also the literal whose
@@ -82,6 +84,31 @@ _NOT_CONNECTED_MESSAGE = "Not connected to UDL — use the UDL panel to log in f
 # the upper-case one keeps its three copies to a single literal (python:S1192).
 _UDL_NAME_KEY_UPPER = "OBJECT_NAME"
 
+# A failed UDL call shows the operator one of two fixed sentences and logs the
+# detail. The exception text carries the request URL and query string, and a
+# UDL error body can carry a server stack trace; neither belongs in the browser
+# (CodeQL py/stack-trace-exposure, SPC-019). The sentence still names the call
+# that failed and what to try, so the operator is not left guessing.
+_DETAIL_IN_LOG = "the server log has the detail."
+
+
+def _udl_unreachable(call: str) -> str:
+    """The operator sentence for a UDL *call* that never got an answer."""
+    return f"UDL unreachable during the {call}. Check the network path to UDL and try again; {_DETAIL_IN_LOG}"
+
+
+def _udl_refused(call: str, status: int) -> str:
+    """The operator sentence for a UDL *call* answered with an error *status*.
+
+    A 5xx is UDL's own fault, so it must not send the operator to check
+    access or a request that were both fine.
+    """
+    if status >= HTTPStatus.INTERNAL_SERVER_ERROR:
+        advice = "That is a fault on the UDL side; try again later"
+    else:
+        advice = "Check your UDL access and the request, then try again"
+    return f"UDL answered the {call} with HTTP {status}. {advice}; {_DETAIL_IN_LOG}"
+
 
 async def fetch_tle_history_for_satno(
     satno: int,
@@ -90,7 +117,7 @@ async def fetch_tle_history_for_satno(
     window_hours: float = 24.0,
     data_mode: str = "REAL",
     source: str = "",
-) -> list[str]:
+) -> ElsetHistory:
     """Fetch all TLEs for a SATNO within a recent time window from UDL.
 
     Queries ``/elset`` (not ``/elset/current``) to retrieve every element set
@@ -99,6 +126,9 @@ async def fetch_tle_history_for_satno(
 
     Returns a list of ``"line1\\nline2"`` strings — one per UDL record.
     Returns an empty list on failure so callers can fall back gracefully.
+    A set the acceptance check refuses, its catalogue number included, is
+    left out and kept on the list's ``refused`` so the caller can say so
+    (SPC-201).
 
     Parameters
     ----------
@@ -113,14 +143,9 @@ async def fetch_tle_history_for_satno(
     source:
         Optional TLE source provider filter.
     """
-    from datetime import timedelta
-
-    since = datetime.now(UTC) - timedelta(hours=window_hours)
-    since_str = since.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
-
     params: dict[str, Any] = {
         "satNo":  satno,
-        "epoch":  f">{since_str}",
+        "epoch":  _epoch_after(window_hours),
     }
     if data_mode != "REAL":
         params["dataMode"] = data_mode
@@ -130,7 +155,7 @@ async def fetch_tle_history_for_satno(
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"{_UDL_BASE}/elset",
+                _ELSET_URL,
                 params=params,
                 auth=(username, password),
                 timeout=15.0,
@@ -138,63 +163,234 @@ async def fetch_tle_history_for_satno(
         resp.raise_for_status()
         data = resp.json()
     except (httpx.HTTPError, ValueError) as exc:
-        logger.warning("fetch_tle_history_for_satno(%s) failed: %s", satno, exc)
-        return []
+        logger.warning("fetch_tle_history_for_satno(%s) failed: %s", log_safe(satno), log_safe(exc, limit=500))
+        return ElsetHistory()
 
     records = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
-    tles: list[str] = []
+    sets: list[tuple[str, dict[str, Any]]] = []
     for rec in records:
         line1 = str(rec.get("line1") or rec.get("TLE_LINE1") or "").strip()
         line2 = str(rec.get("line2") or rec.get("TLE_LINE2") or "").strip()
         if line1 and line2:
-            tles.append(f"{line1}\n{line2}")
+            sets.append((f"{line1}\n{line2}", rec))
+    # Every set feeds the clustering that chooses the cached one, so a set the acceptance check refuses, another
+    # object's included, is dropped here, counted and its failures logged without its text (SPC-201). Each record
+    # goes to the check with its set, so an SGP4-XP set or an uncorrelated track is refused by its own fields.
+    tles = [tle for tle, _ in sets]
+    # A set dated in the future is refused too, by the time it arrives (SPC-226).
+    checked_at = datetime.now(UTC)
+    checks = [check_elset(tle, satno, record=rec, now=checked_at) for tle, rec in sets]
+    log_skipped_by_type(f"SATNO {satno}", sets)
+    history = ElsetHistory(
+        (tle for tle, check in zip(tles, checks, strict=True) if check.accepted),
+        [check for check in checks if not check.accepted],
+    )
+    if history.refused:
+        logger.warning(
+            "fetch_tle_history_for_satno(%s): %d element sets refused: %s",
+            log_safe(satno), len(history.refused), log_safe([c.failures for c in history.refused], limit=1000),
+        )
 
-    logger.debug("fetch_tle_history_for_satno(%s): %d TLEs in %.0fh window", satno, len(tles), window_hours)
-    return tles
+    logger.debug("fetch_tle_history_for_satno(%s): %d TLEs in %.0fh window", satno, len(history), window_hours)
+    return history
+
+
+#: How far back the archive is searched for the newest element set. A set
+#: older than this is stale in every regime (TLE_FILTER's GEO and deep-space
+#: limit, 72 hours, is the longest), so past it the current catalogue's answer
+#: is as good as any.
+_NEWEST_WINDOW_H = 72.0
+#: The ISS archive window source discovery reads: every active provider files for it within a day.
+_DISCOVERY_WINDOW_H = 24.0
+#: The archive answer spans every provider over three days, so it is given
+#: longer than the current catalogue's single set per provider.
+_ARCHIVE_TIMEOUT_S = 20.0
+_CURRENT_TIMEOUT_S = 15.0
+
+
+def _epoch_after(hours: float) -> str:
+    """A UDL epoch filter for element sets newer than *hours* before now."""
+    since = datetime.now(UTC) - timedelta(hours=hours)
+    return f">{since.strftime(_UDL_TIME_FORMAT)}Z"
+
+
+def _complete_records(records: list[Any]) -> list[dict[str, Any]]:
+    """The records in a UDL elset answer that carry both element lines."""
+    return [r for r in records if isinstance(r, dict) and _elset_line(r, 1) and _elset_line(r, 2)]
+
+
+async def _newest_records(
+    client: httpx.AsyncClient, satno: int, auth: tuple[str, str], data_mode: str, source: str,
+) -> list[Any]:
+    """The records a latest fetch chooses the newest set from. HTTP errors propagate.
+
+    The archive over the last ``_NEWEST_WINDOW_H`` hours is asked first: it
+    holds every provider's sets. ``/elset/current`` asked with no source was
+    seen to answer for 18th SPCS alone, so a GEO object came back three days
+    old while commercial providers had filed sets that day (charming-dirac
+    0.6.5; the owner's observation, to be confirmed against live UDL). The
+    current catalogue answers only when the archive holds no complete set in
+    the window, and its answer comes back as UDL gave it, so a record missing
+    a line can still be named as such. *source*, when the operator has chosen
+    one, narrows both. dataMode is sent only when it is not REAL.
+    """
+    base: dict[str, Any] = {"satNo": satno}
+    if data_mode != "REAL":
+        base["dataMode"] = data_mode
+    if source:
+        base["source"] = source
+    window = {**base, "epoch": _epoch_after(_NEWEST_WINDOW_H)}
+    resp = await client.get(_ELSET_URL, params=window, auth=auth, timeout=_ARCHIVE_TIMEOUT_S)
+    resp.raise_for_status()
+    archived = _complete_records(_normalise_elset_records(resp.json()))
+    if archived:
+        return archived
+    resp = await client.get(_ELSET_CURRENT_URL, params=base, auth=auth, timeout=_CURRENT_TIMEOUT_S)
+    resp.raise_for_status()
+    return _normalise_elset_records(resp.json())
+
+
+class FetchedElset(NamedTuple):
+    """One element set fetched from UDL, with its data mode, the provider that filed it and each newer set the
+    acceptance check refused before it was taken, newest first (SPC-243); none when it is the newest."""
+
+    tle: str
+    data_mode: str
+    source: str
+    passed_over: tuple[PassedOver, ...] = ()
+
+    def passed_over_note(self, name: str) -> str:
+        """The sentence naming each newer set refused for the object *name* and why, and this set as the one used;
+        "" when it is the newest. Never any set's text."""
+        if not self.passed_over:
+            return ""
+        return passed_over_sentence(name, self.passed_over, self.source, _parse_tle_epoch(self.tle.split("\n")[0]))
 
 
 async def fetch_tle_for_satno(
     satno: int, username: str, password: str,
     data_mode: str = "REAL",
     source: str = "",
-) -> tuple[str, str] | None:
-    """Fetch current TLE for a SATNO from UDL.
+) -> FetchedElset | RefusedElset | None:
+    """The newest element set UDL holds for *satno*, from any provider, or from *source* when one is named.
 
-    Returns ``('line1\\nline2', 'DATA_MODE_TAG')`` or ``None`` on failure.
-    The element set is the newest complete one UDL returns, and the second
-    element is that record's ``dataMode`` (upper-cased), so callers can keep
-    the provenance of the set they hold.
+    Returns the set with the record's ``dataMode`` (upper-cased) and the
+    provider that filed it (its ``source``), so callers keep its provenance,
+    or None on failure or when UDL holds no complete set. The archive over the
+    last three days is asked first, then the current catalogue (see
+    ``_newest_records``).
+
+    The set taken must pass the acceptance check (SPC-201) and be for
+    *satno*. The complete records are checked newest first, and the newest
+    the check accepts is taken (SPC-243): a newer set the check refuses, such
+    as an ephemeris type 2 set filed a millisecond after another provider's
+    accepted one, does not block an older one, from the same provider or
+    another. Each newer set
+    refused comes back on the set's ``passed_over``, its provider, epoch and
+    failures, for the caller to name, and is logged without its text. Among
+    sets tied at one epoch the order is provider, then set text, so the order
+    UDL listed them in decides nothing, and a refused set tied with the one
+    taken is not newer and not named. At most ``_MAX_SETS_CHECKED`` sets are
+    checked. Only when none checked passes does a RefusedElset come back,
+    naming the newest set's failures, and the caller stores nothing and says
+    why. Staleness is judged by each caller on the set taken.
     """
     try:
         async with httpx.AsyncClient() as client:
-            params: dict[str, Any] = {"satNo": satno}
-            if data_mode != "REAL":
-                params["dataMode"] = data_mode
-            if source:
-                params["source"] = source
-            resp = await client.get(
-                f"{_UDL_BASE}/elset/current",
-                params=params,
-                auth=(username, password),
-                timeout=10.0,
-            )
-        resp.raise_for_status()
-        data = resp.json()
+            records = await _newest_records(client, satno, (username, password), data_mode, source)
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("fetch_tle_for_satno(%s) failed: %s", log_safe(satno), log_safe(exc))
         return None
 
-    # /elset/current keeps one current element set per source and answers in
-    # no order, so the first record can be a source that last updated days
-    # ago. Only complete records are candidates, and the newest of them wins.
-    records: list[Any] = data if isinstance(data, list) else [data]
-    complete = [r for r in records if isinstance(r, dict) and _elset_line(r, 1) and _elset_line(r, 2)]
+    # UDL answers in no order, and the archive holds several providers' sets,
+    # so the complete records are ordered newest first rather than taken as listed.
+    complete = _complete_records(records)
     if not complete:
         return None
+    walked = _newest_accepted(_newest_first(complete), satno)
+    if walked.record is None:
+        refusal = RefusedElset(satno, walked.newest, walked.checked, walked.unchecked)
+        log_refusal(refusal.sentence(f"SATNO {satno}, as UDL answered it,"))
+        return refusal
+    data_mode_tag = str(walked.record.get("dataMode") or data_mode or "REAL").strip().upper()
+    return FetchedElset(walked.tle, data_mode_tag, _provider_of(walked.record), walked.passed_over)
 
-    rec = _select_latest_elset(complete)
-    data_mode_tag = str(rec.get("dataMode") or data_mode or "REAL").strip().upper()
-    return (f"{_elset_line(rec, 1)}\n{_elset_line(rec, 2)}", data_mode_tag)
+
+#: The most element sets one fetch checks, newest first, before it stops (SPC-243). The 72-hour archive of a busy
+#: GEO object can hold one provider's sets every 15 to 30 minutes, up to 288 of them, beside the others'; 500 covers
+#: that with room, and a refused set costs about 25 microseconds to check, so the bound is about 12 ms. Past it the
+#: older sets are not checked: the fetch is refused, naming the newest set's failures as before, and the log says how
+#: many were left unchecked. Unsourced judgement, Claude's choice.
+_MAX_SETS_CHECKED = 500
+
+#: Sorts a record whose epoch cannot be read after every dated one: the check refuses it in any case.
+_UNDATED = datetime.min.replace(tzinfo=UTC)
+
+
+class _Walk(NamedTuple):
+    """What checking records newest first found: the record taken and its set, or None and "" when none passed, the
+    newer sets refused before it, and the newest set's check, which names the failures when none passed."""
+
+    record: Any
+    tle: str
+    passed_over: tuple[PassedOver, ...]
+    newest: ElsetCheck
+    #: How many sets were checked, and how many older ones past ``_MAX_SETS_CHECKED`` were not.
+    checked: int = 0
+    unchecked: int = 0
+
+
+def _provider_of(record: Any) -> str:
+    return str(record.get("source") or "").strip()
+
+
+def _newest_first(records: list[Any]) -> list[Any]:
+    """*records* newest line 1 epoch first; among those tied at an epoch, provider then set text, a stable order."""
+    by_provider = sorted(records, key=lambda r: (_provider_of(r), _elset_line(r, 1), _elset_line(r, 2)))
+    return sorted(by_provider, key=lambda r: _parse_tle_epoch(_elset_line(r, 1)) or _UNDATED, reverse=True)
+
+
+def _newest_accepted(ordered: list[Any], satno: int) -> _Walk:
+    """Check the complete records in *ordered*, newest first and not empty, and stop at the first the check accepts.
+
+    Each record goes to the check with its set, so an SGP4-XP set or an uncorrelated track is refused by the record's
+    own fields; a set dated in the future is refused by the time the walk began (SPC-226). The sets refused are
+    logged by type and provider, and, when an older set is taken, the sentence naming those newer than it, all without
+    any set's text.
+    """
+    checked_at = datetime.now(UTC)
+    refused_sets: list[tuple[str, Any]] = []
+    passed: list[PassedOver] = []
+    checks: list[ElsetCheck] = []
+    taken: tuple[Any, str] | None = None
+    for rec in ordered[:_MAX_SETS_CHECKED]:
+        tle = f"{_elset_line(rec, 1)}\n{_elset_line(rec, 2)}"
+        check = check_elset(tle, satno, record=rec, now=checked_at)
+        checks.append(check)
+        if check.accepted:
+            taken = (rec, tle)
+            break
+        refused_sets.append((tle, rec))
+        epoch = _parse_tle_epoch(_elset_line(rec, 1))
+        if epoch is not None:
+            passed.append(PassedOver(_provider_of(rec), epoch, check.failures))
+    subject = f"SATNO {satno}"
+    log_skipped_by_type(subject, refused_sets)
+    if taken is None:
+        unchecked = len(ordered) - len(checks)
+        if unchecked:
+            logger.warning(
+                "%s: the newest %d of %d element sets were all refused; the %d older were not checked",
+                log_safe(subject), len(checks), len(ordered), unchecked,
+            )
+        return _Walk(None, "", (), checks[0], len(checks), unchecked)
+    rec, tle = taken
+    used_epoch = _parse_tle_epoch(_elset_line(rec, 1))
+    # A refused set tied with the one taken is not newer, so it is not passed over (the tie rule is unchanged).
+    newer = tuple(p for p in passed if used_epoch is None or p.epoch > used_epoch)
+    if newer:
+        logger.warning("%s", log_safe(passed_over_sentence(subject, newer, _provider_of(rec), used_epoch), limit=2000))
+    return _Walk(rec, tle, newer, checks[0])
 
 
 #: Background tasks started at UDL login. The loop holds only weak references
@@ -212,6 +408,14 @@ class _CatalogClock:
 
 
 _CATALOG_CLOCK = _CatalogClock()
+
+
+def spawn_session_task(coro: Coroutine[Any, Any, None], owner: SessionKey | None) -> asyncio.Task[None]:
+    """Start *coro* as a task UDL logout cancels, for other modules (the burn watch).
+
+    Calls ``_spawn`` by name at call time, so tests that patch it still see it.
+    """
+    return _spawn(coro, owner)
 
 
 def _spawn(coro: Coroutine[Any, Any, None], owner: SessionKey | None) -> asyncio.Task[None]:
@@ -271,36 +475,40 @@ async def _fetch_onorbit_background(username: str, password: str) -> None:
         logger.info("Background: on-orbit catalog ready (%d objects)", len(get_onorbit_catalog()))
     except Exception as exc:   # noqa: BLE001 - a background task; any failure must reach the status flag
         set_catalog_status("error")
-        logger.warning("Background: on-orbit catalog fetch failed: %s", exc)
+        logger.warning("Background: on-orbit catalog fetch failed: %s", log_safe(exc, limit=500))
+
+
+def remember_sources(state: SessionState, sources: list[str]) -> None:
+    """Add *sources* to the providers the TLE Source list offers, each once, in order; a blank one never."""
+    named = {src.strip() for src in sources if src.strip()}
+    state.udl_available_sources = sorted(set(state.udl_available_sources) | named)
 
 
 async def _discover_tle_sources(username: str, password: str, state: SessionState) -> None:
-    """Probe UDL to discover available TLE source providers for this session.
+    """Probe UDL for the TLE source providers this session can choose from.
 
-    Fetches ISS (SATNO 25544) with a wide window and collects unique ``source``
-    field values from the returned records.  Results are stored on *state*.
-    Silent on failure — source discovery is best-effort.
+    Reads the ISS's archive over the last day and adds every ``source`` on
+    it to the list. ``/elset/current``, asked before, was seen to answer for
+    18th SPCS alone when no source is given, so the list offered one provider.
+    The ISS is a LEO object, so the providers the connect-time refresh sees on
+    the held sets are added as it runs. Silent on failure: source discovery is
+    best-effort, and a failed probe leaves the list alone.
     """
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"{_UDL_BASE}/elset/current",
-                params={"satNo": 25544},
+                _ELSET_URL,
+                params={"satNo": 25544, "epoch": _epoch_after(_DISCOVERY_WINDOW_H)},
                 auth=(username, password),
                 timeout=15.0,
             )
         resp.raise_for_status()
-        data = resp.json()
-        records = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
-        sources = sorted({
-            str(rec.get("source") or "").strip()
-            for rec in records
-            if rec.get("source") and str(rec.get("source")).strip()
-        })
-        state.udl_available_sources = sources
-        logger.info("UDL TLE sources discovered: %s", log_safe(sources))
-    except Exception as exc:   # noqa: BLE001 - a background task; a failure leaves the default source list
-        logger.warning("_discover_tle_sources failed (non-critical): %s", exc)
+        records = _normalise_elset_records(resp.json())
+        remember_sources(state, [str(rec.get("source") or "") for rec in records if isinstance(rec, dict)])
+        logger.info("UDL TLE sources discovered: %s", log_safe(state.udl_available_sources))
+    # BLE001: a background task; a failure leaves the source list as it was.
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("_discover_tle_sources failed (non-critical): %s", log_safe(exc, limit=500))
 
 
 # ── UDL session management ─────────────────────────────────────────────────
@@ -324,7 +532,7 @@ async def udl_login(
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"{_UDL_BASE}/elset/current",
+                _ELSET_CURRENT_URL,
                 params={"satNo": 25544},
                 auth=(username, password),
                 timeout=10.0,
@@ -337,14 +545,13 @@ async def udl_login(
             )
         if not resp.is_success:
             body = resp.text[:300].strip() or "(empty)"
-            error = f"UDL probe returned HTTP {resp.status_code}: {body}"
             logger.warning(
                 "UDL login probe %d for operator %s: %s",
-                resp.status_code, log_safe(current_user.username), log_safe(body),
+                resp.status_code, log_safe(current_user.username), log_safe(body, limit=500),
             )
             return render(request,
                 "partials/udl_status.html",
-                {"udl_user": None, "error": error},
+                {"udl_user": None, "error": _udl_refused("login check", resp.status_code)},
             )
     # No raise_for_status: every non-success status returned above, so the
     # HTTPStatusError branch it fed could never run (audit F-250).
@@ -354,14 +561,16 @@ async def udl_login(
             {"udl_user": None, "error": "UDL connection timed out (10 s). Check network."},
         )
     except httpx.RequestError as exc:
-        logger.warning("UDL login probe failed: %s", exc)
+        logger.warning("UDL login probe failed: %s", log_safe(exc, limit=500))
         return render(request,
             "partials/udl_status.html",
-            {"udl_user": None, "error": f"UDL unreachable: {exc}"},
+            {"udl_user": None, "error": _udl_unreachable("login check")},
         )
 
     state.udl_username = username
     state.udl_password = password
+    # Discovery adds to the list, so a login on another account without a logout between must not inherit it.
+    state.udl_available_sources = []
     state.append_log(f"[UDL] Connected as {username}")
     logger.info("UDL session opened for operator: %s", log_safe(current_user.username))
 
@@ -404,6 +613,29 @@ async def elset_refresh_status(
 
 _VALID_DATA_MODES = {"REAL", "TEST", "EXERCISE", "SIMULATED"}
 
+# A per-request data mode outside the four is refused rather than read as REAL:
+# a mistyped mode must not pull live data into an exercise, or the reverse.
+_UNKNOWN_DATA_MODE_MESSAGE = (
+    "Data mode must be REAL, SIMULATED, EXERCISE or TEST; nothing was fetched. "
+    "Choose one of those, or Session mode."
+)
+
+
+def _request_data_mode(state: SessionState, requested: str) -> str | None:
+    """The data mode one UDL fetch uses: *requested*, or the session's when blank.
+
+    A named mode applies to this request only and never changes the session
+    mode (SPC-030). Returns None for anything outside the four UDL modes, which
+    the caller refuses.
+    """
+    choice = requested.strip().upper()
+    if not choice:
+        return state.udl_data_mode or "REAL"
+    if choice in _VALID_DATA_MODES:
+        return choice
+    logger.info("UDL fetch refused an unknown data mode %r", log_safe(requested))
+    return None
+
 
 @router.post("/data-mode", response_model=None)
 async def set_data_mode(
@@ -415,7 +647,14 @@ async def set_data_mode(
     state = get_session_state(current_user)
     mode = data_mode.strip().upper()
     if mode not in _VALID_DATA_MODES:
-        mode = "REAL"
+        # Refused, never quietly set to REAL (SPC-024): an operator meaning
+        # EXERCISE would otherwise land on live data with no word said.
+        logger.info("Refused session data mode %s", log_safe(mode))
+        return render(request, "partials/data_mode_status.html", {
+            "udl_data_mode": state.udl_data_mode,
+            "data_mode_error": ("Data mode must be REAL, SIMULATED, EXERCISE or TEST; "
+                                f"the session mode is still {state.udl_data_mode}."),
+        })
     state.udl_data_mode = mode
     state.append_log(f"[UDL] Data mode set to {mode}")
     logger.info("UDL data mode set to %s for operator %s", log_safe(mode), log_safe(current_user.username))
@@ -459,6 +698,9 @@ async def udl_logout(
     state.udl_username = None
     state.udl_password = None
     state.elset_refresh = None
+    # Discovery and the refresh add to the provider list rather than replace
+    # it, so the next login, perhaps on another account, starts from empty.
+    state.udl_available_sources = []
     # The login's background tasks hold the password; stop them too (F-143).
     _cancel_session_tasks(current_user.session_key)
     state.append_log("[UDL] Disconnected")
@@ -473,46 +715,58 @@ async def udl_logout(
 # ── TLE fetch proxy ────────────────────────────────────────────────────────
 
 
-def _tle_precheck_error(state: SessionState, mode: str) -> str | None:
+def _tle_precheck_error(state: SessionState, mode: str, data_mode: str | None) -> str | None:
     """Return the operator-facing reason a TLE fetch cannot proceed, or None.
 
     Credentials live only in session state, so a missing pair means the
     operator never logged in; epoch mode has nothing to measure an elset
-    against until scenario time is set.
+    against until scenario time is set; a None *data_mode* is one
+    _request_data_mode refused.
     """
     if not state.udl_username or not state.udl_password:
         return _NOT_CONNECTED_MESSAGE
+    if data_mode is None:
+        return _UNKNOWN_DATA_MODE_MESSAGE
     if mode == "epoch" and state.scenario_start is None:
         return "No scenario time set. Configure scenario time in the Scenario Configuration panel first."
     return None
 
 
-def _elset_request_spec(
-    state: SessionState,
-    satno: int,
-    mode: str,
-    data_mode: str,
-) -> tuple[str, dict[str, Any], float]:
-    """Return the (url, params, timeout) for the elset query *mode* calls for.
+#: How many element sets dated before the scenario start epoch mode asks UDL for. No sort is sent: none is used
+#: anywhere against UDL here, so none is assumed, and UDL may answer with any of the sets before the start, not the
+#: closest. Ten was too few once a provider files every 15 minutes and its sets are refused (SPC-243): 100 covers
+#: a day of one such provider beside the others. Unsourced judgement, Claude's choice.
+_EPOCH_MAX_RESULTS = 100
 
-    Epoch mode asks /elset for up to ten elsets at or before scenario start;
-    latest mode asks /elset/current, which takes no epoch filter. dataMode is
-    sent only when it is not REAL, and the operator's source override applies
-    to the current-elset query alone.
+
+def _epoch_request_params(state: SessionState, satno: int, data_mode: str) -> dict[str, Any]:
+    """The /elset query for epoch mode: up to ``_EPOCH_MAX_RESULTS`` elsets before scenario start, in no stated order.
+
+    dataMode is sent only when it is not REAL. The operator's source override
+    does not apply: the epoch search reaches back past any one provider. When
+    every set UDL answers with is refused, the panel says so and fills nothing,
+    though an older set past those returned might have passed.
     """
-    if mode == "epoch":
-        epoch_filter = state.scenario_start.strftime("%Y-%m-%dT%H:%M:%S.000000Z")  # type: ignore[union-attr]
-        params: dict[str, Any] = {"satNo": satno, "epoch": f"<{epoch_filter}", "maxResults": 10}
-        if data_mode != "REAL":
-            params["dataMode"] = data_mode
-        return f"{_UDL_BASE}/elset", params, 10.0
-
-    latest_params: dict[str, Any] = {"satNo": satno}
+    epoch_filter = state.scenario_start.strftime("%Y-%m-%dT%H:%M:%S.000000Z")  # type: ignore[union-attr]
+    params: dict[str, Any] = {"satNo": satno, "epoch": f"<{epoch_filter}", "maxResults": _EPOCH_MAX_RESULTS}
     if data_mode != "REAL":
-        latest_params["dataMode"] = data_mode
-    if state.udl_tle_source:
-        latest_params["source"] = state.udl_tle_source
-    return f"{_UDL_BASE}/elset/current", latest_params, 15.0
+        params["dataMode"] = data_mode
+    return params
+
+
+async def _panel_records(client: httpx.AsyncClient, state: Any, satno: int, mode: str, dm: str) -> list[Any]:
+    """The records the TLE panel's *mode* query answers with. HTTP errors propagate.
+
+    Latest mode is the newest set from every provider, or the operator's
+    chosen source, as every other latest fetch takes it (``_newest_records``).
+    Both credentials are set once _tle_precheck_error has passed.
+    """
+    auth = (state.udl_username or "", state.udl_password or "")
+    if mode != "epoch":
+        return await _newest_records(client, satno, auth, dm, state.udl_tle_source)
+    resp = await client.get(_ELSET_URL, params=_epoch_request_params(state, satno, dm), auth=auth, timeout=10.0)
+    resp.raise_for_status()
+    return _normalise_elset_records(resp.json())
 
 
 def _normalise_elset_records(data: Any) -> list[Any]:
@@ -532,7 +786,9 @@ def _log_elset_diagnostics(records: list[Any]) -> None:
     """Log the record field names and every candidate's parsed line 1 epoch.
 
     Field names drift between UDL sources and a wrong pick is only ever
-    diagnosed from the epochs that were on offer, so both go in the log.
+    diagnosed from the epochs that were on offer, so both go in the log: the
+    epoch as read, never the set's own text, since a set the acceptance check
+    refuses must not reach the log in any part (SPC-201).
     """
     # Everything logged here comes off the wire, the record's own field names
     # included, and a newline in any of it forges an audit entry
@@ -546,18 +802,16 @@ def _log_elset_diagnostics(records: list[Any]) -> None:
         # neutralised at any limit.
         logger.info("UDL elset record keys: %s", log_safe(list(sample.keys()), limit=2000))
         # Also check for any epoch-like top-level field
-        for key in ("epoch", "EPOCH", "epochDate", "tle1", "TLE1"):
+        for key in ("epoch", "EPOCH", "epochDate"):
             if key in sample:
                 logger.info("  record[%r] = %s", key, log_safe(str(sample[key])[:80]))
 
-    # Log every candidate's TLE line1 epoch for diagnostics.
+    # Log every candidate's line 1 epoch, as read, for diagnostics.
     for i, candidate in enumerate(records):
-        l1_raw = _elset_line(candidate, 1)
-        ep = _parse_tle_epoch(l1_raw)
+        ep = _parse_tle_epoch(_elset_line(candidate, 1))
         logger.info(
-            "  record[%d] line1[18:32]=%r  parsed_epoch=%s  objectName=%s",
+            "  record[%d] parsed_epoch=%s  objectName=%s",
             i,
-            log_safe(l1_raw[18:_TLE_EPOCH_FIELD_END] if len(l1_raw) > _TLE_EPOCH_FIELD_END else l1_raw),
             ep.isoformat() if ep else "None",
             log_safe(candidate.get("objectName") or candidate.get(_UDL_NAME_KEY_UPPER) or "?"),
         )
@@ -581,26 +835,25 @@ def _select_elset_by_epoch(records: list[Any], scenario_start: datetime) -> Any 
     """Return the record whose TLE epoch is closest to, and not after, *scenario_start*.
 
     An elset published after the scenario starts answers a question the
-    operator did not ask, so those are skipped rather than ranked. Returns
-    None when no candidate survives that filter.
+    operator did not ask, so those are skipped rather than ranked. A record
+    missing a line cannot be used, so a complete one is preferred whenever any
+    is dated in range: a closest record without its lines must not stop the
+    panel taking an older complete one (V0.45 review). Returns None when no
+    candidate survives that filter.
     """
-    best_rec = None
-    best_delta = inf
-    for candidate in records:
-        ep = _parse_tle_epoch(_elset_line(candidate, 1))
-        if ep is None or ep > scenario_start:
-            continue
-        delta = (scenario_start - ep).total_seconds()
-        if delta < best_delta:
-            best_delta = delta
-            best_rec = candidate
-    return best_rec
+    dated = [
+        (r, ep) for r in records if (ep := _parse_tle_epoch(_elset_line(r, 1))) is not None and ep <= scenario_start
+    ]
+    candidates = [pair for pair in dated if _elset_line(pair[0], 2)] or dated
+    if not candidates:
+        return None
+    return max(candidates, key=lambda pair: pair[1])[0]
 
 
 def _select_latest_elset(records: list[Any]) -> Any:
     """Return the record with the newest TLE epoch.
 
-    /elset/current can answer with several records and does not order them,
+    UDL answers in no order, and the archive holds several providers' sets,
     so the newest is chosen here rather than taken on trust. A record missing
     a line cannot be used, so a complete one is preferred whenever any is.
     """
@@ -612,11 +865,27 @@ def _select_latest_elset(records: list[Any]) -> Any:
         if ep is not None and (best_epoch is None or ep > best_epoch):
             best_epoch = ep
             best_rec = candidate
-    logger.info(
-        "Latest mode selected record with epoch=%s",
-        best_epoch.isoformat() if best_epoch else "None",
-    )
     return best_rec
+
+
+def _panel_take(records: list[Any], state: Any, satno: int, mode: str, label: str) -> tuple[_Walk, str | None]:
+    """The TLE panel's set: the newest complete record the check accepts, in latest mode from every record, in
+    epoch mode from those dated at or before the scenario start (SPC-243), with the sentence refusing the newest
+    of them, logged, when none passes. The caller has made sure one such complete record exists."""
+    ordered = _newest_first(_complete_records(records))
+    if mode == "epoch":
+        start = state.scenario_start
+        ordered = [r for r in ordered if (epoch := _parse_tle_epoch(_elset_line(r, 1))) is not None and epoch <= start]
+    walked = _newest_accepted(ordered, satno)
+    if walked.record is not None:
+        # The set taken, not the newest record, which may be one refused.
+        taken = _parse_tle_epoch(_elset_line(walked.record, 1))
+        logger.info("%s mode selected record with epoch=%s", "Epoch" if mode == "epoch" else "Latest",
+                    taken.isoformat() if taken else "None")
+        return walked, None
+    refusal = RefusedElset(satno, walked.newest, walked.checked, walked.unchecked).sentence(label)
+    log_refusal(refusal)
+    return walked, refusal
 
 
 def _extract_tle_fields(rec: Any, name_override: str, satno: int) -> tuple[str, str, str]:
@@ -656,12 +925,38 @@ def _fields_side(request: Request) -> str:
     return _FIELDS_SIDES.get(request.headers.get("HX-Target", ""), "tle")
 
 
+async def _get_elsets(state: Any, satno: int, mode: str, dm: str) -> tuple[list[Any], str | None]:
+    """The TLE fetch's UDL records: ``(records, None)``, or ``([], the sentence to show)``.
+
+    Lifted out of ``fetch_tle`` whole, which sat at the complexity limit of
+    15 (SPC-060). The detail of a failure goes to the log, never the page.
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            return await _panel_records(client, state, satno, mode, dm), None
+    except httpx.HTTPStatusError as exc:
+        body = exc.response.text[:300].strip() or "(empty)"
+        # The remote response body cannot go into the record verbatim
+        # (pythonsecurity:S5145), nor to the operator at all (SPC-019).
+        logger.warning(
+            "UDL returned %s for SATNO %s: %s",
+            log_safe(exc.response.status_code), log_safe(satno), log_safe(body, limit=500),
+        )
+        return [], _udl_refused("TLE fetch", exc.response.status_code)
+    except httpx.TimeoutException:
+        return [], "UDL request timed out."
+    except httpx.RequestError as exc:
+        logger.warning("UDL TLE fetch failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
+        return [], _udl_unreachable("TLE fetch")
+
+
 @router.get("/tle", response_model=None)
 async def fetch_tle(
     request: Request,
     satno: int = Query(..., description="NORAD satellite catalog number"),
     mode: str = Query("latest", description="'latest' for current elset, 'epoch' for closest to scenario start"),
     name_override: Annotated[str, Query(description="Pre-populated name (e.g. from HRR watchlist commonName)")] = "",
+    data_mode: Annotated[str, Query(description="UDL data mode for this fetch only; blank uses the session mode")] = "",
     current_user: User = Depends(require_login),
     _rl: None = Depends(udl_data_rate_limit),
 ) -> HTMLResponse:
@@ -669,11 +964,15 @@ async def fetch_tle(
 
     Two modes are supported:
 
-    * ``latest`` — uses ``/elset/current`` to retrieve the most recent available elset.
+    * ``latest``: the newest elset from any provider, or the chosen TLE Source: the
+      archive over the last 72 hours first, then ``/elset/current`` (see ``_newest_records``).
     * ``epoch`` — fetches up to 10 elsets with epoch ≤ scenario start time, then selects
       the one whose epoch is closest to (but not after) the scenario start.  Requires
       scenario time to be set first.  A staleness warning is shown
       when the selected TLE is more than 7 days from the scenario start.
+
+    *data_mode* names the UDL data mode for this request alone; blank uses the
+    session mode, and the session mode is never changed by it.
     """
     state = get_session_state(current_user)
 
@@ -681,53 +980,19 @@ async def fetch_tle(
                "tle_age_days": None, "mode": mode, "error": None,
                "fields_side": _fields_side(request)}
 
-    precheck_error = _tle_precheck_error(state, mode)
-    if precheck_error is not None:
+    dm = _request_data_mode(state, data_mode)
+    precheck_error = _tle_precheck_error(state, mode, dm)
+    # dm is None only when precheck_error is set; named here so mypy sees it.
+    if precheck_error is not None or dm is None:
         return render(request,
             _TLE_FIELDS_TEMPLATE,
             {**_empty, "error": precheck_error},
         )
 
     # ── Fetch from UDL ───────────────────────────────────────────────────────
-    try:
-        async with httpx.AsyncClient() as client:
-            dm = state.udl_data_mode or "REAL"
-            url, params, timeout = _elset_request_spec(state, satno, mode, dm)
-            resp = await client.get(
-                url,
-                params=params,
-                # Both credentials are non-None once _tle_precheck_error has
-                # passed, but that narrowing now happens in the helper rather
-                # than in this frame, so mypy cannot see it here.
-                auth=(state.udl_username, state.udl_password),  # type: ignore[arg-type]
-                timeout=timeout,
-            )
-        resp.raise_for_status()
-        data = resp.json()
-    except httpx.HTTPStatusError as exc:
-        body = exc.response.text[:300].strip() or "(empty)"
-        error = f"UDL returned {exc.response.status_code} for SATNO {satno}: {body}"
-        # The message embeds the remote response body, so it cannot be used as
-        # the record verbatim (pythonsecurity:S5145).
-        logger.warning("%s", log_safe(error))
-        return render(request,
-            _TLE_FIELDS_TEMPLATE,
-            {**_empty, "error": error},
-        )
-    except httpx.TimeoutException:
-        return render(request,
-            _TLE_FIELDS_TEMPLATE,
-            {**_empty, "error": "UDL request timed out."},
-        )
-    except httpx.RequestError as exc:
-        logger.warning("UDL TLE fetch failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
-        return render(request,
-            _TLE_FIELDS_TEMPLATE,
-            {**_empty, "error": f"UDL unreachable: {exc}"},
-        )
-
-    # Normalise: /elset/current may return a single dict or a list
-    records = _normalise_elset_records(data)
+    records, fetch_error = await _get_elsets(state, satno, mode, dm)
+    if fetch_error is not None:
+        return render(request, _TLE_FIELDS_TEMPLATE, {**_empty, "error": fetch_error})
 
     if not records:
         return render(request,
@@ -767,12 +1032,23 @@ async def fetch_tle(
             {**_empty, "error": f"UDL returned an elset for SATNO {satno} with no element lines."},
         )
 
-    # TLE epoch metadata for the partial
+    # The set fills the form only once it passes the acceptance check, as the set for the number asked (SPC-201):
+    # the newest that does, each newer one refused named beside it (SPC-243).
+    walked, refusal = _panel_take(records, state, satno, mode, f"{name} ({satno})")
+    if refusal is not None:
+        return render(request, _TLE_FIELDS_TEMPLATE, {**_empty, "error": refusal})
+    rec, tle, line1 = walked.record, walked.tle, _elset_line(walked.record, 1)
+    # Named from the record taken: the newest record may be one the check refused (V0.45 review).
+    name = _extract_tle_fields(rec, name_override, satno)[0]
+    passed_over = FetchedElset(tle, "", _provider_of(rec), walked.passed_over).passed_over_note(f"{name} ({satno})")
+
+    # TLE epoch metadata for the partial: the set taken, never a newer one refused.
     tle_epoch_str, tle_age_days = _tle_epoch_metadata(line1, state.scenario_start)
 
     state.append_log(
         f"[UDL] Fetched TLE for SATNO {satno} ({name}) mode={mode}"
         + (f" epoch={tle_epoch_str}" if tle_epoch_str else "")
+        + (f". {passed_over}" if passed_over else "")
     )
     logger.info(
         "TLE fetched for SATNO %s (%s) mode=%s by operator %s",
@@ -788,7 +1064,14 @@ async def fetch_tle(
             "tle_epoch_str": tle_epoch_str,
             "tle_age_days": tle_age_days,
             "mode": mode,
-            "elset_mode": str(rec.get("dataMode") or state.udl_data_mode or "REAL").strip().upper(),
+            # The record's own mode, else the one this fetch asked for: the
+            # session mode is the wrong fallback once a request names its own.
+            "elset_mode": str(rec.get("dataMode") or dm).strip().upper(),
+            # The provider that filed it, so the add records where the set came from.
+            "elset_source": _provider_of(rec),
+            "data_mode_override": bool(data_mode.strip()),
+            # Each newer set the check refused before this one was taken, in a sentence (SPC-243); "" when none.
+            "passed_over": passed_over,
             "error": None,
             "fields_side": _empty["fields_side"],
         },
@@ -809,7 +1092,7 @@ _SV_MAX_RESULTS = 100
 def _sv_window_start() -> str:
     """The UDL epoch filter bound, :data:`_SV_WINDOW_DAYS` before now."""
     start = datetime.now(UTC) - timedelta(days=_SV_WINDOW_DAYS)
-    return start.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return f"{start.strftime(_UDL_TIME_FORMAT)}Z"
 
 
 def _newest_state_vector(data: object) -> dict[str, Any] | None:
@@ -829,6 +1112,7 @@ def _newest_state_vector(data: object) -> dict[str, Any] | None:
 async def fetch_statevector(
     request: Request,
     satno: int = Query(..., description="NORAD satellite catalog number"),
+    data_mode: Annotated[str, Query(description="UDL data mode for this fetch only; blank uses the session mode")] = "",
     current_user: User = Depends(require_login),
     _rl: None = Depends(udl_data_rate_limit),
 ) -> HTMLResponse:
@@ -836,7 +1120,8 @@ async def fetch_statevector(
 
     Returns position (km) and velocity (km s⁻¹) in the J2000 reference frame
     at the newest epoch in the last week (_SV_WINDOW_DAYS). Useful for initialising high-fidelity
-    intercept geometry without propagating a TLE.
+    intercept geometry without propagating a TLE. *data_mode* names the UDL
+    data mode for this request alone; blank uses the session mode.
     """
     state = get_session_state(current_user)
 
@@ -844,13 +1129,15 @@ async def fetch_statevector(
         return render(request,
             _STATEVECTOR_FIELDS_TEMPLATE,
             {
-    
+
                 "sv": None,
                 "error": _NOT_CONNECTED_MESSAGE,
             },
         )
 
-    dm = state.udl_data_mode or "REAL"
+    dm = _request_data_mode(state, data_mode)
+    if dm is None:
+        return render(request, _STATEVECTOR_FIELDS_TEMPLATE, {"sv": None, "error": _UNKNOWN_DATA_MODE_MESSAGE})
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
@@ -863,11 +1150,16 @@ async def fetch_statevector(
         resp.raise_for_status()
         data = resp.json()
     except httpx.HTTPStatusError as exc:
-        error = f"UDL returned {exc.response.status_code} for SATNO {satno}"
-        logger.warning("%s", log_safe(error))
+        # It showed "UDL returned 503 for SATNO ..." with no advice and logged
+        # no body, the one call SPC-019's two sentences had not reached.
+        body = exc.response.text[:300].strip() or "(empty)"
+        logger.warning(
+            "UDL state vector fetch returned %s for SATNO %s: %s",
+            log_safe(exc.response.status_code), log_safe(satno), log_safe(body, limit=500),
+        )
         return render(request,
             _STATEVECTOR_FIELDS_TEMPLATE,
-            {"sv": None, "error": error},
+            {"sv": None, "error": _udl_refused("state vector fetch", exc.response.status_code)},
         )
     except httpx.TimeoutException:
         return render(request,
@@ -878,7 +1170,7 @@ async def fetch_statevector(
         logger.warning("UDL state vector fetch failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
         return render(request,
             _STATEVECTOR_FIELDS_TEMPLATE,
-            {"sv": None, "error": f"UDL unreachable: {exc}"},
+            {"sv": None, "error": _udl_unreachable("state vector fetch")},
         )
 
     rec = _newest_state_vector(data)
@@ -907,6 +1199,7 @@ async def fetch_statevector(
         "y_dot": rec.get("yvel"),
         "z_dot": rec.get("zvel"),
         "ref_frame": rec["referenceFrame"],
+        "data_mode": str(rec.get("dataMode") or dm).strip().upper(),
     }
 
     state.append_log(
@@ -921,7 +1214,7 @@ async def fetch_statevector(
 
     return render(request,
         _STATEVECTOR_FIELDS_TEMPLATE,
-        {"sv": sv, "error": None},
+        {"sv": sv, "error": None, "data_mode_override": bool(data_mode.strip())},
     )
 
 
@@ -987,11 +1280,13 @@ async def fetch_hrr_objects(
                     break
     except httpx.HTTPStatusError as exc:
         body = exc.response.text[:200].strip() or "(empty)"
-        return [], [], 0, f"HRR fetch returned HTTP {exc.response.status_code}: {body}"
+        logger.warning("HRR fetch returned HTTP %s: %s", log_safe(exc.response.status_code), log_safe(body, limit=500))
+        return [], [], 0, _udl_refused("HRR fetch", exc.response.status_code)
     except httpx.TimeoutException:
         return [], [], 0, "UDL request timed out."
     except httpx.RequestError as exc:
-        return [], [], 0, f"UDL unreachable: {exc}"
+        logger.warning("HRR fetch failed: %s", log_safe(exc, limit=500))
+        return [], [], 0, _udl_unreachable("HRR fetch")
 
     if not notifications:
         return [], [], 0, f"No HRR notifications found in the last {_HRR_MAX_LOOKBACK_DAYS} days."
@@ -1001,20 +1296,28 @@ async def fetch_hrr_objects(
     return hrr_blue, hrr_red, days_used, None
 
 
-def _hrr_elset_fields(sat: dict[str, Any]) -> dict[str, str]:
+def _hrr_elset_fields(sat: dict[str, Any], label: str) -> dict[str, str]:
     """Return the optional element-set fields for one HRR entry, or nothing.
 
     Both lines must be present to be usable: half a TLE is not a degraded
-    TLE, it is an unparseable one.
+    TLE, it is an unparseable one. A set the acceptance check refuses is not
+    carried: the entry holds the sentence saying so, naming the object as
+    *label*, in its place (SPC-201).
     """
     line1 = str(sat.get("line1") or "").strip()
     line2 = str(sat.get("line2") or "").strip()
-    if line1 and line2:
-        return {
-            "tle": f"{line1}\n{line2}",
-            "tle_data_mode": str(sat.get("tleDataMode") or "REAL").strip().upper(),
-        }
-    return {}
+    if not (line1 and line2):
+        return {}
+    tle = f"{line1}\n{line2}"
+    refusal = refused(label, tle)
+    if refusal is not None:
+        return {"tle_refusal": refusal}
+    return {"tle": tle, "tle_data_mode": str(sat.get("tleDataMode") or "REAL").strip().upper()}
+
+
+def elset_refusals(objects: list[dict[str, Any]]) -> list[str]:
+    """The sentence for each HRR entry whose element set the acceptance check refused, in order."""
+    return [str(o["tle_refusal"]) for o in objects if o.get("tle_refusal")]
 
 
 def parse_hrr_notification(notification: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -1026,7 +1329,9 @@ def parse_hrr_notification(notification: dict[str, Any]) -> tuple[list[dict[str,
     notification does not, so the live path is unaffected; the bundled
     bootstrap list does, which is what lets a fresh instance run before anyone
     has connected to UDL. Where present it is carried through as ``tle`` with
-    its ``tle_data_mode``, so the interface can mark where it came from.
+    its ``tle_data_mode``, so the interface can mark where it came from, once
+    it passes the acceptance check; a refused one is carried as the sentence
+    ``tle_refusal`` instead (SPC-201).
     """
     msg_body: list[dict[str, Any]] = notification.get("msgBody") or []
     created_at = str(notification.get("createdAt") or "").strip()
@@ -1048,8 +1353,8 @@ def parse_hrr_notification(notification: dict[str, Any]) -> tuple[list[dict[str,
             "orbit_regime": orbit_regime,
             "created_at": created_at,
         }
-        # Optional element set, carried through only when the source has one.
-        entry.update(_hrr_elset_fields(sat))
+        # Optional element set, carried through only when the source has one and it passes the check.
+        entry.update(_hrr_elset_fields(sat, f"{name} ({satno})"))
         if country in _RED_COUNTRIES:
             hrr_red.append(entry)
         else:
@@ -1086,8 +1391,11 @@ async def fetch_hrr(
             "partials/hrr_panel.html", {**_empty_err, "error": error},
         )
 
-    # Cache all HRR objects in session state for threat sweep use.
+    # Cache all HRR objects in session state for threat sweep use. A set the acceptance check refused was not
+    # carried: the run log says so, naming the object (SPC-201).
     state.hrr_objects = hrr_blue + hrr_red
+    for refusal in elset_refusals(state.hrr_objects):
+        state.append_log(f"[HRR] {refusal}")
 
     state.append_log(
         f"[HRR] lookback={days_used}d — "
@@ -1160,6 +1468,125 @@ async def search_catalog(
         {"results": results, "q": q,
          "status": status, "total": len(catalog)},
     )
+
+
+# ── Conjunction lookup ─────────────────────────────────────────────────────
+
+
+_CONJUNCTION_TEMPLATE = "partials/conjunction_results.html"
+_CONJUNCTION_CALL = "conjunction lookup"
+_MAX_SATNO_DIGITS = 9
+_BAD_SATNO_MESSAGE = "Enter a NORAD catalogue number (digits only) to look up its conjunctions."
+
+
+def _conjunction_satno(raw: str) -> int | None:
+    """*raw* as a catalogue number, or None. ASCII digits only, so "1e3" and "²" are not one."""
+    text = raw.strip()
+    if not (text.isascii() and text.isdigit()) or len(text) > _MAX_SATNO_DIGITS or int(text) == 0:
+        return None
+    return int(text)
+
+
+def _conjunction_precheck(state: SessionState, satno: int | None, data_mode: str | None) -> str | None:
+    """The operator-facing reason a conjunction lookup cannot proceed, or None."""
+    if not state.udl_username or not state.udl_password:
+        return _NOT_CONNECTED_MESSAGE
+    if satno is None:
+        return _BAD_SATNO_MESSAGE
+    if data_mode is None:
+        return _UNKNOWN_DATA_MODE_MESSAGE
+    return None
+
+
+async def _get_conjunction_pages(
+    auth: tuple[str, str], satno: int, dm: str,
+) -> tuple[list[tuple[str, Any]], str | None]:
+    """Ask UDL for the object as sat 1 and as sat 2: ``(replies, None)``, or ``([], the sentence to show)``.
+
+    UDL filters on one side per query, so both are asked. Either failing
+    fails the lookup: half a listing would read as no close approaches on the
+    other side. The detail of a failure goes to the log, never the page.
+    """
+    pages: list[tuple[str, Any]] = []
+    try:
+        async with httpx.AsyncClient() as client:
+            for side in CONJUNCTION_SIDE_PARAMS:
+                resp = await client.get(
+                    f"{_UDL_BASE}{CONJUNCTION_PATH}",
+                    params={side: satno, "dataMode": dm},
+                    auth=auth,
+                    timeout=15.0,
+                )
+                resp.raise_for_status()
+                try:
+                    pages.append((side, resp.json()))
+                except ValueError as exc:
+                    logger.warning(
+                        "UDL conjunction reply for SATNO %s was not JSON (%s): %s",
+                        log_safe(satno), log_safe(exc), log_safe(resp.text[:300], limit=500),
+                    )
+                    return [], f"UDL answered the {_CONJUNCTION_CALL} with a body SPECTRE could not read; {_DETAIL_IN_LOG}"
+    except httpx.HTTPStatusError as exc:
+        body = exc.response.text[:300].strip() or "(empty)"
+        logger.warning(
+            "UDL conjunction lookup returned %s for SATNO %s: %s",
+            log_safe(exc.response.status_code), log_safe(satno), log_safe(body, limit=500),
+        )
+        return [], _udl_refused(_CONJUNCTION_CALL, exc.response.status_code)
+    except httpx.TimeoutException as exc:
+        logger.warning("UDL conjunction lookup timed out for SATNO %s: %s", log_safe(satno), log_safe(exc))
+        return [], f"UDL did not answer the {_CONJUNCTION_CALL} in time. Try again; {_DETAIL_IN_LOG}"
+    except httpx.RequestError as exc:
+        logger.warning("UDL conjunction lookup failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
+        return [], _udl_unreachable(_CONJUNCTION_CALL)
+    return pages, None
+
+
+@router.get("/conjunction", response_model=None)
+async def udl_conjunction(
+    request: Request,
+    current_user: Annotated[User, Depends(require_login)],
+    _rl: Annotated[None, Depends(udl_data_rate_limit)],
+    satno: Annotated[str, Query(description="NORAD catalogue number")] = "",
+    data_mode: Annotated[str, Query(description="UDL data mode for this lookup only; blank uses the session mode")] = "",
+) -> HTMLResponse:
+    """List the conjunctions UDL holds for *satno*, newest TCA first, at most 50 (SPC-031).
+
+    The miss distance and probability of collision are UDL's figures as
+    filed; SPECTRE computes neither. *data_mode* names the UDL data mode for
+    this lookup alone; blank uses the session mode, which it never changes.
+    """
+    state = get_session_state(current_user)
+    number = _conjunction_satno(satno)
+    dm = _request_data_mode(state, data_mode)
+    context: dict[str, Any] = {
+        "satno": number, "rows": [], "usable": 0, "skipped": 0, "unrelated": 0, "lookup_mode": dm,
+        "data_mode_override": bool(data_mode.strip()), "error": None,
+    }
+    error = _conjunction_precheck(state, number, dm)
+    # number and dm are None only when error is set; named here so mypy sees it.
+    if error is not None or number is None or dm is None:
+        return render(request, _CONJUNCTION_TEMPLATE, {**context, "error": error})
+
+    # Both credentials are set once the precheck has passed; the "or" is for mypy.
+    auth = (state.udl_username or "", state.udl_password or "")
+    pages, error = await _get_conjunction_pages(auth, number, dm)
+    if error is not None:
+        return render(request, _CONJUNCTION_TEMPLATE, {**context, "error": error})
+
+    reading = read_conjunctions(pages, number, dm)
+    # Held for Interactions (SPC-173): the sweep judges these and never fetches them itself.
+    hold_conjunctions(state, number, reading, dm, datetime.now(UTC))
+    state.append_log(f"[UDL] Conjunction lookup for SATNO {number}: {reading.usable} record(s)")
+    logger.info(
+        "Conjunction lookup for SATNO %s dataMode=%s by operator %s: %s usable, %s skipped, %s unrelated",
+        log_safe(number), log_safe(dm), log_safe(current_user.username),
+        log_safe(reading.usable), log_safe(reading.skipped), log_safe(reading.unrelated),
+    )
+    return render(request, _CONJUNCTION_TEMPLATE, {
+        **context, "rows": reading.rows, "usable": reading.usable,
+        "skipped": reading.skipped, "unrelated": reading.unrelated,
+    })
 
 
 #: Output field -> the UDL fields that may carry it, in order of preference.
@@ -1243,7 +1670,7 @@ def _notso_query(latest: datetime | None) -> dict[str, str | int]:
 
     since = latest + timedelta(microseconds=1) if latest is not None else datetime(2024, 1, 1, tzinfo=UTC)
     return {
-        "createdAt":  f">{since.strftime('%Y-%m-%dT%H:%M:%S.%f')}Z",
+        "createdAt":  f">{since.strftime(_UDL_TIME_FORMAT)}Z",
         "dataMode":   "REAL",
         "msgType":    "TACREP_NOTSO",
         "source":     "JCO",
@@ -1261,7 +1688,8 @@ def _notso_page_records(resp: Any, page: int) -> tuple[list[Any] | None, str | N
     try:
         resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        return None, f"HTTP error on page {page}: {exc}"
+        logger.warning("NOTSO sync page %d failed: %s", page, log_safe(exc, limit=500))
+        return None, f"HTTP error on page {page}: {_udl_refused('NOTSO sync', resp.status_code)}"
     try:
         data = resp.json()
     # BLE001: any undecodable body ends paging with a reason, not a 500.
@@ -1299,15 +1727,16 @@ async def _pull_notso_pages(
                     break
     # BLE001: a failed sync is reported with what it had added so far.
     except Exception as exc:  # noqa: BLE001
-        errors.append(f"Sync failed: {exc}")
-        logger.warning("notso_sync failed: %s", exc)
+        errors.append(f"The NOTSO sync stopped before it finished. Try the sync again; {_DETAIL_IN_LOG}")
+        logger.warning("notso_sync failed: %s", log_safe(exc, limit=500))
     return total_added, page, errors
 
 
 def _notso_sync_status(total_added: int, errors: list[str], cache: Any) -> str:
     """The status callout: red when nothing was added and something failed."""
     if errors and total_added == 0:
-        # Escaped: the messages carry exception text and UDL response bodies (F-249).
+        # Escaped, though the messages are fixed sentences now (SPC-019): one
+        # that ever carries a value again must not become markup (F-249).
         error_html = "".join(f'<p style="margin:0.1rem 0">{html.escape(e)}</p>' for e in errors)
         return f'<div class="callout callout-red" style="font-size:0.72rem">{error_html}</div>'
     warn_html = "".join(

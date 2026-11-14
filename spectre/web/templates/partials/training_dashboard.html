@@ -37,7 +37,7 @@
 
   <button class="btn-primary"
           style="font-size:0.75rem; font-weight:800; padding:0.55rem 1.2rem"
-          onclick="trainingTab('scenarios'); htmx.ajax('GET', '/training/scenario/{{ first_scenario.id }}', {target:'#scenario-detail', swap:'innerHTML'}); setTimeout(function(){ var el=document.getElementById('scenario-detail'); if(el) el.scrollIntoView({behavior:'smooth', block:'start'}); }, 300)">
+          data-action="loadFirstScenario" data-scenario-url="/training/scenario/{{ first_scenario.id }}">
     ▶ Load First Scenario — {{ first_scenario.title }}
   </button>
   <span style="font-size:0.6rem; color:var(--text-dim); margin-left:0.75rem">

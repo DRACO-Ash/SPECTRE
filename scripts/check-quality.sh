@@ -14,6 +14,24 @@
 set -eu
 
 BASE="${1:-master}"
+# A stale local base makes every commit released since it was last pulled read
+# as this branch's work. Use the remote-tracking branch when the local one is
+# behind it; CI fetches the base fresh, a developer's checkout often has not. A
+# release commit, the usual base for one release's own change, has no remote
+# branch and is used as given.
+# A CI checkout often holds origin/master and no local master. A base that names
+# no commit at all stops the run: it is never handed to git as an option.
+if ! git rev-parse --verify --quiet --end-of-options "$BASE^{commit}" >/dev/null 2>&1; then
+    if git rev-parse --verify --quiet --end-of-options "origin/$BASE^{commit}" >/dev/null 2>&1; then
+        BASE="origin/$BASE"
+    else
+        echo "FAIL: base '$BASE' is not a commit here." >&2
+        exit 2
+    fi
+elif git rev-parse --verify --quiet "origin/$BASE" >/dev/null 2>&1 \
+        && git merge-base --is-ancestor "$BASE" "origin/$BASE" 2>/dev/null; then
+    BASE="origin/$BASE"
+fi
 COVERAGE_XML="coverage.xml"
 COVERAGE_FLOOR=80
 DUPLICATION_CEILING=3
@@ -81,6 +99,20 @@ changed_in() {
     done
 }
 
+coverage_is_current() {
+    # A report older than the code it scores is not evidence: diff-cover skips
+    # every file the report does not hold, so four modules new on the
+    # charming-dirac branch went unmeasured against an older report and the
+    # step passed at 89% (d3447e2, SPC-234). A changed source or test file
+    # newer than the report stops the run: an edited test changes what the
+    # report measured as surely as edited code does.
+    for f in $(changed_in "$SOURCE_DIRS $TEST_DIRS"); do
+        if [ "$f" -nt "$COVERAGE_XML" ]; then
+            fail "$COVERAGE_XML is older than $f; rerun pytest --cov --cov-report=xml:$COVERAGE_XML"
+        fi
+    done
+}
+
 SRC_FILES=$(changed_in "$SOURCE_DIRS" | tr '\n' ' ')
 TST_FILES=$(changed_in "$TEST_DIRS" | tr '\n' ' ')
 
@@ -93,6 +125,9 @@ TST_FILES=$(changed_in "$TEST_DIRS" | tr '\n' ' ')
 # green from underneath the bar it exists to enforce. Declare the standard once,
 # here, and report the distance to it on every run so it cannot be silent again.
 HOUSE_COVERAGE_STANDARD=80
+# Both coverage legs read the report, so its age is checked before either.
+[ -f "$COVERAGE_XML" ] || fail "$COVERAGE_XML not found; run pytest --cov --cov-report=xml:$COVERAGE_XML first"
+coverage_is_current
 printf '\n== Whole-repository coverage against the house standard ==\n'
 OVERALL=$(python3 -c "
 import sys, xml.etree.ElementTree as E
@@ -106,8 +141,11 @@ import re, pathlib
 m = re.search(r'^fail_under\s*=\s*(\d+)', pathlib.Path('pyproject.toml').read_text(), re.M)
 print(m.group(1) if m else -1)
 ")
+# A floor above the standard is the ratchet holding more than the standard
+# asks, not a contradiction. This refused it, which made raising the ratchet
+# to the measured figure (SPC-014) fail the gate it exists to tighten.
 if [ "$DECLARED" -gt "$HOUSE_COVERAGE_STANDARD" ] 2>/dev/null; then
-    fail "the declared floor (${DECLARED}%) is above the house standard; one of them is wrong"
+    printf '  NOTE  the project floor (%s%%) is above the house standard; the floor is the bar held\n' "$DECLARED"
 fi
 printf '  measured %s%%, project floor %s%%, house standard %s%%\n' \
     "$OVERALL" "$DECLARED" "$HOUSE_COVERAGE_STANDARD"
@@ -120,6 +158,21 @@ elif python3 -c "import sys; sys.exit(0 if float('$OVERALL') + 0.05 >= float('$D
     printf '        ratchet at %s%% so this cannot slip, but the gap is real and open.\n' "$DECLARED"
 else
     fail "coverage ${OVERALL}% has fallen below the ratchet of ${DECLARED}% in pyproject.toml"
+fi
+
+# ── Rules the gate has raised on this project ───────────────────────────────
+# Every failed Code Quality submission from 0.6.0 to 0.6.3 was a rule ruff does
+# not approximate: duplicated literals, form labels, ARIA roles, the Number
+# globals and five others. scripts/sonar_rules.py encodes each, scoped the way
+# the gate scopes (changed lines and elements, thresholds when crossed), and is
+# calibrated against every release from 0.6.1 to 0.6.5 (docs/SONAR-RULES.md).
+# It reads templates and spectre/web/static/js/ as well as Python, so it runs
+# before the exit below for a change that touches no Python.
+printf '\n== Rules the gate has raised on this project (docs/SONAR-RULES.md) ==\n'
+if python3 scripts/sonar_rules.py "$BASE"; then
+    pass "no rule the gate has raised before lands on changed code"
+else
+    fail "the findings above are rules the gate has already failed a submission on"
 fi
 
 if [ -z "$SRC_FILES" ] && [ -z "$TST_FILES" ]; then
@@ -166,7 +219,6 @@ else
 fi
 
 printf '\n== Coverage on changed lines ==\n'
-[ -f "$COVERAGE_XML" ] || fail "$COVERAGE_XML not found; run pytest --cov --cov-report=xml:$COVERAGE_XML first"
 if diff-cover "$COVERAGE_XML" --compare-branch="$BASE" --include-untracked --fail-under="$COVERAGE_FLOOR" >"$OUT/diffcov.out" 2>&1; then
     pass "$(grep -E '^Coverage: ' "$OUT/diffcov.out" || echo "at or above ${COVERAGE_FLOOR}%")"
 else

@@ -1,0 +1,50 @@
+{#- The close approaches UDL holds for one object (SPC-031). Every string in a
+    row came from UDL and is untrusted (audit F-038): autoescape covers it and
+    nothing here is marked safe. The miss distance and probability are UDL's
+    figures, so the headings and caption say so. -#}
+{% if error is defined and error %}
+<p class="field-error" role="alert">{{ error }}</p>
+{% else %}
+{% set _mode = lookup_mode if lookup_mode is defined and lookup_mode else "REAL" %}
+{% set _satno = satno if satno is defined and satno else "" %}
+<p class="field-meta">
+  <span class="{{ 'badge-ok' if _mode == 'REAL' else 'badge-warn' }}">Data Mode: {{ _mode }}</span>
+  {% if data_mode_override is defined and data_mode_override %}<em class="hint">(this lookup only; session mode unchanged)</em>{% endif %}
+</p>
+{% if rows is defined and rows %}
+<table class="results-table conjunction-table">
+  <caption class="hint" style="caption-side:bottom; text-align:left">Close approaches UDL holds for SATNO {{ _satno }}, newest TCA first. Miss distance and probability of collision are UDL's figures as filed, not computed by SPECTRE.</caption>
+  <thead>
+    <tr>
+      <th scope="col">Other object</th>
+      <th scope="col">TCA (UTC)</th>
+      <th scope="col" title="Miss distance at TCA as UDL filed it, in the unit UDL gives">Miss distance (UDL)</th>
+      <th scope="col" title="Probability of collision as UDL filed it">Pc (UDL)</th>
+      <th scope="col">Data mode</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr class="conj-row">
+      <td><span class="mono">{{ row.other_satno if row.other_satno else "not given" }}</span>{% if row.other_name %} {{ row.other_name }}{% endif %}</td>
+      <td class="mono">{{ row.tca_text }}</td>
+      <td class="mono">{{ row.miss_distance }}</td>
+      <td class="mono">{{ row.collision_prob }}</td>
+      <td><span class="{{ 'badge-ok' if row.data_mode == 'REAL' else 'badge-warn' }}">{{ row.data_mode }}</span></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% if usable is defined and usable > rows | length %}
+<p class="empty-msg" style="margin-top:0.4rem">Showing the newest {{ rows | length }} of {{ usable }}.</p>
+{% endif %}
+{% else %}
+<p class="empty-msg">UDL returned no usable conjunction records for SATNO {{ _satno }} in data mode {{ _mode }}.</p>
+{% endif %}
+{% if skipped is defined and skipped %}
+<p class="hint">{{ skipped }} {{ "record" if skipped == 1 else "records" }} without a usable time of closest approach {{ "was" if skipped == 1 else "were" }} left out.</p>
+{% endif %}
+{% if unrelated is defined and unrelated %}
+<p class="hint">{{ unrelated }} {{ "record" if unrelated == 1 else "records" }} naming two other objects, neither SATNO {{ _satno }}, {{ "was" if unrelated == 1 else "were" }} left out.</p>
+{% endif %}
+{% endif %}

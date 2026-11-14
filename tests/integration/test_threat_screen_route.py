@@ -7,22 +7,28 @@ result without a reason, and that the three-click path actually resolves.
 
 from __future__ import annotations
 
+import re
+from datetime import UTC, datetime
+
 import pytest
 
+from spectre.web.routes import pol, threat
+from spectre.web.routes.pol import HeldHistory
 from tests.conftest import csrf_headers
 from tests.integration.conftest import session_state
+from tests.unit.test_threat_understanding_sweep import _RAISES, _held_history
 
 pytestmark = pytest.mark.anyio
 
 # A real GEO element set, used as a manual asset so the screen can run without
 # a UDL session.
 _ASSET_TLE = (
-    "1 30793U 07007A   26250.50000000 -.00000100  00000-0  00000-0 0  9995\n"
-    "2 30793   0.0400  95.0000 0002000 270.0000 180.0000  1.00271000 46210"
+    "1 30793U 07007A   26250.50000000 -.00000100  00000-0  00000-0 0  9998\n"
+    "2 30793   0.0400  95.0000 0002000 270.0000 180.0000  1.00271000 46216"
 )
 _RED_TLE = (
-    "1 41838U 16065A   26250.50000000  .00000000  00000-0  00000-0 0  9990\n"
-    "2 41838   3.4700  83.3000 0005000 310.0000 124.0000  1.00270000 26260"
+    "1 41838U 16065A   26250.50000000  .00000000  00000-0  00000-0 0  9992\n"
+    "2 41838   3.4700  83.3000 0005000 310.0000 124.0000  1.00270000 26266"
 )
 
 
@@ -46,7 +52,10 @@ class TestTheScreenRefusesClearly:
     def test_an_invalid_manual_tle_says_why(self, client: object, auth_cookie: str) -> None:
         resp = _screen(client, auth_cookie, manual_asset_tle="not a tle at all")
         assert resp.status_code == 200
-        assert "Manual asset TLE invalid" in resp.text
+        assert (
+            "The element set for the manual asset was refused: it does not hold two element lines. It was not stored."
+            in resp.text
+        )
 
     def test_an_uncached_asset_says_what_to_do(self, client: object, auth_cookie: str) -> None:
         resp = _screen(client, auth_cookie, asset_satno="99999")
@@ -202,3 +211,199 @@ class TestAFailedRefreshIsShown:
             state.hrr_tle_data_mode.pop("41838", None)
         flat = " ".join(resp.text.split())  # type: ignore[attr-defined]
         assert "SJ-17 (41838): live element set not fetched; screened on the set already held" in flat
+
+
+_NOW = datetime(2026, 9, 8, 12, 0, tzinfo=UTC)
+
+
+class TestTheRangeAndUnderstandingColumns:
+    """SPC-169: each actor's Threat range and Understanding, read from what is cached, nothing fetched."""
+
+    @pytest.fixture(autouse=True)
+    def _fixed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        async def refused(*_a: object, **_k: object) -> None:
+            pytest.fail("screening fetched a history")
+
+        monkeypatch.setattr(pol, "_fetch_and_analyse", refused)
+        monkeypatch.setattr(threat, "_utc_now", lambda: _NOW)
+
+    def _one_actor(self, client: object, auth_cookie: str, held: HeldHistory | None) -> str:
+        state = session_state(auth_cookie)
+        saved = (list(state.hrr_objects), dict(state.hrr_tle_cache), dict(state.elset_histories))
+        state.hrr_objects = [{"satno": "41838", "name": "SJ-17", "country": "CHN", "rank": 1, "orbit_regime": "GEO"}]
+        state.hrr_tle_cache["41838"] = _RED_TLE
+        if held is not None:
+            state.elset_histories[41838] = held
+        try:
+            resp = _screen(client, auth_cookie, manual_asset_tle=_ASSET_TLE, max_dv_m_s=5000)
+        finally:
+            state.hrr_objects = saved[0]
+            state.hrr_tle_cache.clear()
+            state.hrr_tle_cache.update(saved[1])
+            state.elset_histories.clear()
+            state.elset_histories.update(saved[2])
+        assert resp.status_code == 200  # type: ignore[attr-defined]
+        return " ".join(resp.text.split())  # type: ignore[attr-defined]
+
+    def test_an_uncached_actor_reads_no_history_held_and_nothing_is_fetched(
+        self, client: object, auth_cookie: str
+    ) -> None:
+        flat = self._one_actor(client, auth_cookie, None)
+        assert '<th scope="col">Range</th> <th scope="col">Understanding</th>' in flat
+        assert "Understanding LOW: no history held" in flat
+        assert "Raise it by: pull its element-set history" in flat
+        assert "Behaviour not earned" in flat
+
+    def test_a_cached_history_is_read(self, client: object, auth_cookie: str) -> None:
+        flat = self._one_actor(client, auth_cookie, HeldHistory(41838, _NOW, pol=_held_history(_RAISES).pol))
+        assert '<td class="screen-understanding col-dim"> <details> <summary>Understanding' in flat
+        assert "no history held" not in flat
+        # The history is held, so its cue is no longer to pull it, and its burns are judged.
+        assert "Raise it by: pull its element-set history" not in flat
+        assert "Behaviour not earned" not in flat
+
+
+class TestOnlyPayloadsThatCanActAreScreened:
+    """charming-dirac 0.6.6 named a CZ-3B rocket body the most dangerous actor against AEHF-1 (1357a67, 0f5fa30)."""
+
+    @staticmethod
+    def _run(client: object, cookie: str, objects: list[dict[str, object]], cache: dict[str, str]) -> str:
+        state = session_state(cookie)
+        saved_objects, saved_cache = list(state.hrr_objects), dict(state.hrr_tle_cache)
+        state.hrr_objects = objects
+        state.hrr_tle_cache.update(cache)
+        try:
+            resp = _screen(client, cookie, asset_satno="30793", max_dv_m_s=5000)
+        finally:
+            state.hrr_objects = saved_objects
+            state.hrr_tle_cache.clear()
+            state.hrr_tle_cache.update(saved_cache)
+        assert resp.status_code == 200  # type: ignore[attr-defined]
+        return " ".join(resp.text.split())  # type: ignore[attr-defined]
+
+    def test_a_rocket_body_and_an_old_payload_are_left_out_and_named(self, client: object, auth_cookie: str) -> None:
+        old_payload = _RED_TLE.replace("16065A  ", "04042A  ", 1)
+        text = self._run(client, auth_cookie, [
+            {"satno": "41838", "name": "SJ-17", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "100141", "name": "CZ-3B R/B", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "28451", "name": "FENGYUN 2C", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "28452", "name": "FENGYUN 1C DEB", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "30793", "name": "SKYNET-5A", "country": "GBR", "rank": 1, "orbit_regime": "GEO"},
+        ], {"41838": _RED_TLE, "100141": _RED_TLE, "28451": old_payload, "28452": _RED_TLE, "30793": _ASSET_TLE})
+        assert "1 candidate actor(s) in GEO" in text, "only SJ-17 is screened"
+        assert (
+            '<p class="field-meta" role="note">Not screened, as not able to act: '
+            "1 debris: FENGYUN 1C DEB (named as debris); 1 past working life: FENGYUN 2C (launched 2004); "
+            "1 rocket body: CZ-3B R/B (named as rocket body). A payload is taken to be past its working life 15 "
+            "years after launch, an assumption, unless the intelligence record holds it as operational or "
+            "degraded.</p>"
+        ) in text
+
+    def test_the_catalogue_type_is_read_once_it_has_loaded(
+        self, client: object, auth_cookie: str, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A stage named like a payload is caught by the UDL on-orbit catalogue's objectType."""
+        monkeypatch.setattr(
+            "spectre.web.planning_state.get_onorbit_catalog",
+            lambda: [{"satNo": 99001, "objectType": "ROCKET BODY", "launchDate": "2024-01-01"}],
+        )
+        text = self._run(client, auth_cookie, [
+            {"satno": "41838", "name": "SJ-17", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "99001", "name": "SHIJIAN STAGE", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "30793", "name": "SKYNET-5A", "country": "GBR", "rank": 1, "orbit_regime": "GEO"},
+        ], {"41838": _RED_TLE, "99001": _RED_TLE, "30793": _ASSET_TLE})
+        assert "SHIJIAN STAGE (catalogued as rocket body)" in text
+        assert "1 candidate actor(s) in GEO" in text
+
+    def test_a_watchlist_of_nothing_that_can_act_says_so(self, client: object, auth_cookie: str) -> None:
+        text = self._run(client, auth_cookie, [
+            {"satno": "100141", "name": "CZ-3B R/B", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+            {"satno": "30793", "name": "SKYNET-5A", "country": "GBR", "rank": 1, "orbit_regime": "GEO"},
+        ], {"30793": _ASSET_TLE})
+        assert (
+            "No red HRR object in a regime compatible with GEO can act. Not screened, as not able to act: "
+            "1 rocket body: CZ-3B R/B (named as rocket body)."
+        ) in text
+
+
+_OLD_PAYLOAD_TLE = _RED_TLE.replace("16065A  ", "04042A  ", 1)
+#: A bundled bootstrap set: the generator's placeholder designator, 20001A, on a number no intelligence record holds.
+_BUNDLED_STYLE_TLE = _RED_TLE.replace("16065A  ", "20001A  ", 1).replace("41838", "99021")
+_NOT_SCREENED = re.compile(r'<p class="field-meta" role="note">(Not screened, as not able to act: [^<]*)</p>')
+
+
+class TestEligibilityIsJudgedOnTheSetScreened:
+    """SPC-239: whether a payload is past its working life is judged on the element set it is screened on, the same on
+    a first screen, which fetches that set, as on the next, which reads it from the cache; and a bundled synthetic
+    set's placeholder designator is not read as a launch year."""
+
+    _OBJECTS = (
+        {"satno": "41838", "name": "SJ-17", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+        {"satno": "28451", "name": "FENGYUN 2C", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+        {"satno": "30793", "name": "SKYNET-5A", "country": "GBR", "rank": 1, "orbit_regime": "GEO"},
+    )
+
+    def test_an_old_payload_fetched_on_the_first_screen_is_left_out_on_it_as_on_the_next(
+        self, client: object, auth_cookie: str, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from spectre.web.routes import udl
+        from spectre.web.routes.udl import FetchedElset
+
+        fetched: list[int] = []
+
+        async def _fetch(satno: int, *_a: object, **_k: object) -> FetchedElset | None:
+            fetched.append(satno)
+            return FetchedElset(_OLD_PAYLOAD_TLE, "REAL", "18th SPCS") if satno == 28451 else None
+
+        monkeypatch.setattr(udl, "fetch_tle_for_satno", _fetch)
+        state = session_state(auth_cookie)
+        saved = (state.udl_username, state.udl_password, list(state.hrr_objects), dict(state.hrr_tle_cache),
+                 dict(state.hrr_tle_data_mode))
+        state.udl_username, state.udl_password = "u", "p"
+        state.hrr_objects = [dict(o) for o in self._OBJECTS]
+        state.hrr_tle_cache.update({"41838": _RED_TLE, "30793": _ASSET_TLE})
+        state.hrr_tle_data_mode.update({"41838": "REAL", "30793": "REAL"})
+        state.hrr_tle_cache.pop("28451", None)
+        try:
+            first = _screen(client, auth_cookie, asset_satno="30793", max_dv_m_s=5000)
+            second = _screen(client, auth_cookie, asset_satno="30793", max_dv_m_s=5000)
+        finally:
+            state.udl_username, state.udl_password, state.hrr_objects = saved[:3]
+            state.hrr_tle_cache.clear()
+            state.hrr_tle_cache.update(saved[3])
+            state.hrr_tle_data_mode.clear()
+            state.hrr_tle_data_mode.update(saved[4])
+        texts = [" ".join(r.text.split()) for r in (first, second)]  # type: ignore[attr-defined]
+        assert fetched == [28451], "only the payload with no set held is fetched, once"
+        notes = [_NOT_SCREENED.findall(t) for t in texts]
+        assert notes[0] == notes[1] == [
+            "Not screened, as not able to act: 1 past working life: FENGYUN 2C (launched 2004). A payload is taken "
+            "to be past its working life 15 years after launch, an assumption, unless the intelligence record holds "
+            "it as operational or degraded."
+        ]
+        assert ["1 candidate actor(s) in GEO" in t for t in texts] == [True, True]
+
+    def test_a_bundled_synthetic_set_is_not_cut_by_its_placeholder_designator(
+        self, client: object, auth_cookie: str, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(threat, "_utc_now", lambda: datetime(2036, 3, 1, 12, 0, tzinfo=UTC))
+        state = session_state(auth_cookie)
+        saved = (state.udl_username, list(state.hrr_objects), dict(state.hrr_tle_cache), dict(state.hrr_tle_data_mode))
+        state.udl_username = None
+        state.hrr_objects = [
+            {"satno": "99021", "name": "SHIYAN BOOTSTRAP", "country": "CHN", "rank": 1, "orbit_regime": "GEO"},
+        ]
+        state.hrr_tle_cache["99021"] = _BUNDLED_STYLE_TLE
+        state.hrr_tle_data_mode["99021"] = "SYNTHETIC"
+        try:
+            resp = _screen(client, auth_cookie, manual_asset_tle=_ASSET_TLE, max_dv_m_s=5000)
+        finally:
+            state.udl_username, state.hrr_objects = saved[:2]
+            state.hrr_tle_cache.clear()
+            state.hrr_tle_cache.update(saved[2])
+            state.hrr_tle_data_mode.clear()
+            state.hrr_tle_data_mode.update(saved[3])
+        text = " ".join(resp.text.split())  # type: ignore[attr-defined]
+        assert _NOT_SCREENED.findall(text) == []
+        assert "past working life" not in text
+        assert "1 candidate actor(s) in GEO" in text

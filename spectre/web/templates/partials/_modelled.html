@@ -9,10 +9,33 @@
 
     `{% import "partials/_modelled.html" as modelled %}` then
     `{{ modelled.badge(basis) }}`. *basis* says what the figure rests on and
-    is shown as the badge's title. -#}
+    is shown as the badge's title.
+
+    Each figure also states its own basis (SPC-101): `{{ modelled.mark(fb) }}`
+    for a FigureBasis shows "(lookup)", "(sampled)" or "(computed)" with the
+    rule as its title, and `{{ modelled.kind(fb) }}` gives the same kind for a
+    data-basis attribute. Guard the FigureBasis at the call site, since
+    StrictUndefined raises on an attribute of an undefined value before a
+    macro runs, and call `mark_unrecorded()` when there is none. An unknown
+    basis reads as a lookup, never as computed. -#}
 {% macro badge(basis="") -%}
 <span class="modelled-badge" title="{{ basis }}"
       style="display:inline-block; font-size:0.58rem; font-weight:700; letter-spacing:0.04em;
              text-transform:uppercase; color:var(--gold); border:1px solid var(--gold);
              border-radius:3px; padding:0 0.3rem; margin-left:0.3rem; vertical-align:middle">modelled estimate, not a computed solution</span>
+{%- endmacro %}
+{% macro mark_unrecorded() -%}
+<span class="figure-basis" data-basis="lookup" title="Basis not recorded; read as a lookup"
+      style="color:var(--gold)">(lookup)</span>
+{%- endmacro %}
+{% macro kind(fb) -%}
+{%- if fb is defined and fb.kind is defined and fb.kind.value is defined and fb.note is defined -%}{{ fb.kind.value }}{%- else -%}lookup{%- endif -%}
+{%- endmacro %}
+{% macro mark(fb) -%}
+{%- if fb is defined and fb.kind is defined and fb.kind.value is defined and fb.note is defined -%}
+<span class="figure-basis" data-basis="{{ fb.kind.value }}" title="{{ fb.note }}"
+      style="color:{% if fb.kind.value == 'computed' %}var(--text-dim){% else %}var(--gold){% endif %}">({{ fb.kind.value }})</span>
+{%- else -%}
+{{ mark_unrecorded() }}
+{%- endif -%}
 {%- endmacro %}

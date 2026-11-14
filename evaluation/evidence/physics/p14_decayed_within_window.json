@@ -1,0 +1,123 @@
+{
+  "decay_error_minutes": [
+    [
+      52,
+      69
+    ],
+    [
+      139,
+      156
+    ],
+    [
+      226,
+      243
+    ],
+    [
+      313,
+      330
+    ]
+  ],
+  "red_freshness": "current",
+  "recommendation": "manoeuvre",
+  "strategy": "minimax",
+  "composite_scores": [
+    [
+      0.321333,
+      0.329,
+      0.599867,
+      0.627333
+    ],
+    [
+      0.223333,
+      0.28,
+      0.266667,
+      0.333333
+    ],
+    [
+      0.293333,
+      0.315,
+      0.329667,
+      0.368333
+    ],
+    [
+      0.273333,
+      0.305,
+      0.311667,
+      0.358333
+    ]
+  ],
+  "closest_approach_km": [
+    [
+      400.0,
+      200.0,
+      360.0,
+      200.0
+    ],
+    [
+      20000.0,
+      10000.0,
+      18000.0,
+      10000.0
+    ],
+    [
+      6000.0,
+      3000.0,
+      5400.0,
+      3000.0
+    ],
+    [
+      10000.0,
+      5000.0,
+      9000.0,
+      5000.0
+    ]
+  ],
+  "bases": [
+    [
+      "lookup",
+      "lookup",
+      "lookup",
+      "lookup"
+    ],
+    [
+      "lookup",
+      "lookup",
+      "lookup",
+      "lookup"
+    ],
+    [
+      "lookup",
+      "lookup",
+      "lookup",
+      "lookup"
+    ],
+    [
+      "lookup",
+      "lookup",
+      "lookup",
+      "lookup"
+    ]
+  ],
+  "modelled_banner": true,
+  "basis_lines": [
+    "Every figure in every cell is a lookup."
+  ],
+  "row_notes": [],
+  "cell_refusals": [
+    "Not computed: SGP4 could not propagate the red element set across the horizon, so a miss without those instants could hide the closest. This cell's closest approach is a lookup.",
+    "Not computed: a manoeuvre with no hypothesis names no burn, and propagating the orbit as it stands would show only where it goes if it does not move. Add a manoeuvre hypothesis to sample this row. This cell's closest approach is a lookup."
+  ],
+  "binding_sentences": [
+    "Orbit current: 0.0 h old at evaluation, limit 24 h.",
+    "Orbit current: 0.0 h old at evaluation, limit 24 h."
+  ],
+  "computed_caveat": null,
+  "searched_span_note": null,
+  "objective_guidance": null,
+  "page_mentions": {
+    "decay": false,
+    "propagat": true,
+    "re-ent": false,
+    "lookup": true
+  }
+}

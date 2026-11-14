@@ -28,9 +28,10 @@ one channel only.
    control that opened it on close.
 
 These read the template source rather than a rendered page because the sort
-headers are inside Jinja loops and the behaviour under test is in the inline
-scripts the fragments carry. The live-DOM proof is in the review record; these
-are the regression fence.
+headers are inside Jinja loops, and the first-party scripts that carry the
+behaviour, which were inline blocks in the fragments until SPC-199. The
+live-DOM proof is in tests/browser, under the console's policy; these are the
+regression fence.
 """
 
 from __future__ import annotations
@@ -41,12 +42,13 @@ from pathlib import Path
 import pytest
 
 _TEMPLATES = Path(__file__).resolve().parents[2] / "spectre" / "web" / "templates" / "partials"
+_SCRIPTS = Path(__file__).resolve().parents[2] / "spectre" / "web" / "static" / "js"
 
 # Template, the sort function its headers call, how many sortable headers it
 # should have. The counts are deliberate: a new sortable column added without
 # aria-sort fails here rather than shipping silent.
 _SORTABLE_TABLES = [
-    ("all_intercepts_result.html", "aiSort", 7),
+    ("all_intercepts_result.html", "aiSort", 8),  # Realism joined in SPC-234
     ("threat_sweep.html", "threatSort", 7),
     ("threat_sweep.html", "childSort", 6),
     ("hrr_panel.html", "hrrSort", 10),  # blue and red tables, five columns each
@@ -60,8 +62,22 @@ def _source(name: str) -> str:
 
 
 def _sortable_th_tags(source: str, sort_fn: str) -> list[str]:
-    """Every ``<th>`` opening tag whose onclick calls *sort_fn*."""
-    return [t for t in _TH_TAG.findall(source) if f"{sort_fn}(" in t]
+    """Every ``<th>`` opening tag whose click runs the *sort_fn* action."""
+    return [t for t in _TH_TAG.findall(source) if f'data-action="{sort_fn}"' in t]
+
+
+def _script_of(marker: str) -> str:
+    """The one first-party script holding *marker*."""
+    owning = [p.read_text(encoding="utf-8") for p in sorted(_SCRIPTS.glob("*.js"))
+              if marker in p.read_text(encoding="utf-8")]
+    assert len(owning) == 1, f"{marker!r} is in {len(owning)} scripts"
+    return owning[0]
+
+
+def _geometry_script() -> str:
+    """The geometry panel's Escape, close and focus handling in intercepts.js."""
+    source = _script_of("function geometryExit(panel)")
+    return source[source.index("function geometryExit(panel)"):source.index("SPECTRE.init('geometry'")]
 
 
 class TestEverySortableHeaderDeclaresItsSortState:
@@ -89,13 +105,13 @@ class TestEverySortableHeaderDeclaresItsSortState:
     def test_the_sort_function_writes_both_directions(
         self, template: str, sort_fn: str, expected: int
     ) -> None:
-        source = _source(template)
+        source = _script_of(f"function {sort_fn}(")
         body = source[source.index(f"function {sort_fn}("):]
-        # Up to the next top-level function, so threatSort's body cannot pass
-        # on childSort's writes.
-        nxt = body.find("\n  function ", 1)
-        if nxt > 0:
-            body = body[:nxt]
+        # Up to the next section or registration, so threatSort's body cannot
+        # pass on childSort's writes; aiSort keeps the helpers that follow it.
+        ends = [i for i in (body.find("\n/* ── ", 1), body.find("\nSPECTRE.action(", 1)) if i > 0]
+        if ends:
+            body = body[:min(ends)]
         assert "'ascending'" in body, f"{sort_fn} never sets aria-sort=ascending"
         assert "'descending'" in body, f"{sort_fn} never sets aria-sort=descending"
         assert "aria-sort" in body, f"{sort_fn} never touches aria-sort"
@@ -104,9 +120,9 @@ class TestEverySortableHeaderDeclaresItsSortState:
         """aria-sort on a fixed column would promise an action that is not there."""
         for template, sort_fn, _ in _SORTABLE_TABLES:
             for tag in _TH_TAG.findall(_source(template)):
-                if f"{sort_fn}(" in tag:
+                if f'data-action="{sort_fn}"' in tag:
                     continue
-                if "Sort(" in tag:  # another table's sortable header in the same file
+                if re.search(r'data-action="[a-z]+Sort"', tag):  # another table's sortable header in the same file
                     continue
                 assert "aria-sort" not in tag, (
                     f"{template}: a non-sortable header claims a sort state:\n  {tag}"
@@ -115,7 +131,7 @@ class TestEverySortableHeaderDeclaresItsSortState:
 
 class TestTheGeometryPanelEscapeIsScopedToThePanel:
     def test_the_keydown_listener_is_not_on_document(self) -> None:
-        source = _source("intercept_geometry.html")
+        source = _geometry_script()
         assert "document.addEventListener('keydown'" not in source, (
             "a document-level Escape handler closes the panel from anywhere on "
             "the console, including the sweep search box in another hero tab"
@@ -123,31 +139,33 @@ class TestTheGeometryPanelEscapeIsScopedToThePanel:
         assert "panel.addEventListener('keydown'" in source
 
     def test_escape_is_the_only_key_that_closes_it(self) -> None:
-        source = _source("intercept_geometry.html")
+        source = _geometry_script()
         assert "event.key !== 'Escape'" in source
 
     def test_nothing_is_left_on_window_to_be_cleaned_up(self) -> None:
         """A listener that dies with the node needs no global bookkeeping."""
         assert "__spectreGeometryKeydown" not in _source("intercept_geometry.html")
+        assert "__spectreGeometryKeydown" not in _geometry_script()
 
 
 class TestTheGeometryPanelManagesFocus:
     def test_the_panel_has_a_heading_to_send_focus_to(self) -> None:
         source = _source("intercept_geometry.html")
-        assert '<h3 id="geom-panel-heading"' in source, "a native heading, not a role on a span (Web:S6819)"
+        # The ids carry the route's prefix: "" for the intercept panel, "decision-" for a Decision Engine view.
+        assert '<h3 id="{{ id_prefix }}geom-panel-heading"' in source, "a native heading, not a role on a span (Web:S6819)"
         assert not re.search(r'<span[^>]*role="heading"', source)
         assert 'tabindex="-1"' in source, "the heading must be focusable, not tabbable"
-        assert 'aria-labelledby="geom-panel-heading"' in source, "the panel is named by it"
+        assert 'aria-labelledby="{{ id_prefix }}geom-panel-heading"' in source, "the panel is named by it"
 
     def test_focus_moves_into_the_panel_on_open(self) -> None:
-        source = _source("intercept_geometry.html")
-        assert re.search(r"getElementById\('geom-panel-heading'\);\s*\n\s*if \(heading\) \{ heading\.focus\(\); \}", source), (
+        source = _geometry_script()
+        assert re.search(r"getElementById\(IDS \+ 'geom-panel-heading'\);\s*\n\s*if \(heading\) \{ heading\.focus\(\); \}", source), (
             "the heading is never focused, so opening the panel leaves the "
             "keyboard operator outside it"
         )
 
     def test_focus_returns_to_the_opener_on_close(self) -> None:
-        source = _source("intercept_geometry.html")
+        source = _geometry_script()
         close = source[source.index("function spectreCloseGeometryPanel"):]
         close = close[:close.index("\n  }")]
         assert "opener.focus()" in close, (
@@ -158,7 +176,7 @@ class TestTheGeometryPanelManagesFocus:
     def test_the_focused_heading_is_visible(self) -> None:
         """Measured 4.95:1 on the ops panel and 4.66:1 on steel, floor 3:1."""
         source = _source("intercept_geometry.html")
-        assert "#geom-panel-heading:focus { outline: 2px solid currentColor; }" in source
+        assert "#{{ id_prefix }}geom-panel-heading:focus { outline: 2px solid currentColor; }" in source
 
 
 class TestTheSweepRowSpeaksRatherThanHovers:
@@ -192,7 +210,7 @@ class TestChildSortSurvivesAGroupWithIntel:
         had target intel. An aria-sort written after the sort would never have
         been reached.
         """
-        source = _source("threat_sweep.html")
+        source = _script_of("function childSort(")
         assert "r.id.indexOf('threat-row-') === 0" in source, (
             "childSort collects rows by class alone, so the single-cell intel "
             "row reaches the comparator and throws"

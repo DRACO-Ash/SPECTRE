@@ -21,7 +21,7 @@
   <td class="col-dim" headers="tsw-child-{{ group_idx }}-1">{{ entry.burn_location }}</td>
   <td class="col-dim" headers="tsw-child-{{ group_idx }}-2">{{ entry.burn_epoch.strftime('%Y-%m-%d %H:%M') }}</td>
   <td class="mnv-dv" headers="tsw-child-{{ group_idx }}-3">{{ entry.delta_v_m_s | m_s }}</td>
-  <td class="col-dim" headers="tsw-child-{{ group_idx }}-4">{{ "%.2f" | format(entry.tof_hours) }} hr</td>
+  <td class="col-dim" headers="tsw-child-{{ group_idx }}-4">{% if entry.arrives is defined and not entry.arrives %}aligns planes only{% else %}{{ "%.2f" | format(entry.tof_hours) }} hr{% endif %}</td>
   <td class="col-dim" headers="tsw-child-{{ group_idx }}-5" title="Pro {{ entry.dv_prograde | m_s }} m/s  Nor {{ entry.dv_normal | m_s }} m/s  Rad {{ entry.dv_radial | m_s }} m/s">
     {{ entry.method }}
   </td>
@@ -55,8 +55,19 @@
             type="button"
             data-red="{{ red_name }}" data-blue="{{ entry.target.target_name }}"
             data-epoch="{{ entry.burn_epoch.strftime('%Y-%m-%dT%H:%M') }}" data-method="{{ entry.method }}"
-            onclick="event.stopPropagation(); loadInEngine(this.dataset.red, this.dataset.blue, this.dataset.epoch, this.dataset.method)"
+            data-action="loadInEngine"
             title="Pre-fill the intercept engine with this row's objects, burn epoch and method (TOF is not carried)">Load</button>
+    {# The same decision control as threat_sweep.html (SPC-150), naming the sweep the refine wrote into. #}
+    {% if entry.arrives and sweep_at is defined and sweep_at %}
+    <button class="btn-secondary btn-sm"
+            type="button"
+            hx-get="/plan/decision/from-sweep"
+            hx-vals='{"entry": {{ index }}, "sweep": "{{ sweep_at }}"}'
+            hx-target="#hero-decision" hx-swap="innerHTML"
+            data-opens-decision
+            aria-label="Decide from this entry in the Decision Engine: {{ entry.target.target_name }}, {{ entry.method }}, {{ entry.burn_location }}"
+            title="Open a decision scenario filled from this entry; nothing is evaluated until you press Evaluate">Decide</button>
+    {% endif %}
   </td>
 </tr>
 {% endif %}

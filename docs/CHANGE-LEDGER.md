@@ -1003,3 +1003,418 @@ Space Watch report itself.
 partial also rendered its out-of-band TLE source panel, so the page held
 `#tle-source-panel` twice and a stray source dropdown inside the UDL menu.
 It now renders only on the login response that needs it.
+
+## 0.7.0
+
+Feature work from the backlog, not a gate fix: the first of the operator's four
+outputs ("is this normal"), and case-blind usernames.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/normality.py`, the held history and shared analyse step in `routes/pol.py`, the sweep's history fetch in `routes/threat.py`, case-blind matching in `auth.py`, `login.py`, `admin.py` and `database.py`, and two template sections | Written against what the gate reported in 0.6.0 to 0.6.4: `scripts/cognitive_complexity.py --changed` finds no touched function above 15; no new form field; sections carry `aria-label`, no `role`; colours in the sweep come from the band tokens; no Jinja comment inside a tag; no route signature changed, so no new `Depends` default enters the window. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. One new unique index, `ux_users_username_lower`, built at boot when no names clash. | n/a. |
+
+## 0.8.0
+
+Feature work from the backlog: custody, behaviour into the verdict, the behaviour label and the phase angle.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/custody.py`, `spectre/astro/phase_angle.py`, the history evidence and custody in `routes/pol.py`, the capability, custody, behaviour, epoch label and phase helpers in `routes/threat.py`, a regime limit in `elsets.py`, and template sections | `scripts/check-quality.sh` against 0.7.0 before upload: see the outcome below. Sections carry `aria-label`, no `role`; the sweep's colours come from the band tokens; every new template value is guarded with `is defined`; no route signature changed. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+**Local check before upload.** `scripts/check-quality.sh` against 0.7.0
+first failed one leg: `threat_sweep` at cognitive complexity 16. Split, it
+passed all five, with 93 per cent coverage on changed lines and no finding
+on a changed line. The full suite is green on the same tree.
+
+## 0.9.0
+
+Feature work from the backlog: the warning-time change and the burn watch (output 2), and the Decision Engine's per-figure basis.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/warning_change.py`, `spectre/web/burn_watch.py`, the differential and watch helpers in `routes/threat.py`, NOTSO helpers, session liveness helpers, the basis types in `provenance.py` and `decision.py`, and template sections | `scripts/check-quality.sh` against 0.8.0 before upload: see the outcome below. The new route uses `Annotated`, and `tests/unit/test_routes_use_annotated_depends.py` now holds the 77 older bare `Depends` defaults from growing. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. The watch adds up to 6 UDL element-set requests an hour per signed-in operator watching an object, outside the per-user UDL limiter, plus 2 history requests only when a newer set appears. | n/a. |
+
+## 0.10.0
+
+Feature work from the backlog: decide-by, the delta-V band, a data mode per fetch, and UDL error text kept out of the page; and the plane-change ranking fixed.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/decide_by.py`, `spectre/astro/along_track.py`, the band and decide-by helpers in `routes/threat.py`, the per-fetch data mode and error sentences in `routes/udl.py`, the refresh mode in `elsets.py`, and template sections | `scripts/check-quality.sh` against 0.9.0 before upload: see the outcome below. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+**Local check before upload.** `scripts/check-quality.sh` against 0.9.0
+first failed on a bare 500 in the UDL error sentence and, earlier, on a
+silent except and a bare 2 in the delta-V band; each was named or logged.
+It then passed all five legs, with 97 per cent coverage on changed lines.
+The full suite is green on the same tree.
+
+## 0.11.0
+
+Feature work from the backlog: the scenario binding and reference cases for the Decision Engine, a UDL conjunction lookup, and fixes from the V0.9 adversarial review.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/web/decision_binding.py`, `spectre/astro/closest_approach.py`, `spectre/web/udl_conjunction.py`, the binding types in `decision.py`, the conjunction route in `routes/udl.py`, fixes in `burn_watch.py`, `warning_change.py` and `routes/threat.py`, and template sections | `scripts/check-quality.sh` before upload: see the outcome below. The decision panel route moves to `Annotated`, so `decision.py` has no bare `Depends` left. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. The conjunction lookup adds 2 UDL requests per lookup, inside the per-user UDL data limiter. | n/a. |
+
+**A feature that is itself a probe, not of a gate.** The conjunction lookup
+reads UDL's `/conjunction` service with field names inferred from UDL's
+published API, never seen live. It is not a gate probe and does not use this
+submission's one PROBE. If live UDL answers in another shape, the panel says
+it found nothing usable rather than showing a wrong figure; SPC-033 is the check.
+
+**Local check before upload.** `scripts/check-quality.sh` first failed two
+argument counts on the SPC-100 lines and then an exception name in the burn
+watch (N818); each was fixed in its own commit. It then passed all five
+legs, with 92 per cent coverage on changed lines. The full suite is green on
+the same tree.
+
+## 0.12.0
+
+Feature work from the backlog: a response time per target, the manoeuvre hypothesis, Alpha-5 catalogue numbers, colour tokens, and the V0.9 review leftovers.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/astro/catalogue.py`, the hypothesis types in `decision.py`, per-target response times in `decide_by.py` and `routes/threat.py`, watch and sign-out fixes in `burn_watch.py` and `planning_state.py`, and template colour tokens | `scripts/check-quality.sh` against 0.11.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. `threat.py` has one bare `Depends` fewer. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.13.0
+
+Feature work from the backlog: the sampled closest approach and P5 scoring for the Decision Engine, and colour names.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: the separation series in `spectre/astro/monte_carlo.py`, a B* property in `propagator.py`, sampling, refusals and the cost cap in `decision.py`, the evaluation on a worker thread in `routes/decision.py`, colour tokens in the stylesheets and templates | `scripts/check-quality.sh` against 0.12.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. A sampled evaluation uses up to about 9 s of one CPU per request, within its cap. | n/a. |
+
+## 0.14.0
+
+Feature work from the backlog: the sampled evaluation as a session job, P5 to P95 bands, the hypothesis panel, a velocity check, and Steel contrast.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/web/decision_job.py`, a progress tick in `monte_carlo.py`, the budget, bands and velocity check in `decision.py`, the job and hypothesis routes in `routes/decision.py`, template sections and theme tokens | `scripts/check-quality.sh` against 0.13.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. A sampled evaluation can now hold one CPU for up to 120 s, one at a time on the server; the page polls every 2 s while it runs. | n/a. |
+
+## 0.15.0
+
+Feature work from the backlog: computed closest approach, the convergence tolerance, custody from the operator's definition, and contrast.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/astro/elset_approach.py`, `spectre/web/decision_custody.py`, custody over the horizon in `custody.py`, the propagator gap in `monte_carlo.py`, computed cells and custody in `decision.py`, one shared custody rule in `routes/pol.py`, and theme tokens | `scripts/check-quality.sh` against 0.14.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. A bound evaluation may fetch the red track's element-set history from UDL, as the sweep does, within the per-user limiter. | n/a. |
+
+## 0.16.0
+
+Feature work from the backlog: computed friendly responses, element-set limits on sampling, times of closest approach, and the first Threat Understanding items.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/threat_understanding.py`, confidence in `threat_assessment.py`, response burns, figures and trajectories in new decision modules, burn series in `monte_carlo.py`, and template sections | `scripts/check-quality.sh` against the previous commit before each push passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. Sizing a response burn adds up to a few seconds of one CPU inside the existing sampled-evaluation job budget. | n/a. |
+
+## 0.17.0
+
+Feature work from the backlog: Threat Understanding on the sweep, decide-by from earned evidence, and the custody gap separated from intelligence confidence.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: adapters and the screen text in `threat_understanding.py`, the ledger hash in `provenance.py`, the sweep's evidence gathering in `routes/threat.py` and `routes/gcat.py`, the custody gap share in `decision.py` and `routes/decision.py`, and template sections | `scripts/check-quality.sh` against the previous commit before each push passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. The catalogue row is read from the cache only; the sweep fetches nothing new. | n/a. |
+
+## 0.18.0
+
+Feature work from the backlog: cues, the Threat Understanding display across panels, and screening columns.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: cues in `threat_understanding.py`, `spectre/web/understanding_view.py`, actor ranges in `threat_assessment.py`, wiring in `routes/threat.py` and `routes/pol.py`, two new partials and template sections, one theme rule | `scripts/check-quality.sh` against 0.17.0 before upload passed all five legs, with 98 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. Screening reads cached histories only and fetches nothing new. | n/a. |
+
+## 0.19.0
+
+Feature work from the backlog: collect first in the Decision Engine, interactions evidence, lookup constants retired where computed figures exist, and wording.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/interaction_graph.py`, `spectre/web/decision_threat.py`, collect-first and picture types in `decision.py`, landing cues in `threat_understanding.py`, the custody read in `decision_custody.py` and `decision_job.py`, the picture hand-off in `routes/threat.py`, and template sections | `scripts/check-quality.sh` against 0.18.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. The engine reads the sweep's held picture and fetches nothing new. | n/a. |
+
+## 0.20.0
+
+Feature work from the backlog: opening a decision from the sweep, interactions from conjunctions, and hostile seeds.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/web/decision_from_sweep.py`, `spectre/web/interaction_store.py`, misses and seeds in `interaction_graph.py`, burn approaches in `elset_approach.py`, conjunction misses in `udl_conjunction.py`, a seed path in `config/settings.py`, and template sections | `scripts/check-quality.sh` against the previous commit before each push passed all five legs, with 99 to 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. One optional environment variable, `SPECTRE_HOSTILE_SEEDS`, a path the deployment sets; nothing is read when it is unset. No new handler attribute, so the Content Security Policy gap does not widen. | n/a. |
+
+## 0.21.0
+
+Feature work from the backlog: the verdict switch (off) and its sign-off sheet, the adjudication log, the NOTSO-based suggestion, and a binding fix.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/adjudication.py`, `spectre/web/adjudication_log.py`, `spectre/domain/notso_prior.py`, `spectre/web/decision_prior.py`, the switch in `threat_assessment.py` and `config/settings.py`, and template sections | `scripts/check-quality.sh` against 0.20.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. One optional environment variable, `SPECTRE_THREAT_VERDICT_SWITCH`, unset in every shipped configuration. | n/a. |
+
+## 0.22.0
+
+Feature work from the backlog: loading NOTSO suggestions per row, the NOTSO timeline, and the probability interval in expected value.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: the interval and timeline in `notso_prior.py`, interval and joint picks in `decision.py`, loading in `decision_prior.py` and `routes/decision.py`, and template sections | `scripts/check-quality.sh` against 0.21.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change; the interval uses scipy, already a runtime dependency. | n/a. |
+
+## 0.23.0
+
+Feature work from the backlog: the game tree and its selectors; and test hardening with two defects fixed.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/domain/decision_tree.py`, `spectre/domain/tree_selectors.py`, `spectre/domain/turn_update.py`, tree support in `decision.py` and `decision_job.py`, two fixes in `routes/pol.py` and `routes/udl.py`, and new tests | `scripts/check-quality.sh` against the previous commit before each push passed all five legs, with 100 per cent coverage on changed lines; whole-repository coverage 97 per cent. The full suite is green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Test | **HYGIENE** | The coverage floor rises from 74 to 90 per cent, with per-route floors in CI | Measured 97.2 per cent total, 100 for the Pattern of Life route and 99.8 for the UDL route before the floors were set. | Then a platform measure differs from the local one, and the floor should be set to the platform's figure. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.24.0
+
+Feature work from the backlog: the game tree's view and the Decision Engine documentation rewrite.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New code: `spectre/web/tree_view.py`, `partials/decision_tree.html`, depth refusal and the stated observation in `decision_tree.py`, `decision.py`, `tree_selectors.py` and `turn_update.py`, the route and job running the tree, and the guide generator | `scripts/check-quality.sh` against 0.23.0 before upload passed all five legs, with 100 per cent coverage on changed lines. The full suite and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. The regenerated operator guide `.docx` ships in the repository, not the image. | n/a. |
+
+## 0.24.1
+
+Test hardening and one template fix.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. One template change, `partials/sweep_target_config.html`; the rest is tests | `scripts/check-quality.sh` against 0.24.0 before upload passed all five legs. The full suite and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Test | **HYGIENE** | The threat route floor rises from 90 to 95 | Measured 98.3 per cent before the floor was set. | Then a platform measure differs from the local one. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.24.2
+
+Test hardening and one race fix.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. One product change, the cluster reduction in `routes/threat.py`; the rest is tests, `scripts/mutate.py` and reports | `scripts/check-quality.sh` against 0.24.1 before upload passed all five legs. The full suite and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Test | **HYGIENE** | A PostgreSQL 16 job joins the SQLite one in CI | The suite was run green on PostgreSQL 16 here before the job was added. | Then the runner's PostgreSQL service differs from the one used here, and its log names the test. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.25.0
+
+Four owner rulings built in the Decision Engine, and the evaluation of 0.24.2 committed under `evaluation/`.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. Product changes in the Decision Engine (`decision.py`, `custody.py`, `decision_tree.py`, `turn_update.py`, `routes/decision.py`, `decision_from_sweep.py` and their templates) | `scripts/check-quality.sh` against the previous commit passed all five legs: no function over 15, 100 per cent coverage on changed lines, 0 per cent duplication. The full suite (8,515 passed) and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.26.0
+
+The score's closest-approach and delta-V scales (evaluation finding F-10).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. Product changes in `decision.py`, `decision_figures.py`, `routes/decision.py` and the decision templates | `scripts/check-quality.sh` against 0.25.0 passed all five legs. The full suite (8,578 passed) and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.27.0
+
+A decision record (evaluation F-01), propagator checks in the suite (F-06), the threat picture at any age and the guide's wording (F-15).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. A new table `decision_records`, a new module `web/decision_record.py`, two routes and a page | `scripts/check-quality.sh` against 0.26.0 passed all five legs. The full suite (8,756 passed) and every CI coverage floor are green on the same tree; the record's tests also passed on PostgreSQL 16. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. The new table is created by `create_all` at start. | n/a. |
+
+## 0.28.0
+
+All three rules side by side (evaluation F-03) and replay from a stored record (F-02).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New modules `domain/rule_comparison.py`, `domain/decision_inputs.py`, `domain/decision_replay.py` and `scripts/replay_decision.py`; four columns on `decision_records` | `scripts/check-quality.sh` against 0.27.0 passed all five legs. The full suite (8,974 passed) and every CI coverage floor are green on the same tree; the record, upgrade, replay and admin tests (170) passed on PostgreSQL 16. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. `.env.example` documents `SPECTRE_PRIMARY_RULE`. | n/a. |
+
+## 0.29.0
+
+Vetoes before aggregation (evaluation F-04) and the judgement basis with a lookup register (F-05).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New module `domain/decision_judgement.py`; vetoes in the decision engine, selectors, comparison, stored inputs (version 2) and record | `scripts/check-quality.sh` against 0.28.0 passed all five legs. The full suite (9,222 passed) and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.30.0
+
+Element-set integrity at ingest (evaluation F-25), the operating envelope (F-09) and what P means (F-12).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New modules `astro/elset_check.py` and `domain/decision_envelope.py`; the check wired into every ingest path; the remainder of P in the engine; stored inputs version 3 | `scripts/check-quality.sh` against 0.29.0 passed all five legs. The full suite (9,551 passed) and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.31.0
+
+Weight stability (evaluation F-16) and collect-first advice tied to the decision (F-14).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **HYGIENE** | None made for the gate. New module `domain/weight_stability.py`; decision relevance in `decision.py`; one column on `decision_records` | `scripts/check-quality.sh` against 0.30.0 passed all five legs. The full suite (9,688 passed) and every CI coverage floor are green on the same tree. | Then the window caught a rule the local proxies cannot run, and the report names the line. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.32.0
+
+Element-set error in the miss (evaluation F-11) and a script policy with no inline script or eval (F-08).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | New first-party JavaScript under `spectre/web/static/js/`, which the platform may score with no coverage report of its own | `scripts/check-quality.sh` against 0.31.0 passed all five legs; the browser tests in `tests/browser/` drive every moved control under the policy and passed here with Chromium required. The full suite (9,939 passed) and every CI coverage floor are green on the same tree. | Then the platform scores the JavaScript on its own terms; the report names the file, and `sonar-project.properties` is where to declare its coverage or exclusion. |
+| DAST | **EVIDENCED** | `script-src 'self'`, no `'unsafe-inline'` or `'unsafe-eval'` | The header is asserted on every page by tests. | Then a page or fragment still needs a script the policy refuses; the browser console names it. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.33.0
+
+The small changes from the charming-dirac branch (owner ruling 2026-11-12).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Container Scanning | **EVIDENCED** | Base image `python:3.12-slim-bookworm@sha256:935c3c5b...`, Python 3.12.16 | The previous digest 6a0e06f5 carries Python 3.12.15, affected by CVE-2026-115557; the new digest's configuration reads PYTHON_VERSION=3.12.16, read from mirror.gcr.io and confirmed on Docker Hub. Not built or scanned here: no Docker daemon. | Then the scanner names a package in the new image; `scripts/verify-container.sh` with its Grype stage, run where Docker is available, names it first (SPC-236). |
+| Code Quality | **EVIDENCED** | New module `spectre/domain/actor_eligibility.py`; changes to `elset_check.py`, `maneuvers.py`, three routes and `theme-boot.js` | `scripts/check-quality.sh` against 0.32.0: 0 findings on changed lines, changed-line coverage 100%, duplication 0%. | Then the platform applies a rule the local checker does not carry; SPC-233 ports the Sonar rules checker. |
+| Other gates | **HYGIENE** | None | No dependency change. | n/a. |
+
+## 0.34.0
+
+The newest element set from every UDL provider (charming-dirac 7ed9d0b and 5751c3e).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `spectre/web/routes/udl.py`, `elsets.py`, four routes, three templates and `operator.js` | `scripts/check-quality.sh` against 0.33.0: 0 findings on changed lines, changed-line coverage 100%, duplication 0.8%. The repeated literals the archive fetch would have taken to 3 or more uses (python:S1192) are named constants. | Then the platform applies a rule the local checker does not carry; SPC-233 ports the Sonar rules checker. |
+| DAST | **EVIDENCED** | A hidden form input and a provider name shown on two pages | The provider is bounded to 64 characters and kept only for a UDL mode; templates escape it; no inline script (the browser tests run under `script-src 'self'`). | Then a page reflects the field unescaped; the report names the page. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.35.0
+
+Every Code Quality rule the gate has raised, checked before it runs (charming-dirac c930087).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | 100 blocking findings cleared across the new-code window, which runs from master 77a1088 (0.6.4): 34 S7761, 19 S1244, 16 S7632, 13 S7773, 6 S3358, 6 labels, 3 S6353, 2 S6819, 1 S1192 | `scripts/sonar_rules.py 77a1088`: 99 blocking before, and 2 more unlabelled fields the new label lines brought into the diff; 1 after (the chart canvas, Web:S6819, kept for its accessible name). `scripts/check-quality.sh` against 0.34.0: every leg green. | Then the gate raises a rule the checker does not yet encode, or the canvas; the report names it, and `docs/SONAR-RULES.md` gives the four steps for adding a rule. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+
+## 0.36.0
+
+Realistic intercepts from the NOTSO on-station record (charming-dirac d3447e2), with the Max ΔV default of 171.8 m/s by the owner's ruling of 2026-11-12.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | New modules `spectre/astro/flight.py`, `targeting.py`, `spectre/domain/manoeuvre_evidence.py`, `realism.py`; changes to `maneuvers.py`, `maneuver.py`, two templates and `operator.js` | `scripts/sonar_rules.py 39d5363`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 0.35.0: complexity none over 15, changed-line coverage 99%, duplication 0%. | Then the gate raises a rule the checker does not yet encode; the report names it, and `docs/SONAR-RULES.md` gives the steps for adding it. |
+| DAST | **EVIDENCED** | Three new form fields and three now bounded | Every numeric field on both Intercept Engine routes refuses infinity, NaN and out-of-range values with a 422; satellite names from the record and cache are autoescaped (a `<script>` name renders escaped); no inline script. | Then a page reflects a field unescaped or a value reaches a 500; the report names the page and parameter. |
+| Secret and data scanning | **HYGIENE** | `spectre/data/manoeuvre_evidence.json` added | Catalogue numbers, satellite names, counts, ISO dates and delta-V figures only; no personal data or message text. The export it was built from is not in this branch. Its dissemination marking is the owner's to confirm (SPC-241). | Then the scanner names a field in the file; it comes out with its `fleet.source`. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.37.0
+
+Turns set by the engine, chains counted once, and suggestions shown at once (owner rulings of 2026-11-05).
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `decision_tree.py`, `turn_update.py`, `threat_understanding.py`, `decision.py`, `decision_prior.py`, `interaction_graph.py`, the Decision Engine routes and panel | `scripts/sonar_rules.py 6ff5e5e`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 0.36.0: complexity none over 15, changed-line coverage 100%, duplication 0%. | Then the gate raises a rule the checker does not yet encode; the report names it, and `docs/SONAR-RULES.md` gives the steps for adding it. |
+| DAST | **HYGIENE** | One form control and one hidden field removed from the Decision Engine panel | Fewer inputs; seed names are autoescaped; no inline script. | Then a page reflects a field unescaped; the report names the page. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.38.0
+
+Ties named, the tree's own cost cap, and decide-by on your own response time.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `decision.py`, `decision_tree.py`, `tree_selectors.py`, `rule_comparison.py`, `decision_inputs.py`, `decision_replay.py`, `decide_by.py`, `tree_view.py`, the threat routes, the Decision Engine and sweep templates; new `scripts/measure_tree_cost.py` | `scripts/sonar_rules.py 3070ce7`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 0.37.0: complexity none over 15, changed-line coverage 100%, duplication 0%. | Then the gate raises a rule the checker does not yet encode; the report names it, and `docs/SONAR-RULES.md` gives the steps for adding it. |
+| DAST | **HYGIENE** | Score colours removed, one label added to the rankings, the response-time placeholders changed | No new input; all new text is autoescaped; no inline script. | Then a page reflects a field unescaped; the report names the page. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.39.0
+
+Lookup results labelled training only, and the update's likelihood stated as uncalibrated.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `decision.py`, `turn_update.py`, `decision_record.py`, `decision_replay.py`, `decision_job.py`, `database.py`, `models.py`, the Decision Engine results and records templates; new `likelihood_calibration.py` and `scripts/calibrate_likelihood.py` | `scripts/sonar_rules.py b43f9c1`: 0 blocking, 1 advisory (S1192 in `decision.py`, over on the base). `scripts/check-quality.sh` against 0.38.0: complexity none over 15, changed-line coverage 100%, duplication at or below 3%. | Then the gate raises a rule the checker does not yet encode; the report names it, and `docs/SONAR-RULES.md` gives the steps for adding it. |
+| DAST | **HYGIENE** | One label added to the results and records pages | No new input; the label is built from constants and autoescaped; no inline script. | Then a page reflects a field unescaped; the report names the page. |
+| SAST | **HYGIENE** | A new command reads a local CSV | The file is read as text with `csv`, every value is parsed and range-checked, and nothing is evaluated or written. | Then the scanner flags the file read; the finding names the line. |
+| Other gates | **HYGIENE** | One nullable column added to the decision record, migrated in place | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.40.0
+
+Hop plans flown and costed burn by burn, and every limit names its orbit class.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `along_track.py`, `maneuvers.py`, `monte_carlo.py`, `propagator.py`, `elset_approach.py`, `custody.py`, `decision.py`, `decision_figures.py`, `decision_envelope.py`, `decision_tree.py`, `interaction_graph.py`, `turn_update.py`, the threat, POL and manoeuvre routes and their templates | `scripts/sonar_rules.py 292fa2c`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 0.39.0: complexity none over 15, changed-line coverage 99%, duplication at or below 3%. | Then the gate raises a rule the checker does not yet encode; the report names it, and `docs/SONAR-RULES.md` gives the steps for adding it. |
+| DAST | **HYGIENE** | Wording changed on the decision, sweep, POL and intercept pages | No new input; all new text is built from constants and autoescaped; no inline script. | Then a page reflects a field unescaped; the report names the page. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.41.0
+
+The game tree drawn, two scoring assumptions stated, and the asset screen judging age on the set it uses.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `threat.py` routes, `actor_eligibility.py`, `tree_view.py`, `decision.py`, the decision tree and results templates; new `spectre/web/static/js/tree_diagram.js` | `scripts/sonar_rules.py f5825cb`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 0.40.0: complexity none over 15, changed-line coverage 100%, duplication at or below 3%. | Then the gate raises a rule the checker does not yet encode; the report names it, and `docs/SONAR-RULES.md` gives the steps for adding it. |
+| DAST | **HYGIENE** | An inline SVG drawing and three zoom buttons added to the Decision Engine results; two notes added | No new input. Every label in the drawing is autoescaped by Jinja, tested with a hostile name; the script is first-party and loaded from `'self'`, with no inline script or handler. | Then a page reflects a field unescaped; the report names the page. |
+| SAST | **HYGIENE** | A new first-party script file | It reads and writes only attributes and classes on the drawing; no `innerHTML`, `eval` or network call. | Then the scanner flags the script; the finding names the line. |
+| Other gates | **HYGIENE** | The asset screen's UDL fetches are bounded by the 60-actor cap, as before | No dependency, Dockerfile or image change. | n/a. |
+
+## 0.42.0
+
+Scores, inputs, seeds, constants and dates checked before anything is recommended.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `decision.py`, `decision_inputs.py`, `tree_selectors.py`, `custody.py`, `interaction_graph.py`, `elset_check.py`, `pattern_of_life.py`, `monte_carlo.py`, `propagator.py`, `constants.py`, `decision_binding.py`, `decision_job.py`, `elsets.py`, `tree_view.py`, the decision, POL, threat and UDL routes and their templates, `scripts/smoke-browser.py` | `scripts/sonar_rules.py 602c963`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 602c963: all PASS. Full suite 10,925 passed, 15 skipped; coverage 98.4%, every floor met. Six review mutants killed. | Then a rule names the line; fix it in the next release. |
+| DAST | **HYGIENE** | New refusal sentences and notes on the decision, sweep, POL, UDL and threat pages | No new input field; every new sentence is built from constants or validated figures and autoescaped; no inline script. | Then a page reflects a field unescaped; the report names the page. |
+| SAST | **HYGIENE** | Form fields now refused when absent; element sets refused when dated in the future | Refusal only narrows what is accepted; nothing is evaluated or written from the new paths. | Then the scanner flags the parse; the finding names the line. |
+| Other gates | **HYGIENE** | Stored decision inputs go to version 7; earlier versions replay exactly | No dependency, Dockerfile or image change; no schema migration. | n/a. |
+
+## 0.43.0
+
+The force model measured against a higher-fidelity one, and every sampled note saying where it holds.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `monte_carlo.py` (two figure tables and their words) and `decision.py` (the sampled basis note takes red's regime); a new measuring reference under `tests/unit/` | `scripts/sonar_rules.py 3c8fe56`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 3c8fe56: all PASS. Full suite on Python 3.12, figures in the commit. An independent review killed 18 of 18 mutants; its two findings are fixed. | Then a rule names the line; fix it in the next release. |
+| DAST | **HYGIENE** | One clause added to the sampled basis note on the Decision Engine results | No new input; the clause is built from constants and the regime read from the element set, and autoescaped. | Then a page reflects a field unescaped; the report names the page. |
+| Other gates | **HYGIENE** | None | No dependency, Dockerfile or image change; the reference uses numpy and scipy, already locked, and ships nowhere. | n/a. |
+
+## 0.44.0
+
+A decision record being written when the server stops now stands.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `decision_job.py` (`jobs_ended`, the stop bound) and `app.py` (the shutdown step awaits it); `docs/architecture.md` states the stop assumption | `scripts/sonar_rules.py c318760`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against c318760 and against master: all PASS. Full suite on Python 3.12, figures in the commit; the PostgreSQL decision subset passes. An independent review confirmed the cause by intervention; its findings are fixed and 21 of 23 mutants die, the other two explained. | Then a rule names the line; fix it in the next release. |
+| SCA | **EVIDENCED** | `opentelemetry-api` 1.45.1 to 1.45.2 (CVE-2026-126360), carried from c318760 | `pip-audit` on `requirements.txt`: 1 vulnerability before, none after. | Then pip-audit names the package; recompile its pin with `scripts/lock.sh`'s command and `--upgrade-package`. |
+| Other gates | **HYGIENE** | Shutdown takes up to 8 s longer when a job is sampling or writing a record | No Dockerfile or image change. | n/a. |
+
+## 0.45.0
+
+A refused newer element set no longer blocks the UDL fetch; the Dependabot updates carried.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `routes/udl.py` (newest-accepted walk, cap, panel), `elsets.py`, `planning_state.py`, `routes/operator.py`, `routes/threat.py`, `routes/maneuver.py`, `burn_watch.py` and their templates | `scripts/sonar_rules.py 0c87ec5`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 0c87ec5 and master: all PASS. Full suite on Python 3.12, figures in the commit. An independent review found no blocking defect; its findings are fixed and 17 of 18 mutants die, the other equivalent. | Then a rule names the line; fix it in the next release. |
+| DAST | **HYGIENE** | A new note naming a passed-over set, its provider, epoch and why, on the panel, list cards, screen, intercept panels, refresh and burn watch notes | Provider and object names come from UDL and are autoescaped, tested with a hostile name; no set text reaches a page or log. | Then a page reflects a field unescaped; the report names the page. |
+| SCA | **EVIDENCED** | Dependabot updates (Actions, mypy, pytest, pytest-asyncio, types-pyyaml, pip-tools) recompiled with `scripts/lock.sh`'s command | `pip-audit` on both lock files: no known vulnerabilities. | Then pip-audit names the package; recompile its pin with `--upgrade-package`. |
+| Other gates | **HYGIENE** | Epoch-mode UDL query asks for up to 100 sets, not 10 | No Dockerfile or image change. | n/a. |

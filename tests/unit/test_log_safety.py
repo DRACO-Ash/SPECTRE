@@ -75,6 +75,11 @@ class TestItIsBounded:
     def test_a_value_at_the_limit_is_not_marked(self) -> None:
         assert log_safe("x" * 120) == "x" * 120
 
+    @pytest.mark.parametrize(("limit", "expected"), [(2, "ab"), (3, "abc"), (4, "a..."), (5, "ab...")])
+    def test_the_marker_is_used_only_when_text_fits_beside_it(self, limit: int, expected: str) -> None:
+        """At a limit no wider than the marker the text is cut without one: "abc", never a bare "..."."""
+        assert log_safe("abcdefgh", limit=limit) == expected
+
 
 class TestItWorksThroughTheLoggingModule:
     def test_a_forged_record_becomes_one_record(self, caplog: pytest.LogCaptureFixture) -> None:

@@ -83,7 +83,27 @@ class KeplerianElements:
 TLE_ERRORS: tuple[type[Exception], ...] = (ValueError, RuntimeError, ArithmeticError)
 
 
-_TLE_LINE_LENGTH = 69
+#: Every element line is this many characters long, its checksum in the last column (Spacetrack Report No. 3, 1980).
+TLE_LINE_LENGTH = 69
+_DIGITS = "0123456789"
+
+#: The period, minutes, at or over which SGP4 propagates an element set with its deep-space branch, SDP4
+#: (Spacetrack Report No. 3, 1980; Vallado and others, 2006). The library makes the switch itself, from the
+#: un-Kozai'd mean motion; TLEOrbit.deep_space reads its choice, and this names the line for the operator.
+DEEP_SPACE_PERIOD_MIN = 225.0
+
+
+#: SGP4's error code for an object whose radius has fallen under one Earth radius: it has decayed (Vallado and
+#: others, 2006). The search reads it as the re-entry it is, not as a generic propagation failure.
+SGP4_DECAYED = 6
+
+
+class SGP4Error(RuntimeError):
+    """SGP4 could not propagate to an instant: *code* is its own error code, so a caller can tell decay apart."""
+
+    def __init__(self, code: int, epoch: datetime) -> None:
+        super().__init__(f"SGP4 error code {code} at {epoch}")
+        self.code = code
 
 
 def tle_checksum_valid(line: str) -> bool:
@@ -91,17 +111,24 @@ def tle_checksum_valid(line: str) -> bool:
 
     Digits count their value, a minus sign counts 1, everything else 0.
     Nothing checked this, and 50 of the 52 training scenario lines carried a
-    wrong one (audit F-272).
+    wrong one (audit F-272). Only the ASCII digits are digits: '²'.isdigit()
+    is True and int('²') raises, which crashed the route that asked.
     """
     line = line.rstrip()
-    if len(line) != _TLE_LINE_LENGTH or not line[-1].isdigit():
+    if len(line) != TLE_LINE_LENGTH or line[-1] not in _DIGITS:
         return False
-    total = sum(int(c) if c.isdigit() else int(c == "-") for c in line[:-1])
+    total = sum(int(c) if c in _DIGITS else int(c == "-") for c in line[:-1])
     return total % 10 == int(line[-1])
 
 
 class TLEOrbit:
-    """Satellite orbit defined by a TLE, propagated with SGP4."""
+    """Satellite orbit defined by a TLE, propagated with SGP4.
+
+    Satrec.twoline2rv's default gravity model is WGS-72, the constants element sets are fitted with, and it is kept:
+    SGP4 must run on the constants its elements were made with. An RK45 arc started from one of these states flies
+    it with WGS-84's (spectre.astro.constants); that handover is measured and stated in
+    spectre.astro.monte_carlo.WGS_HANDOVER_KM (SPC-225, evaluation F-36).
+    """
 
     def __init__(self, tle: str) -> None:
         lines = [ln.strip() for ln in tle.strip().splitlines() if ln.strip()]
@@ -111,12 +138,40 @@ class TLEOrbit:
         self.line2 = lines[-1]
         self._sat = Satrec.twoline2rv(self.line1, self.line2)
 
+    @property
+    def period_minutes(self) -> float:
+        """The orbit's period, minutes, from the element set's mean motion. SGP4 decides its branch on the
+        un-Kozai'd mean motion, which differs from this by a part in a thousand or less, so deep_space reads the
+        library's own choice and this is for the operator."""
+        return 2.0 * math.pi / float(self._sat.no_kozai)
+
+    @property
+    def eccentricity(self) -> float:
+        """The element set's mean eccentricity, as SGP4 reads it."""
+        return float(self._sat.ecco)
+
+    @property
+    def init_error(self) -> int:
+        """SGP4's own error code from starting on this set: 0 when it can propagate from it."""
+        return int(self._sat.error)
+
+    @property
+    def deep_space(self) -> bool:
+        """Whether SGP4 propagates this set with SDP4, its deep-space branch: a period of DEEP_SPACE_PERIOD_MIN or
+        more, as the library itself decides."""
+        return bool(self._sat.method == "d")
+
+    @property
+    def bstar(self) -> float:
+        """The element set's SGP4 drag term B*, in inverse Earth radii."""
+        return float(self._sat.bstar)
+
     def propagate(self, epoch: datetime) -> StateVector:
         """Propagate to *epoch* and return the TEME state vector."""
         jd, fr = _datetime_to_jd(epoch)
         e, r, v = self._sat.sgp4(jd, fr)
         if e != 0:
-            raise RuntimeError(f"SGP4 error code {e} at {epoch}")
+            raise SGP4Error(int(e), epoch)
         return StateVector(
             epoch=epoch,
             r=np.array(r, dtype=float),

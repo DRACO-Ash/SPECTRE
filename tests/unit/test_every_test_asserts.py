@@ -72,18 +72,20 @@ def _cannot_fail(test: ast.expr) -> bool:
     )
 
 
+def _checks_only_types(fn: ast.AST) -> bool:
+    """Every assertion in *fn* is type-only, and no ``with`` block could be the real check."""
+    asserts = [n for n in ast.walk(fn) if isinstance(n, ast.Assert)]
+    others = [n for n in ast.walk(fn) if isinstance(n, ast.With)]
+    return bool(asserts) and not others and all(_type_only(a.test) for a in asserts)
+
+
 def test_every_test_checks_something() -> None:
     offenders = [where for where, fn in _test_functions() if not _checks_something(fn)]
     assert not offenders, f"these tests pass whenever nothing raises: {offenders}"
 
 
 def test_no_test_checks_only_types() -> None:
-    offenders = []
-    for where, fn in _test_functions():
-        asserts = [n for n in ast.walk(fn) if isinstance(n, ast.Assert)]
-        others = [n for n in ast.walk(fn) if isinstance(n, ast.With)]
-        if asserts and not others and all(_type_only(a.test) for a in asserts):
-            offenders.append(where)
+    offenders = [where for where, fn in _test_functions() if _checks_only_types(fn)]
     assert not offenders, f"these tests check a type or not-None and no value: {offenders}"
 
 
@@ -97,14 +99,46 @@ def test_no_assertion_is_true_of_every_count() -> None:
     assert not offenders, f"these assertions cannot fail: {offenders}"
 
 
-def test_the_checker_catches_or_true() -> None:
-    def assertion(src: str) -> ast.expr:
-        node = ast.parse(src).body[0]
-        assert isinstance(node, ast.Assert)
-        return node.test
+def _assertion(src: str) -> ast.expr:
+    node = ast.parse(src).body[0]
+    assert isinstance(node, ast.Assert)
+    return node.test
 
-    assert _cannot_fail(assertion("assert a <= b or True"))
-    assert not _cannot_fail(assertion("assert a <= b or c"))
+
+def _function(src: str) -> ast.AST:
+    node = ast.parse(src).body[0]
+    assert isinstance(node, ast.FunctionDef)
+    return node
+
+
+def test_the_checker_catches_or_true() -> None:
+    assert _cannot_fail(_assertion("assert a <= b or True"))
+    assert not _cannot_fail(_assertion("assert a <= b or c"))
+
+
+def test_the_checker_catches_a_count_compared_with_zero() -> None:
+    """SPC-074: the ``added >= 0`` case of audit F-080, the form that started this check."""
+    assert _cannot_fail(_assertion("assert len(rows) >= 0"))
+    assert not _cannot_fail(_assertion("assert len(rows) >= 1"))
+    assert not _cannot_fail(_assertion("assert 3 >= 0"))
+
+
+def test_the_guard_sees_a_test_that_checks_nothing() -> None:
+    """SPC-074: the committed red case. A body that only runs code, or opens a context that is not a check."""
+    assert not _checks_something(_function("def test_x():\n    run()\n"))
+    assert not _checks_something(_function("def test_x():\n    with open('f'):\n        run()\n"))
+    assert not _checks_something(_function("def test_x():\n    failover()\n"))
+    # Each form the docstring accepts still counts, so the red case is not red for every input.
+    assert _checks_something(_function("def test_x():\n    with pytest.raises(ValueError):\n        run()\n"))
+    assert _checks_something(_function("def test_x():\n    pytest.fail('no')\n"))
+    assert _checks_something(_function("def test_x():\n    _check_row(run())\n"))
+
+
+def test_the_guard_sees_a_test_that_checks_only_a_type() -> None:
+    assert _type_only(_assertion("assert isinstance(result, Plan)"))
+    assert _type_only(_assertion("assert result is not None"))
+    assert not _type_only(_assertion("assert result == 1"))
+    assert not _type_only(_assertion("assert result is not False"))
 
 
 def _searches_without_concluding(body: list[ast.stmt]) -> list[int]:
@@ -154,3 +188,29 @@ def test_the_search_check_recognises_the_pattern() -> None:
     assert _searches_without_concluding(bad) == [1]
     assert _searches_without_concluding(with_else) == []
     assert _searches_without_concluding(with_assert) == []
+
+
+
+def test_the_guard_sees_a_whole_test_that_checks_only_types() -> None:
+    """SPC-074: the decision on a whole test, not only on one assertion."""
+    assert _checks_only_types(_function("def test_x():\n    assert isinstance(r, Plan)\n    assert r.id is not None\n"))
+    # One assertion on a value, or a with block that may hold the check, and the test is not reported.
+    assert not _checks_only_types(_function("def test_x():\n    assert isinstance(r, Plan)\n    assert r.id == 1\n"))
+    assert not _checks_only_types(_function(
+        "def test_x():\n    with pytest.raises(E):\n        run()\n    assert r is not None\n",
+    ))
+    # No assertion at all is the other guard's case, not this one's.
+    assert not _checks_only_types(_function("def test_x():\n    run()\n"))
+
+
+def test_the_guard_reads_the_whole_suite() -> None:
+    """SPC-074: every check above passes on zero tests, so the scan must still find the suite.
+
+    The floor sits well under today's 4,448 test functions, and the named
+    files are this guard and one integration file, so a glob that stops
+    matching, or matches only one directory, goes red.
+    """
+    found = _test_functions()
+    assert len(found) >= 4000
+    files = {where.split(":")[0] for where, _ in found}
+    assert {"unit/test_every_test_asserts.py", "integration/test_threat_route_fallbacks.py"} <= files

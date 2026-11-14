@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
+from typing import NamedTuple
 
 from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
 from spectre.domain.manoeuvre_calibration import DEFAULT_SWEEP_BUDGET_M_S
@@ -31,6 +32,9 @@ class BlueAsset:
     #: (REAL, TEST, EXERCISE, SIMULATED), or MANUAL for one entered by hand.
     #: Only a UDL set is refreshed from UDL; a MANUAL one is never overwritten.
     data_mode: str = "MANUAL"
+    #: The UDL provider that filed the set (its ``source``, e.g. 18th SPCS),
+    #: or empty for one entered by hand or whose provider was not recorded.
+    elset_source: str = ""
     stk_name: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -57,6 +61,9 @@ class RedTrack:
     #: (REAL, TEST, EXERCISE, SIMULATED), or MANUAL for one entered by hand.
     #: Only a UDL set is refreshed from UDL; a MANUAL one is never overwritten.
     data_mode: str = "MANUAL"
+    #: The UDL provider that filed the set (its ``source``, e.g. 18th SPCS),
+    #: or empty for one entered by hand or whose provider was not recorded.
+    elset_source: str = ""
     stk_name: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -410,6 +417,15 @@ class ThreatActor:
     manual: bool = False
 
 
+class SweepBurn(NamedTuple):
+    """One burn of a sweep entry's transfer: its own UTC time and its prograde, normal and radial parts, m/s."""
+
+    at_utc:   datetime
+    prograde: float
+    normal:   float
+    radial:   float
+
+
 @dataclass
 class ThreatSweepEntry:
     """One (target, epoch) intercept result."""
@@ -436,6 +452,18 @@ class ThreatSweepEntry:
     #: blue asset against many candidate actors. Defaulted last so every
     #: existing construction site stays valid.
     actor: ThreatActor | None = None
+    #: Whether this method brings the object to the target. A plane change
+    #: only aligns the planes: its single burn "arrives" the moment it fires,
+    #: so its flight time is not a warning and it never ranks as one.
+    arrives: bool = True
+    #: The first burn alone, m/s, as (prograde, normal, radial): the one burn a
+    #: single-burn decision hypothesis can stand for (SPC-150). The dv_ fields
+    #: above sum every burn of the transfer, which is no one burn. None when
+    #: the solution carried no burn.
+    departure_m_s: tuple[float, float, float] | None = None
+    #: Every burn of the transfer, in time order, each at its own UTC time with its own parts in m/s (SPC-184):
+    #: what a scenario opened from the sweep carries. Empty when the solution carried no burn.
+    transfer_m_s: tuple[SweepBurn, ...] = ()
 
 
 @dataclass

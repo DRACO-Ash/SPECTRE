@@ -2,8 +2,8 @@
      Shown once per session on operator console load.
      Auto-dismissed after 3.4 s or on click/keypress.
      Stored in sessionStorage so it only fires once per browser session. -->
-<div id="spectre-splash"
-     onclick="spectreCloseSplash()"
+<div id="spectre-splash" data-init="splash"
+     data-action="closeSplash"
      style="position:fixed;inset:0;z-index:9999;background:#0A0C10;
             display:flex;flex-direction:column;align-items:center;justify-content:center;
             cursor:pointer;transition:opacity 0.6s ease;">
@@ -106,30 +106,4 @@
   <div class="sp-dismiss">CLICK TO ENTER — OR WAIT</div>
 </div>
 
-<script>
-(function () {
-  var key = 'spectre-splash-seen';
-  var el  = document.getElementById('spectre-splash');
-  if (!el) return;
-
-  // Skip if already seen this session
-  if (sessionStorage.getItem(key)) { el.remove(); return; }
-
-  // Auto-dismiss after 3.4 s
-  var timer = setTimeout(spectreCloseSplash, 3400);
-
-  // Also dismiss on any keypress
-  document.addEventListener('keydown', spectreCloseSplash, { once: true });
-
-  function spectreCloseSplash() {
-    clearTimeout(timer);
-    document.removeEventListener('keydown', spectreCloseSplash);
-    sessionStorage.setItem(key, '1');
-    el.style.opacity = '0';
-    el.style.pointerEvents = 'none';
-    setTimeout(function () { el.remove(); }, 650);
-  }
-  // expose for onclick
-  window.spectreCloseSplash = spectreCloseSplash;
-})();
-</script>
+{# Closed and remembered by operator.js; hidden before paint once seen, by theme-boot.js (SPC-199). #}

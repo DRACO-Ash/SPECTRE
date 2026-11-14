@@ -15,18 +15,35 @@ import pytest
 
 from tests.conftest import csrf_headers
 
+#: What each row field took, before 0.42.0, on a row the form posted none for, by the column of ids it runs beside.
+#: The route now refuses a missing one (SPC-222), so _form fills each in, as the panel posts each, and every test's
+#: scenario is the one it always was.
+_ROW_FILL: dict[str, tuple[str, str]] = {
+    "adv_name": ("adv_id", "ADV-{row}"), "adv_type": ("adv_id", "manoeuvre"), "adv_prob": ("adv_id", "0.5"),
+    "adv_conf": ("adv_id", "0.5"), "adv_gap": ("adv_id", "0.7"),
+    "fr_name": ("fr_id", "FR-{row}"), "fr_type": ("fr_id", "manoeuvre"), "fr_cost": ("fr_id", "0.5"),
+    "fr_rev": ("fr_id", "0.5"), "fr_time": ("fr_id", "6"),
+}
 
-def _form(**overrides: Any) -> dict[str, Any]:
+
+def _form(*, pad: bool = True, **overrides: Any) -> dict[str, Any]:
+    """A complete decision form, *overrides* applied. With *pad*, each row field the overrides leave short of its
+    rows is filled to them with what the route gave a missing value before 0.42.0 (_ROW_FILL), so a test that names
+    only the columns it is about posts every field, as the panel does; without it the form is posted as built."""
     form: dict[str, Any] = {
-        "scenario_name": "Check", "horizon_hours": "72",
+        "scenario_name": "Check", "horizon_hours": "72", "keep_out_km": "10",
         "adv_id": ["A1"], "adv_name": ["Approach"], "adv_type": ["manoeuvre"],
-        "adv_prob": ["0.6"], "adv_conf": ["0.7"],
+        "adv_prob": ["0.6"], "adv_conf": ["0.7"], "adv_gap": ["0.7"],
         "fr_id": ["F1"], "fr_name": ["Hold"], "fr_type": ["manoeuvre"],
         "fr_cost": ["0.2"], "fr_rev": ["0.8"], "fr_time": ["4"],
         "w_custody": "0.35", "w_ca": "0.25", "w_dv": "0.2", "w_time": "0.1", "w_rev": "0.1",
         "strategy": "minimax",
     }
     form.update(overrides)
+    for field, (ids, fill) in _ROW_FILL.items():
+        column, rows = list(form.get(field) or []), len(form.get(ids) or [])
+        if pad and field in form and len(column) < rows:
+            form[field] = column + [fill.format(row=row) for row in range(len(column) + 1, rows + 1)]
     return form
 
 

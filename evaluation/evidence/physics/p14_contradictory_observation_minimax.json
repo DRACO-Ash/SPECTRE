@@ -1,0 +1,24 @@
+{
+  "strategy": "minimax",
+  "tree_refusal": null,
+  "likelihood": [
+    "no burn",
+    "no burn"
+  ],
+  "picks": [
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      0
+    ]
+  ],
+  "update_lines": [
+    "Each later pick may rest only on what the turns before it let us see of red: the bound red track's custody, as the sweep judges it, carried over each turn with each row's burn. Custody lost at a burn in the turn shows that red burnt, not which burn; custody held through it shows that red did not; custody lost for any other reason, or not read, shows nothing. In turn 1: row 1, Hold course, gives no burn; row 2, Posture, gives no burn. Each row gives what it gives for certain, so branches that show the same thing share one pick. It is the custody rule, not calibrated against any outcome.",
+    "Minimax does not use probability, so no update after turn 1 is shown; its later picks rest only on what each turn lets us see.",
+    "You stated that turn 1 shows a burn; Minimax does not use probability, so it updated nothing."
+  ],
+  "matrix_recommendation": "Hold"
+}

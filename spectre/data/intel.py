@@ -22,6 +22,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from spectre.astro.catalogue import catalogue_number
+
 _DATA: dict[str, dict[str, Any]] | None = None
 
 
@@ -43,16 +45,16 @@ def get_intel(satno: int | str | None) -> dict[str, Any] | None:
 
 
 def satno_from_tle(tle: str) -> int | None:
-    """Extract the NORAD catalogue number from a TLE string.
+    """The NORAD catalogue number in line 1 of *tle*, or None when it cannot be read.
 
-    TLE Line 1 format: ``1 NNNNNC ...``
-    The five-digit NORAD number occupies columns 3–7 (1-indexed).
+    TLE line 1 reads ``1 NNNNNC ...``: the number is in columns 3 to 7, as
+    five digits or as an Alpha-5 letter and four digits (SPC-026). The reader
+    is ``spectre.astro.catalogue``, shared with the history parser.
     """
     for line in tle.strip().splitlines():
         line = line.strip()
         if line.startswith("1 ") and len(line) >= 7:
-            try:
-                return int(line[2:7])
-            except ValueError:
-                pass
+            number = catalogue_number(line[2:7])
+            if number is not None:
+                return number
     return None

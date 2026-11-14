@@ -11,9 +11,10 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Protocol
 
+from spectre.domain.adjudication import Adjudication, Subject
 from spectre.domain.models import (
     BlueAsset,
     InterceptResult,
@@ -36,8 +37,12 @@ class ElsetRefresh:
     """The refresh of every held element set made when UDL connects.
 
     *updated*, *failed* name each object ("red SY-12 02"); *current* counts
-    the ones UDL had nothing newer for. *announced* is set once the page has
-    been told the refresh finished, so it is told once.
+    the ones UDL had nothing newer for; *refused* holds the sentence for each
+    object whose newest set the acceptance check refused, the held set kept
+    (SPC-201). *passed_over* holds the sentence for each object updated from
+    an older set because each newer one was refused, naming those (SPC-243).
+    *announced* is set once the page has been told the refresh finished, so
+    it is told once.
     """
 
     started_at: datetime
@@ -46,6 +51,8 @@ class ElsetRefresh:
     updated: list[str] = field(default_factory=list)
     current: int = 0
     failed: list[str] = field(default_factory=list)
+    refused: list[str] = field(default_factory=list)
+    passed_over: list[str] = field(default_factory=list)
     announced: bool = False
 
 
@@ -105,6 +112,39 @@ class SessionState:
     hrr_tle_multiset: dict[str, list[str]] = field(default_factory=dict)
     # The element set refresh started at UDL connect, while it runs and after.
     elset_refresh: ElsetRefresh | None = None
+    # Analysed element-set histories by SATNO, oldest first, for the sweep and
+    # the is-this-normal verdict (routes.pol.held_history, SPC-001).
+    elset_histories: dict[int, Any] = field(default_factory=dict)
+    # The burn watch on the red object last swept, and its latest alert
+    # (spectre.web.burn_watch, SPC-006).
+    burn_watch: Any | None = None
+    burn_alert: Any | None = None
+    # This sign-in's sampled Decision Engine evaluation, queued, running or
+    # finished (spectre.web.decision_job, SPC-113).
+    decision_job: Any | None = None
+    # The Threat range, Understanding, cues and decide-by the sweep last held
+    # for its red track (spectre.web.decision_threat, SPC-171), read by the
+    # Decision Engine when it is bound to that red track.
+    threat_picture: Any | None = None
+    # Interactions held per object between sweeps, and the conjunctions the
+    # operator looked up (spectre.web.interaction_store, SPC-173).
+    interaction_store: Any | None = None
+    # The operator's response time in hours, for decide-by (SPC-008); None
+    # until they set it. With neither it nor a target's own set for a target
+    # in reach, decide-by says it needs one and shows no time (SPC-211).
+    response_time_h: float | None = None
+    # Response times set for named targets, by target name (SPC-022). A target
+    # here takes its own; any other takes response_time_h, else has none, and
+    # then decide-by says it needs one (SPC-211).
+    response_time_by_target: dict[str, float] = field(default_factory=dict)
+    # The Threat range and Understanding the sweep last showed, as an analyst
+    # may adjudicate them, and the adjudications this sign-in recorded
+    # (spectre.domain.adjudication, SPC-176). Per sign-in, like every other
+    # operational record: the database holds accounts and per-account
+    # training only, and why adjudications are not kept there is in
+    # spectre.web.adjudication_log.
+    adjudication_subject: Subject | None = None
+    adjudications: tuple[Adjudication, ...] = ()
 
     def __repr__(self) -> str:
         """Safe repr that never leaks the UDL password."""
@@ -190,9 +230,31 @@ def get_session_state(owner: SessionKey | _HasSessionKey) -> SessionState:
         if _default_hrr_tles:
             state.hrr_tle_cache.update(_default_hrr_tles)
             state.hrr_tle_data_mode.update(_default_hrr_tle_modes)
+        for sentence in _default_elset_refusals:
+            state.append_log(f"[HRR] {sentence}")
         _store[key] = (now, state)
         logger.debug("Created new session state for account %d", key.user_id)
     return _store[key][1]
+
+
+def session_alive(key: SessionKey, state: SessionState) -> bool:
+    """Whether this sign-in still holds *state* and has not outlived its 8 hours.
+
+    For a background task holding the state: ``has_session_state`` alone does
+    not prune, so an expired sign-in still answered True until the next
+    request pruned it, and a replaced state would be mistaken for this one.
+    """
+    held = _store.get(key)
+    return held is not None and held[1] is state and time.monotonic() - held[0] <= _STATE_MAX_AGE_S
+
+
+def sign_in_expires_at(key: SessionKey, now: datetime) -> datetime | None:
+    """When this sign-in's planning state expires, on the wall clock, or ``None`` if not held."""
+    held = _store.get(key)
+    if held is None:
+        return None
+    remaining = _STATE_MAX_AGE_S - (time.monotonic() - held[0])
+    return now + timedelta(seconds=max(remaining, 0.0))
 
 
 def has_session_state(key: SessionKey) -> bool:
@@ -209,10 +271,13 @@ def clear_account_state(user_id: int) -> None:
     """Discard the state of every sign-in of an account.
 
     Called when its sessions are revoked (logout, password change) and when it
-    is deleted, so its UDL password goes with them.
+    is deleted, so its UDL password goes with them. The credentials are blanked
+    on each state as well as the state dropped: a burn watch check in flight
+    still holds the state, and must find no password in it (V0.9 review 6).
     """
     for key in [k for k in _store if k.user_id == user_id]:
-        del _store[key]
+        state = _store.pop(key)[1]
+        state.udl_username = state.udl_password = None
 
 
 # ── App-level on-orbit catalog (shared across all operator sessions) ─────────
@@ -291,3 +356,15 @@ def set_default_hrr_tles(tles: dict[str, str], modes: dict[str, str]) -> None:
 def get_default_hrr_tles() -> tuple[dict[str, str], dict[str, str]]:
     """Return the default element sets and their provenance."""
     return _default_hrr_tles, _default_hrr_tle_modes
+
+
+#: The sentence for each element set of the default watchlist the acceptance check refused at start-up (SPC-201).
+#: No operator is signed in then, so each new session's run log carries them.
+_default_elset_refusals: list[str] = []
+
+
+def set_default_elset_refusals(sentences: list[str]) -> None:
+    """Store the refusals of the default watchlist's element sets, for each new session's run log."""
+    # PLW0603: boot-time default state, as the setters above.
+    global _default_elset_refusals  # noqa: PLW0603
+    _default_elset_refusals = list(sentences)

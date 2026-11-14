@@ -30,6 +30,48 @@
 {% endif %}
 
 {# ══════════════════════════════════════════════════════════════════════════════
+   § 0 — IS THIS NORMAL? The operator's first question (SPC-009): the latest
+   burn judged against this object's own earlier burns.
+   ══════════════════════════════════════════════════════════════════════════════ #}
+{% set NORMAL_COLOR = {"routine":"#22c55e","unusual":"#f59e0b","unprecedented":"#ef4444","not enough history":"var(--text-dim)"} %}
+{% set CUSTODY_COLOR = {"held":"#22c55e","degraded":"#f59e0b","lost":"#ef4444"} %}
+{% if custody is defined and custody %}
+{# Custody first: it says whether the verdict after it can be trusted (SPC-018). #}
+{% set cc = CUSTODY_COLOR.get(custody.state.value, "var(--text-dim)") %}
+<section class="pol-custody" aria-label="Custody of this object"
+         style="border:1px solid {{ cc }}; border-left:4px solid {{ cc }}; border-radius:5px;
+                background:var(--panel-bg); padding:0.5rem 0.8rem; margin-bottom:0.5rem">
+  <div style="font-size:0.8rem; font-weight:700; color:{{ cc }}">{{ custody.sentence }}</div>
+  <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.2rem">{{ custody.basis }}</div>
+</section>
+{% endif %}
+{% if latest_burn %}
+{% set nc = NORMAL_COLOR.get(latest_burn.verdict.value, "var(--text-dim)") %}
+<section class="pol-normality" aria-label="Is the latest burn normal for this object"
+         style="border:1px solid {{ nc }}; border-left:4px solid {{ nc }}; border-radius:5px;
+                background:var(--panel-bg); padding:0.6rem 0.8rem; margin-bottom:0.7rem">
+  <div style="font-size:0.62rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em">
+    Is this normal? Latest burn, {{ latest_burn.burn.epoch.strftime("%Y-%m-%d %H:%M UTC") }}
+  </div>
+  <div style="font-size:0.85rem; font-weight:700; color:{{ nc }}; margin-top:0.2rem">{{ latest_burn.sentence }}</div>
+  {% for caveat in latest_burn.caveats %}
+  <div style="font-size:0.66rem; color:#f59e0b; margin-top:0.2rem">&#9888; Caveat: {{ caveat }}.</div>
+  {% endfor %}
+  <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.25rem">{{ latest_burn.basis }}</div>
+</section>
+{% endif %}
+
+{# What is understood about this object (SPC-168, concept section 7.3): the
+   same strip the sweep shows for it. This panel's custody and normality
+   above set volatility; "no burns" is judged on the history's own window,
+   as on every panel. No intercept is in view here, so the Threat line says
+   where the threat is assessed and the cues quote no Threat steps. #}
+{% if object_understanding is defined and object_understanding %}
+{% set tu = object_understanding %}
+{% include "partials/threat_understanding.html" %}
+{% endif %}
+
+{# ══════════════════════════════════════════════════════════════════════════════
    § 1 — INTELLIGENCE ASSESSMENT BANNER
    ══════════════════════════════════════════════════════════════════════════════ #}
 <div style="border:2px solid {{ rc }}; border-radius:7px; background:{{ rb }};
@@ -69,7 +111,7 @@
       <div style="font-size:0.78rem; font-weight:800; color:var(--text-primary); letter-spacing:0.03em; margin-bottom:0.15rem">
         {{ intel.mission_profile }}
       </div>
-      <div style="font-size:0.68rem; color:var(--ops-gold); font-style:italic; margin-bottom:0.4rem">
+      <div style="font-size:0.68rem; color:var(--gold); font-style:italic; margin-bottom:0.4rem">
         {{ intel.behaviour_class }}
       </div>
       <div style="font-size:0.7rem; color:var(--text-dim); line-height:1.5; max-width:52rem">
@@ -234,7 +276,7 @@
       {% if reserve_reset %}
       <tr>
         <td style="color:var(--text-dim); padding:0.15rem 0">Since reserve reset</td>
-        <td style="text-align:right; font-weight:600; color:var(--ops-gold)">
+        <td style="text-align:right; font-weight:600; color:var(--gold)">
           {{ pb.spent_since_reset_m_s | m_s }} m/s
         </td>
       </tr>
@@ -325,14 +367,14 @@
                "derived from Table 3, not asserted") }}
   {% endif %}
   {% if pol.next_manoeuvre_est %}
-  {{ stat_card("Next Predicted", pol.next_manoeuvre_est[:10], "± " ~ pol.next_manoeuvre_uncertainty_days ~ " d (95% prediction)", color="var(--ops-gold)") }}
+  {{ stat_card("Next Predicted", pol.next_manoeuvre_est[:10], "± " ~ pol.next_manoeuvre_uncertainty_days ~ " d (95% prediction)", color="var(--gold)") }}
   {% endif %}
   {% if pol.records %}
   {{ stat_card("Last TLE", pol.records[-1].epoch.strftime("%Y-%m-%d"), "most recent epoch") }}
   {{ stat_card("Altitude", pol.records[-1].alt_km | round(1) ~ " km", "current mean") }}
   {{ stat_card("Inclination [𝑖]", pol.records[-1].inc_deg | round(4) ~ "°", "current") }}
   {% if pol.records[-1].geo_longitude_deg is not none %}
-  {{ stat_card("GEO Longitude", pol.records[-1].geo_longitude_deg | round(2) ~ "°", "current subsatellite point", color="var(--ops-gold)") }}
+  {{ stat_card("GEO Longitude", pol.records[-1].geo_longitude_deg | round(2) ~ "°", "current subsatellite point", color="var(--gold)") }}
   {% endif %}
   {% if pol.records[-1].geo_drift_rate_deg_day is not none %}
   {% set dr = pol.records[-1].geo_drift_rate_deg_day %}
@@ -425,9 +467,9 @@
     </table>
     <div style="margin-top:0.5rem; font-size:0.62rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.35rem">
       <strong>Out-of-PoL trigger:</strong> ΔV &gt;
-      <span style="color:var(--ops-gold)">{{ (pol_high_dv_m_s | m_s) if pol_high_dv_m_s else "N/A" }} m/s</span>
+      <span style="color:var(--gold)">{{ (pol_high_dv_m_s | m_s) if pol_high_dv_m_s else "N/A" }} m/s</span>
       or gap &gt;
-      <span style="color:var(--ops-gold)">{{ pol.pol_high_interval|round(0)|int if pol.pol_high_interval else "N/A" }} d</span>
+      <span style="color:var(--gold)">{{ pol.pol_high_interval|round(0)|int if pol.pol_high_interval else "N/A" }} d</span>
     </div>
     {% else %}
     <p class="empty-msg" style="font-size:0.68rem">Need ≥ 2 manoeuvres for statistical bounds.</p>
@@ -526,7 +568,7 @@
       <div style="border:1px solid var(--border); border-radius:4px; padding:0.4rem 0.5rem; text-align:center">
         <div style="font-size:0.58rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em">+{{ label }}</div>
         {% if lon is not none %}
-        <div style="font-size:1rem; font-weight:800; color:var(--ops-gold)">{{ lon | round(1) }}°</div>
+        <div style="font-size:1rem; font-weight:800; color:var(--gold)">{{ lon | round(1) }}°</div>
         <div style="font-size:0.6rem; color:{{ DRIFT_COLOR.get(dir,'#6b7280') }}">
           {{ DRIFT_ICON.get(dir,"") }} {{ dir }}</div>
         {% else %}
@@ -642,6 +684,7 @@
     {% if detection.duplicate_epoch_sets %}● {{ detection.duplicate_epoch_sets }} repeated an epoch already held and were dropped{% endif %}
     {% if detection.bad_provenance_sets %}● {{ detection.bad_provenance_sets }} carried provenance in an unusable shape and were dropped{% endif %}
     {% if detection.other_object_sets %}● {{ detection.other_object_sets }} belonged to another object and were dropped{% endif %}
+    {% if detection.refused_sentence %}● {{ detection.refused_sentence }}{% endif %}
     {% if detection.skipped_long_gap %}● {{ detection.skipped_long_gap }} skipped for an epoch gap too large to read as one burn{% endif %}
     {% if detection.breakdowns_truncated %}● {{ detection.breakdowns_truncated }} beyond the forensic budget, screening estimate only{% endif %}
     <br>● <strong style="color:#22c55e">{{ detection.confirmed }} confirmed</strong>
@@ -661,18 +704,19 @@
     <table class="hrr-table" style="font-size:0.66rem">
       <thead>
         <tr>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Date<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">ΔV (m/s)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Type<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Posture<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Δ Alt (km)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Δ Inc (°)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Δ Per (s)<span class="hrr-sort-ind"></span></th>
-          {% if is_geo %}<th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Δ Drift (°/d)<span class="hrr-sort-ind"></span></th>{% endif %}
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Dominant<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Gap (d)<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer">Date<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer">ΔV (m/s)<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer">Type<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer">Normal?<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer">Posture<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer">Δ Alt (km)<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer">Δ Inc (°)<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer">Δ Per (s)<span class="hrr-sort-ind"></span></th>
+          {% if is_geo %}<th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer">Δ Drift (°/d)<span class="hrr-sort-ind"></span></th>{% endif %}
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer">Dominant<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer">Gap (d)<span class="hrr-sort-ind"></span></th>
           <th style="text-align:right">Alt After</th>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Confidence<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer">Confidence<span class="hrr-sort-ind"></span></th>
           <th style="text-align:center">Working</th>
           <th style="text-align:center">MC</th>
         </tr>
@@ -689,6 +733,10 @@
           <td style="white-space:nowrap">
             {{ v.classification }}
             {% if v.sk_subtype %}<span class="label-dim">({{ v.sk_subtype }})</span>{% endif %}
+          </td>
+          <td style="white-space:nowrap">
+            <span style="color:{{ NORMAL_COLOR.get(row.normal.verdict.value, 'var(--text-dim)') }}; font-weight:700"
+                  title="{{ row.normal.sentence }}">{{ row.normal.verdict.value }}</span>
           </td>
           <td style="white-space:nowrap">
             <span style="color:{{ pcol }}; font-weight:700" title="{{ v.posture.rationale }}">
@@ -888,19 +936,19 @@
     <table class="hrr-table" style="font-size:0.64rem; width:100%">
       <thead>
         <tr>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; white-space:nowrap">Epoch (UTC)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Regime<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">Alt (km)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">SMA [<em>a</em>] (km)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">Inc [<em>i</em>] (°)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">Ecc [<em>e</em>]<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">MM (rev/d)<span class="hrr-sort-ind"></span></th>
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer; text-align:right">BSTAR<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer; white-space:nowrap">Epoch (UTC)<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer">Regime<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer; text-align:right">Alt (km)<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer; text-align:right">SMA [<em>a</em>] (km)<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer; text-align:right">Inc [<em>i</em>] (°)<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer; text-align:right">Ecc [<em>e</em>]<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer; text-align:right">MM (rev/d)<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer; text-align:right">BSTAR<span class="hrr-sort-ind"></span></th>
           {% if pol.records | selectattr("data_mode") | list %}
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Data Mode<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer">Data Mode<span class="hrr-sort-ind"></span></th>
           {% endif %}
           {% if pol.records | selectattr("source") | list %}
-          <th onclick="polSort(this)" tabindex="0" onkeydown="spectreActivate(event)" scope="col" style="cursor:pointer">Source<span class="hrr-sort-ind"></span></th>
+          <th data-action="polSort" tabindex="0" data-activate scope="col" style="cursor:pointer">Source<span class="hrr-sort-ind"></span></th>
           {% endif %}
           <th style="white-space:nowrap">TLE</th>
         </tr>
@@ -969,299 +1017,5 @@
 {# ══════════════════════════════════════════════════════════════════════════════
    CHART.JS INITIALISATION
    ══════════════════════════════════════════════════════════════════════════════ #}
-<script>
-(function () {
-  var SATNO   = {{ pol.satno }};
-  var IS_GEO  = {{ 'true' if is_geo else 'false' }};
-
-  var ZOOM_CFG = {
-    pan:  { enabled: true, mode: 'xy' },
-    zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'xy' }
-  };
-
-  var CHART_DEFAULTS = {
-    animation: false,
-    responsive: true,
-    maintainAspectRatio: true,
-    plugins: {
-      legend: { display: false },
-      zoom: ZOOM_CFG,
-    },
-    scales: {
-      x: { ticks: { color: '#8899aa', font: { size: 9 }, maxTicksLimit: 8, maxRotation: 0 },
-           grid: { color: 'rgba(255,255,255,0.04)' } },
-      y: { ticks: { color: '#8899aa', font: { size: 9 } },
-           grid: { color: 'rgba(255,255,255,0.04)' } }
-    }
-  };
-
-  function deepMerge(base, over) {
-    var out = Object.assign({}, base);
-    for (var k in over) {
-      if (over[k] && typeof over[k] === 'object' && !Array.isArray(over[k])) {
-        out[k] = deepMerge(base[k] || {}, over[k]);
-      } else { out[k] = over[k]; }
-    }
-    return out;
-  }
-
-  // Create a chart and wire dblclick → resetZoom
-  function mkChart(ctx, config) {
-    var chart = new Chart(ctx, config);
-    ctx.addEventListener('dblclick', function () { chart.resetZoom(); });
-    ctx.title = 'Scroll to zoom · Drag to pan · Double-click to reset';
-    return chart;
-  }
-
-  function sparkLine(id, labels, data, color) {
-    var ctx = document.getElementById(id);
-    if (!ctx) return;
-    return mkChart(ctx, {
-      type: 'line',
-      data: { labels: labels, datasets: [{ data: data, borderColor: color, borderWidth: 1.2,
-              pointRadius: 0, fill: false, tension: 0 }] },
-      options: deepMerge(CHART_DEFAULTS, { plugins: { legend: { display: false } } })
-    });
-  }
-
-  function makeHistogram(values, bins) {
-    if (!values || !values.length) return { labels: [], counts: [] };
-    var min = Math.min.apply(null, values), max = Math.max.apply(null, values);
-    if (min === max) { min -= 1; max += 1; }
-    var w = (max - min) / bins, counts = new Array(bins).fill(0), labels = [];
-    for (var i = 0; i < bins; i++) labels.push((min + i * w).toFixed(1));
-    values.forEach(function (v) { counts[Math.min(bins - 1, Math.floor((v - min) / w))]++; });
-    return { labels: labels, counts: counts };
-  }
-
-  function findNearestIdx(epochs, dateStr) {
-    var target = new Date(dateStr).getTime();
-    var best = 0, bestDiff = Infinity;
-    epochs.forEach(function (e, i) {
-      var diff = Math.abs(new Date(e).getTime() - target);
-      if (diff < bestDiff) { bestDiff = diff; best = i; }
-    });
-    return best;
-  }
-
-  // ── Fetch all chart data ────────────────────────────────────────────────────
-  fetch('/pol/chart-data/' + SATNO)
-    .then(function (r) { return r.json(); })
-    .then(function (d) {
-
-      var eps = d.elements ? d.elements.epochs : [];
-
-      // ── Element sparklines ───────────────────────────────────────────────
-      if (d.elements) {
-        sparkLine('pol-alt-chart',    eps, d.elements.altitude,     '#3b8beb');
-        sparkLine('pol-inc-chart',    eps, d.elements.inclination,  '#22c55e');
-        sparkLine('pol-ecc-chart',    eps, d.elements.eccentricity, '#f59e0b');
-        sparkLine('pol-raan-chart',   eps, d.elements.raan,         '#a78bfa');
-      }
-
-      // ── Period sparkline (§6 side chart) ────────────────────────────────
-      if (d.elements && d.elements.period) {
-        sparkLine('pol-period-chart', eps, d.elements.period, '#e879f9');
-      }
-
-      // ── ΔV Timeline ─────────────────────────────────────────────────────
-      var dvCtx = document.getElementById('pol-dv-chart');
-      if (dvCtx && d.manoeuvres && d.manoeuvres.epochs.length) {
-        mkChart(dvCtx, {
-          type: 'bar',
-          data: {
-            labels: d.manoeuvres.epochs,
-            datasets: [{
-              data: d.manoeuvres.dvs_ms,
-              backgroundColor: d.manoeuvres.colors,
-              borderColor:     d.manoeuvres.colors,
-              borderWidth: 1, borderRadius: 2
-            }]
-          },
-          options: deepMerge(CHART_DEFAULTS, {
-            scales: { y: { title: { display: true, text: 'ΔV (m/s)', color: '#8899aa', font: { size: 9 } } } }
-          })
-        });
-        // Manual legend
-        var leg = document.createElement('div');
-        leg.style.cssText = 'display:flex;gap:0.8rem;flex-wrap:wrap;margin-top:0.3rem;font-size:0.6rem;color:#8899aa';
-        [['#3b8beb','Station Keeping'], ['#f59e0b','Plane Change'], ['#ef4444','Repositioning'], ['#6b7280','Unknown']].forEach(function (p) {
-          var s = document.createElement('span');
-          s.innerHTML = '<span style="display:inline-block;width:10px;height:3px;border-radius:2px;background:' + p[0] + ';margin-right:3px;vertical-align:middle"></span>' + p[1];
-          leg.appendChild(s);
-        });
-        dvCtx.parentNode.appendChild(leg);
-      } else if (dvCtx) {
-        dvCtx.parentNode.innerHTML += '<p class="empty-msg" style="font-size:0.68rem">No manoeuvres to chart.</p>';
-      }
-
-      // ── GEO Longitude Timeline ──────────────────────────────────────────
-      var lonCtx = document.getElementById('pol-lon-chart');
-      if (IS_GEO && lonCtx && d.geo && d.geo.longitude && d.geo.longitude.length) {
-        var geoEps  = d.geo.epochs;
-        var geoLons = d.geo.longitude;
-        var phases  = d.geo.drift_phases || [];
-
-        // Build segment color lookup from drift phases
-        var phaseRanges = phases.map(function (ph) {
-          return {
-            startIdx: findNearestIdx(geoEps, ph.start),
-            endIdx:   findNearestIdx(geoEps, ph.end),
-            direction: ph.direction
-          };
-        });
-
-        function segColorForIdx(idx) {
-          for (var i = 0; i < phaseRanges.length; i++) {
-            if (idx >= phaseRanges[i].startIdx && idx <= phaseRanges[i].endIdx) {
-              return phaseRanges[i].direction === 'EAST' ? '#22c55e' :
-                     phaseRanges[i].direction === 'WEST' ? '#ef4444' : '#6b7280';
-            }
-          }
-          return '#8899aa';
-        }
-
-        // Manoeuvre scatter points on longitude
-        var mnvLons = (d.manoeuvres && d.manoeuvres.lons) ? d.manoeuvres.lons : [];
-        var mnvEps  = (d.manoeuvres && d.manoeuvres.epochs) ? d.manoeuvres.epochs : [];
-        var scatterData = [];
-        mnvEps.forEach(function (e, i) {
-          if (mnvLons[i] !== null && mnvLons[i] !== undefined) {
-            scatterData.push({ x: e, y: mnvLons[i] });
-          }
-        });
-
-        mkChart(lonCtx, {
-          type: 'line',
-          data: {
-            labels: geoEps,
-            datasets: [
-              {
-                data: geoLons,
-                borderColor: '#8899aa',
-                borderWidth: 1.4,
-                pointRadius: 0,
-                fill: false,
-                tension: 0,
-                segment: {
-                  borderColor: function (ctx) { return segColorForIdx(ctx.p0DataIndex); }
-                }
-              },
-              {
-                type: 'scatter',
-                data: scatterData,
-                pointRadius: 5,
-                pointStyle: 'triangle',
-                backgroundColor: 'rgba(245,158,11,0.85)',
-                borderColor: '#f59e0b',
-                borderWidth: 1,
-                showLine: false
-              }
-            ]
-          },
-          options: deepMerge(CHART_DEFAULTS, {
-            scales: {
-              x: { type: 'category' },
-              y: { title: { display: true, text: 'Longitude (°)', color: '#8899aa', font: { size: 9 } } }
-            }
-          })
-        });
-      }
-
-      // ── Drift Rate Timeline ─────────────────────────────────────────────
-      var drCtx = document.getElementById('pol-drift-chart');
-      if (IS_GEO && drCtx && d.geo && d.geo.drift_rate && d.geo.drift_rate.length) {
-        var nonZero = d.geo.drift_rate.filter(function (v) { return v !== 0; });
-        if (nonZero.length > 0) {
-          mkChart(drCtx, {
-            type: 'line',
-            data: {
-              labels: d.geo.epochs,
-              datasets: [
-                { data: d.geo.drift_rate, borderColor: '#8899aa', borderWidth: 1,
-                  pointRadius: 0, fill: false, tension: 0,
-                  segment: { borderColor: function (ctx) {
-                    var v = d.geo.drift_rate[ctx.p0DataIndex] || 0;
-                    return v > 0.05 ? '#22c55e' : v < -0.05 ? '#ef4444' : '#6b7280';
-                  }}
-                },
-                // Zero reference line
-                { data: d.geo.epochs.map(function () { return 0; }),
-                  borderColor: 'rgba(255,255,255,0.15)', borderWidth: 1,
-                  borderDash: [4, 3], pointRadius: 0, fill: false }
-              ]
-            },
-            options: deepMerge(CHART_DEFAULTS, {
-              scales: {
-                y: { title: { display: true, text: '°/day', color: '#8899aa', font: { size: 9 } } }
-              }
-            })
-          });
-        }
-      }
-
-      // ── ΔV Histogram ────────────────────────────────────────────────────
-      var dvHistCtx = document.getElementById('pol-dv-hist');
-      if (dvHistCtx && d.manoeuvres && d.manoeuvres.dvs_ms && d.manoeuvres.dvs_ms.length >= 3) {
-        var hDv = makeHistogram(d.manoeuvres.dvs_ms, 10);
-        mkChart(dvHistCtx, {
-          type: 'bar',
-          data: { labels: hDv.labels,
-                  datasets: [{ data: hDv.counts, backgroundColor: 'rgba(59,139,235,0.6)',
-                               borderColor: '#3b8beb', borderWidth: 1, borderRadius: 2 }] },
-          options: deepMerge(CHART_DEFAULTS, {
-            scales: { x: { title: { display: true, text: 'ΔV (m/s)', color: '#8899aa', font: { size: 9 } } },
-                      y: { title: { display: true, text: 'Count',    color: '#8899aa', font: { size: 9 } } } }
-          })
-        });
-      }
-
-      // ── Interval Histogram ──────────────────────────────────────────────
-      var ivCtx = document.getElementById('pol-interval-hist');
-      if (ivCtx && d.manoeuvres && d.manoeuvres.epochs && d.manoeuvres.epochs.length >= 3) {
-        var mEps = d.manoeuvres.epochs;
-        var intervals = [];
-        for (var ii = 1; ii < mEps.length; ii++) {
-          intervals.push((new Date(mEps[ii]) - new Date(mEps[ii - 1])) / 86400000);
-        }
-        if (intervals.length >= 2) {
-          var hIv = makeHistogram(intervals, 10);
-          mkChart(ivCtx, {
-            type: 'bar',
-            data: { labels: hIv.labels,
-                    datasets: [{ data: hIv.counts, backgroundColor: 'rgba(34,197,94,0.6)',
-                                 borderColor: '#22c55e', borderWidth: 1, borderRadius: 2 }] },
-            options: deepMerge(CHART_DEFAULTS, {
-              scales: { x: { title: { display: true, text: 'Days', color: '#8899aa', font: { size: 9 } } },
-                        y: { title: { display: true, text: 'Count', color: '#8899aa', font: { size: 9 } } } }
-            })
-          });
-        }
-      }
-
-    })
-    .catch(function (e) { console.warn('PoL chart-data fetch failed:', e); });
-
-  // ── Sortable table helper ─────────────────────────────────────────────────
-  window.polSort = function (th) {
-    var table = th.closest('table');
-    var col   = th.cellIndex;
-    var asc   = th.dataset.dir !== 'asc';
-    table.querySelectorAll('th').forEach(function (h) { h.dataset.dir = ''; });
-    th.dataset.dir = asc ? 'asc' : 'desc';
-    var tbody = table.querySelector('tbody');
-    var rows  = Array.from(tbody.rows);
-    rows.sort(function (a, b) {
-      var av = (a.cells[col].dataset.val !== undefined ? a.cells[col].dataset.val : a.cells[col].textContent).trim();
-      var bv = (b.cells[col].dataset.val !== undefined ? b.cells[col].dataset.val : b.cells[col].textContent).trim();
-      var an = parseFloat(av), bn = parseFloat(bv);
-      if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
-      return asc ? av.localeCompare(bv) : bv.localeCompare(av);
-    });
-    rows.forEach(function (r) { tbody.appendChild(r); });
-    table.querySelectorAll('.hrr-sort-ind').forEach(function (s) { s.textContent = ''; });
-    th.querySelector('.hrr-sort-ind').textContent = asc ? ' ▲' : ' ▼';
-  };
-
-})();
-</script>
+{# Drawn by /static/js/pol.js from /pol/chart-data/<satno> (SPC-199). #}
+<span hidden data-init="pol-charts" data-satno="{{ pol.satno }}" data-geo="{{ 'true' if is_geo else 'false' }}"></span>

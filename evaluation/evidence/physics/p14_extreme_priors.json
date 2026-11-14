@@ -1,0 +1,82 @@
+{
+  "all_zero": {
+    "P": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "expected_value_pick": "manoeuvre",
+    "expected_value_pick_with_responses_reversed": "no_action",
+    "minimax_pick": "sensor_retask",
+    "objective_guidance": null,
+    "best_response_of_the_certain_row": null,
+    "page_mentions": {
+      "probability": false,
+      "no weight": false,
+      "all zero": false,
+      "unearned": false,
+      "has not earned": false
+    }
+  },
+  "all_one": {
+    "P": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "expected_value_pick": "manoeuvre",
+    "expected_value_pick_with_responses_reversed": "manoeuvre",
+    "minimax_pick": "sensor_retask",
+    "objective_guidance": null,
+    "best_response_of_the_certain_row": "sensor_retask",
+    "page_mentions": {
+      "probability": false,
+      "no weight": false,
+      "all zero": false,
+      "unearned": false,
+      "has not earned": false
+    }
+  },
+  "row0_one_rest_zero": {
+    "P": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "expected_value_pick": "sensor_retask",
+    "expected_value_pick_with_responses_reversed": "sensor_retask",
+    "minimax_pick": "sensor_retask",
+    "objective_guidance": null,
+    "best_response_of_the_certain_row": "sensor_retask",
+    "page_mentions": {
+      "probability": false,
+      "no weight": false,
+      "all zero": false,
+      "unearned": false,
+      "has not earned": false
+    }
+  },
+  "row3_one_rest_zero": {
+    "P": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "expected_value_pick": "manoeuvre",
+    "expected_value_pick_with_responses_reversed": "manoeuvre",
+    "minimax_pick": "sensor_retask",
+    "objective_guidance": null,
+    "best_response_of_the_certain_row": "manoeuvre",
+    "page_mentions": {
+      "probability": false,
+      "no weight": false,
+      "all zero": false,
+      "unearned": false,
+      "has not earned": false
+    }
+  }
+}

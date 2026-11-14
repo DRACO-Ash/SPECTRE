@@ -11,18 +11,27 @@ from __future__ import annotations
 from spectre.astro.pattern_of_life import parse_tle_history, parse_tle_history_counted
 
 _GOOD_A = (
-    "1 25544U 98067A   24001.00000000  .00001000  00000-0  10000-3 0  9990\n"
-    "2 25544  51.6400 100.0000 0001000  90.0000 270.0000 15.49000000 00001"
+    "1 25544U 98067A   24001.00000000  .00001000  00000-0  10000-3 0  9992\n"
+    "2 25544  51.6400 100.0000 0001000  90.0000 270.0000 15.49000000 00007"
 )
 _GOOD_B = (
-    "1 25544U 98067A   24003.00000000  .00001000  00000-0  10000-3 0  9990\n"
-    "2 25544  51.6400  90.0000 0001000  90.0000 270.0000 15.49000000 00002"
+    "1 25544U 98067A   24003.00000000  .00001000  00000-0  10000-3 0  9994\n"
+    "2 25544  51.6400  90.0000 0001000  90.0000 270.0000 15.49000000 00005"
 )
 # Columns 19-32 of line 1 hold the epoch; letters there cannot be a year.
 _CORRUPT_EPOCH = (
-    "1 25544U 98067A   XX002.00000000  .00001000  00000-0  10000-3 0  9990\n"
-    "2 25544  51.6400  95.0000 0001000  90.0000 270.0000 15.49000000 00003"
+    "1 25544U 98067A   XX002.00000000  .00001000  00000-0  10000-3 0  9997\n"
+    "2 25544  51.6400  95.0000 0001000  90.0000 270.0000 15.49000000 00000"
 )
+
+
+def _renumbered(tle: str, satno: str) -> str:
+    """*tle* for another object, both checksums made good, so only its number tells it apart."""
+    lines = []
+    for line in tle.splitlines():
+        body = line[:2] + satno + line[7:68]
+        lines.append(body + str(sum(int(c) if c.isdigit() else int(c == "-") for c in body) % 10))
+    return "\n".join(lines)
 
 
 def test_a_corrupt_epoch_drops_one_pair_and_is_counted() -> None:
@@ -50,12 +59,12 @@ class TestEveryDropIsCounted:
         assert (len(records), counts.bad_provenance) == (1, 1)
 
     def test_another_objects_element_set_is_skipped_and_counted(self) -> None:
-        other = _GOOD_B.replace("25544", "43013")
+        other = _renumbered(_GOOD_B, "43013")
         records, counts = parse_tle_history_counted("\n".join([_GOOD_A, other]), satno=25544)
         assert (len(records), counts.other_object) == (1, 1)
 
     def test_without_a_satno_nothing_is_filtered(self) -> None:
-        other = _GOOD_B.replace("25544", "43013")
+        other = _renumbered(_GOOD_B, "43013")
         records, counts = parse_tle_history_counted("\n".join([_GOOD_A, other]))
         assert (len(records), counts.other_object) == (2, 0)
 

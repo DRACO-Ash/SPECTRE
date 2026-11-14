@@ -53,6 +53,8 @@ _KM_S_ATTRIBUTES: tuple[str, ...] = (
     "delta_v_km_s", "predicted_delta_v_km_s", "total_delta_v",
     "dv_stats.mean", "dv_stats.std", "dv_stats.p95",
     "dv_stats.low_2sigma", "dv_stats.high_2sigma",
+    # The Decision Engine's burns (SPC-121, SPC-124): our budget, our burn's RIC parts, and a closing speed.
+    "budget_km_s", "delta_v_ric_km_s", "closing_speed_km_s",
 )
 
 #: The one deliberate exception, with its reason.
@@ -79,6 +81,14 @@ def _templates() -> list[Path]:
     return sorted(_TEMPLATES.rglob("*.html"))
 
 
+def _route_files() -> list[Path]:
+    return sorted(_ROUTES.glob("*.py"))
+
+
+def _non_astro_files() -> list[Path]:
+    return [path for directory in _NON_ASTRO_PY for path in sorted(directory.glob("*.py"))]
+
+
 def _rendered_lines(path: Path) -> list[tuple[int, str]]:
     """Lines of *path* with comment bodies blanked, numbering preserved."""
     text = path.read_text(encoding="utf-8")
@@ -88,16 +98,72 @@ def _rendered_lines(path: Path) -> list[tuple[int, str]]:
     return list(enumerate(blanked.splitlines(), 1))
 
 
+def _rel(path: Path) -> str:
+    """*path* as a failure names it: under the templates root, or by its name."""
+    return path.relative_to(_TEMPLATES).as_posix() if path.is_relative_to(_TEMPLATES) else path.name
+
+
+#: The detectors, each taking the files to read, so the guards below and the
+#: committed red cases in TestTheGuardsSeeKnownBadInput run the same code.
+_SCALING = re.compile(r"[*/]\s*1000(?:\.0+)?\b")
+_RENDERED_KM_S = re.compile(r'f"[^"]*km/s|f\'[^\']*km/s')
+
+
+def _km_s_on_screen(paths: list[Path]) -> list[str]:
+    """Each rendered template line showing km/s, outside the excused templates."""
+    return [
+        f"{_rel(path)}:{i}: {line.strip()[:110]}"
+        for path in paths if _rel(path) not in _ALLOWED_KM_S_TEMPLATES
+        for i, line in _rendered_lines(path) if "km/s" in line
+    ]
+
+
+def _km_s_formatted(paths: list[Path]) -> list[str]:
+    """Each Python line that formats a km/s label into an f-string."""
+    return [
+        f"{path.name}:{i}: {line.strip()[:110]}"
+        for path in paths
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if _RENDERED_KM_S.search(line)
+    ]
+
+
+def _template_scaling(paths: list[Path]) -> list[str]:
+    """Each rendered template line that multiplies or divides by a thousand."""
+    return [
+        f"{_rel(path)}:{i}: {line.strip()[:110]}"
+        for path in paths for i, line in _rendered_lines(path) if _SCALING.search(line)
+    ]
+
+
+def _relabelled(paths: list[Path]) -> list[str]:
+    """Each line labelling a km/s attribute m/s without scaling it."""
+    offenders: list[str] = []
+    for path in paths:
+        for i, line in _rendered_lines(path):
+            if "m/s" not in line or re.search(r"\*\s*1000(?:\.0+)?\b", line):
+                continue
+            # Anchored so "total_delta_v" does not match the already
+            # converted "total_delta_v_m_s".
+            named = [a for a in _KM_S_ATTRIBUTES if re.search(re.escape(a) + r"(?!\w)", line)]
+            if named:
+                offenders.append(f"{_rel(path)}:{i}: {', '.join(named)} -> {line.strip()[:90]}")
+    return offenders
+
+
+def _unnamed_scaling(paths: list[Path]) -> list[str]:
+    """Each Python line scaling by a thousand without naming km anywhere on it."""
+    return [
+        f"{path.name}:{i}: {line.strip()[:110]}"
+        for path in paths
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if _SCALING.search(line) and "km" not in line.lower()
+    ]
+
+
 class TestNoTemplateShowsKilometresPerSecond:
     def test_every_template_is_either_clean_or_explicitly_excused(self) -> None:
-        offenders: list[str] = []
-        for path in _templates():
-            rel = path.relative_to(_TEMPLATES).as_posix()
-            if rel in _ALLOWED_KM_S_TEMPLATES:
-                continue
-            for i, line in _rendered_lines(path):
-                if "km/s" in line:
-                    offenders.append(f"{rel}:{i}: {line.strip()[:110]}")
+        offenders = _km_s_on_screen(_templates())
         assert not offenders, (
             "these templates put km/s in front of an operator:\n  "
             + "\n  ".join(offenders)
@@ -118,16 +184,10 @@ class TestNoRouteFormatsKilometresPerSecond:
     """A km/s label in an f-string reaches the operator just as surely."""
 
     #: km/s inside a comment or docstring is documentation of the boundary and
-    #: is expected. Only rendered strings are in scope.
-    _RENDERED = re.compile(r'f"[^"]*km/s|f\'[^\']*km/s')
+    #: is expected. Only rendered strings are in scope (_RENDERED_KM_S).
 
     def test_no_route_renders_a_km_s_label(self) -> None:
-        offenders: list[str] = []
-        for directory in _NON_ASTRO_PY:
-            for path in sorted(directory.glob("*.py")):
-                for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                    if self._RENDERED.search(line):
-                        offenders.append(f"{path.name}:{i}: {line.strip()[:110]}")
+        offenders = _km_s_formatted(_non_astro_files())
         assert not offenders, (
             "these routes format a km/s label into operator-facing text:\n  "
             + "\n  ".join(offenders)
@@ -152,13 +212,7 @@ class TestNoTemplatePerformsUnitArithmetic:
     """
 
     def test_no_template_scales_by_a_thousand(self) -> None:
-        scaling = re.compile(r"[*/]\s*1000(?:\.0+)?\b")
-        offenders: list[str] = []
-        for path in _templates():
-            rel = path.relative_to(_TEMPLATES).as_posix()
-            for i, line in _rendered_lines(path):
-                if scaling.search(line):
-                    offenders.append(f"{rel}:{i}: {line.strip()[:110]}")
+        offenders = _template_scaling(_templates())
         assert not offenders, (
             "a template is converting units. Move it to the route boundary and "
             "pass the figure in already in m/s, so the conversion cannot happen "
@@ -180,27 +234,34 @@ class TestRelabellingIsNotConverting:
     """Changing the unit on the label without changing the number is 1000x wrong."""
 
     def test_every_km_s_attribute_shown_as_m_s_is_scaled(self) -> None:
-        offenders: list[str] = []
-        for path in _templates():
-            rel = path.relative_to(_TEMPLATES).as_posix()
-            for i, line in _rendered_lines(path):
-                if "m/s" not in line:
-                    continue
-                # Anchored so "total_delta_v" does not match the already
-                # converted "total_delta_v_m_s".
-                named = [
-                    a for a in _KM_S_ATTRIBUTES
-                    if re.search(re.escape(a) + r"(?!\w)", line)
-                ]
-                if not named:
-                    continue
-                if re.search(r"\*\s*1000(?:\.0+)?\b", line):
-                    continue
-                offenders.append(f"{rel}:{i}: {', '.join(named)} -> {line.strip()[:90]}")
+        offenders = _relabelled(_templates())
         assert not offenders, (
             "these lines label a km/s value as m/s without scaling it, so the "
             "number shown is a thousand times too small:\n  " + "\n  ".join(offenders)
         )
+
+
+class TestTheDecisionEngineBurnIsInMetresPerSecond:
+    """SPC-121 and SPC-124 carry new km/s figures from the astro package (63)."""
+
+    def test_the_new_km_s_attributes_are_guarded(self) -> None:
+        for name in ("budget_km_s", "delta_v_ric_km_s", "closing_speed_km_s"):
+            assert name in _KM_S_ATTRIBUTES, name
+
+    def test_the_burn_cell_and_its_drawing_are_in_m_s(self) -> None:
+        from spectre.domain.decision import evaluate_scenario
+        from spectre.web.decision_trajectory import trajectory_links
+        from tests.unit.test_decision_figure_basis import _render
+        from tests.unit.test_decision_response import _AVOID, _avoid, _computed_scenario, _hold
+
+        result = evaluate_scenario(_computed_scenario(_hold(), _avoid()))
+        cell = result.outcome_matrix[0][_AVOID]
+        assert cell.ca_response is not None
+        line = cell.ca_response.line
+        assert re.match(r"Our burn: 3\.\d\d m/s in-track \(retrograde\)", line), line
+        assert line in " ".join(_render(result).split()).replace("&#39;", "'")
+        link = trajectory_links(result)[0][_AVOID]
+        assert link is not None and link.dv_prograde == pytest.approx(cell.ca_response.delta_v_km_s * 1000.0)
 
 
 class TestTheConversionHappensExactlyOnce:
@@ -209,7 +270,7 @@ class TestTheConversionHappensExactlyOnce:
     def test_no_route_multiplies_a_metres_per_second_field_by_a_thousand(self) -> None:
         pattern = re.compile(r"delta_v_m_s\s*\*\s*1000|_m_s\s*\*\s*1000\b")
         offenders: list[str] = []
-        for path in sorted(_ROUTES.glob("*.py")):
+        for path in _route_files():
             for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 if pattern.search(line):
                     offenders.append(f"{path.name}:{i}: {line.strip()[:110]}")
@@ -243,15 +304,7 @@ class TestTheConversionHappensExactlyOnce:
         or out of the astro package, and every such crossing names km
         somewhere on the line. Anything else is an undeclared conversion.
         """
-        scaling = re.compile(r"[*/]\s*1000(?:\.0+)?\b")
-        offenders: list[str] = []
-        for path in sorted(_ROUTES.glob("*.py")):
-            for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                if not scaling.search(line):
-                    continue
-                if "km" in line.lower():
-                    continue
-                offenders.append(f"{path.name}:{i}: {line.strip()[:110]}")
+        offenders = _unnamed_scaling(_route_files())
         assert not offenders, (
             "these lines scale by 1000 without naming the km/s side, so it is "
             "impossible to tell a boundary conversion from a bug:\n  "
@@ -548,3 +601,58 @@ class TestEveryConvertedFigureIsActuallySupplied:
         assert "60" in html, "the converted radial rate is missing"
         assert "0.0601" not in html, "that is the km/s value reaching the screen"
         assert "60100" not in html, "that is the conversion applied twice"
+
+
+class TestTheGuardsSeeKnownBadInput:
+    """SPC-074: each detector above, run on a file planted with the defect it exists to catch.
+
+    A guard that silently stops matching passes every template in the tree, so
+    each of these goes red the moment its detector goes blind.
+    """
+
+    @staticmethod
+    def _plant(tmp_path: Path, name: str, text: str) -> list[Path]:
+        path = tmp_path / name
+        path.write_text(text, encoding="utf-8")
+        return [path]
+
+    def test_km_s_on_screen_is_seen_and_a_comment_is_not(self, tmp_path: Path) -> None:
+        planted = self._plant(tmp_path, "panel.html", "{# km/s,\n still a comment #}\n<td>{{ dv }} km/s</td>\n")
+        assert _km_s_on_screen(planted) == ["panel.html:3: <td>{{ dv }} km/s</td>"]
+
+    def test_a_km_s_label_in_an_f_string_is_seen_and_a_comment_is_not(self, tmp_path: Path) -> None:
+        planted = self._plant(tmp_path, "route.py", '# the astro side speaks km/s\nnote = f"{dv:.2f} km/s"\n')
+        assert _km_s_formatted(planted) == ['route.py:2: note = f"{dv:.2f} km/s"']
+
+    def test_a_template_doing_the_sum_is_seen(self, tmp_path: Path) -> None:
+        planted = self._plant(tmp_path, "sum.html", "<td>{{ dv * 1000 }}</td>\n<td>{{ dv / 1000.0 }}</td>\n<td>10000</td>\n")
+        assert [line.split(":")[1] for line in _template_scaling(planted)] == ["1", "2"]
+
+    def test_a_relabel_without_a_conversion_is_seen(self, tmp_path: Path) -> None:
+        planted = self._plant(tmp_path, "relabel.html", (
+            "<td>{{ burn_state.xd }} m/s</td>\n"
+            "<td>{{ burn_state.xd * 1000 }} m/s</td>\n"
+            "<td>{{ total_delta_v_m_s }} m/s</td>\n"
+        ))
+        assert _relabelled(planted) == ["relabel.html:1: burn_state.xd -> <td>{{ burn_state.xd }} m/s</td>"]
+
+    def test_a_scaling_that_names_no_km_is_seen(self, tmp_path: Path) -> None:
+        planted = self._plant(tmp_path, "route.py", "b_dv_ms = b_dv * 1000.0\ndv_m_s = dv_km_s * 1000.0\n")
+        assert _unnamed_scaling(planted) == ["route.py:1: b_dv_ms = b_dv * 1000.0"]
+
+    def test_the_guards_read_the_whole_console(self) -> None:
+        """A detector that still matches is no use if the scan finds no files: every check above passes on none.
+
+        The floors sit under today's 76 templates and 13 route modules, and the
+        named files are ones that render a burn, so a glob that stops matching
+        (or matches only a corner of the tree) goes red here.
+        """
+        templates = {path.relative_to(_TEMPLATES).as_posix() for path in _templates()}
+        assert len(templates) >= 70
+        assert {"partials/intercept_result.html", "partials/decision_results.html"} <= templates
+        routes = {path.name for path in _route_files()}
+        assert len(routes) >= 12
+        assert {"threat.py", "maneuver.py", "decision.py"} <= routes
+        scanned = {path.relative_to(_ROOT).as_posix() for path in _non_astro_files()}
+        assert {"spectre/web/routes/threat.py", "spectre/web/burn_view.py"} <= scanned
+        assert any(name.startswith("spectre/domain/") for name in scanned)

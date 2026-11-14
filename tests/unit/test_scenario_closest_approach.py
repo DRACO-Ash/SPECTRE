@@ -12,12 +12,16 @@ The reference here is independent of the planner: SGP4 sampled every
 
 from __future__ import annotations
 
+import inspect
 import math
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
+import pytest
 from sgp4.api import Satrec, jday
 
+from spectre.domain import scenario
 from spectre.domain.models import BlueAsset, RedTrack, RunConfig
 from spectre.domain.scenario import _ACCESS_RANGE_KM, ScenarioPlanner
 
@@ -87,3 +91,23 @@ def test_the_horizon_comes_from_the_run_config() -> None:
     short = _plan(1.0)
     assert short
     assert all(w.end <= _EPOCH + timedelta(hours=1) for w in short)
+
+
+def test_the_access_search_uses_the_shared_golden_section(monkeypatch: pytest.MonkeyPatch) -> None:
+    # One golden-section search in the tree (SPC-102): the access search
+    # delegates to spectre.astro.closest_approach rather than keeping a copy.
+    calls: list[tuple[float, float, float]] = []
+
+    def spy(f: Callable[[float], float], lo: float, hi: float, tolerance_s: float) -> tuple[float, float]:
+        calls.append((lo, hi, tolerance_s))
+        return 12.5, f(12.5)
+
+    class _StubPair:
+        def range_km(self, t: datetime) -> float:
+            return (t - _EPOCH).total_seconds() + 100.0
+
+    monkeypatch.setattr(scenario, "golden_minimum", spy)
+    tca, miss = scenario._closest(_StubPair(), _EPOCH, _EPOCH + timedelta(seconds=60))  # type: ignore[arg-type]
+    assert (tca, miss) == (_EPOCH + timedelta(seconds=12.5), 112.5)
+    assert calls == [(0.0, 60.0, scenario._TCA_TOLERANCE_S)]
+    assert "_GOLDEN" not in inspect.getsource(scenario)

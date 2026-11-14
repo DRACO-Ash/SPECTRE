@@ -1,0 +1,24 @@
+{
+  "strategy": "expected_value",
+  "tree_refusal": null,
+  "likelihood": [
+    "no burn",
+    "no burn"
+  ],
+  "picks": [
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      0
+    ]
+  ],
+  "update_lines": [
+    "The update after turn 1 rests on this likelihood model: what turn 1 lets us see of red is the bound red track's custody, as the sweep judges it, carried over turn 1 with each row's burn. Custody lost at a burn in the turn shows that red burnt, not which burn; custody held through it shows that red did not; custody lost for any other reason, or not read, shows nothing. Row 1, Hold course, gives no burn; row 2, Posture, gives no burn. Each row gives what it gives for certain, so rows that give the same thing are not told apart. It is the custody rule, not calibrated against any outcome, so the update is a lookup; the same rule reads turn 2 in a 3-turn tree.",
+    "The update says which turn-1 branch we are on, not what red does next: red's move in each later turn is weighed by the rows' P as entered, since nothing sourced says how its turn-1 move bears on its next.",
+    "You stated that turn 1 shows a burn, which no row gives under this likelihood model, so nothing was updated."
+  ],
+  "matrix_recommendation": "Hold"
+}

@@ -516,6 +516,31 @@ async def _ensure_cached(key: str) -> bool:
         return True
 
 
+#: The catalogue the threat sweep reads an object's entry from, and the column its number is in.
+_ENTRY_DATASET = "satcat"
+_ENTRY_NUMBER_COLUMN = "satcat"
+
+
+def catalogue_entry(satno: str | None) -> tuple[dict[str, str], datetime] | None:
+    """The object's SatCat row and when the cache fetched it, or None when it is not held.
+
+    Reads only what the cache already holds: the sweep must never wait on
+    planet4589.org, so an object is simply missing until an operator opens
+    or refreshes the catalogue (Threat Understanding, SPC-165).
+    """
+    cached = _CACHE.get(_ENTRY_DATASET)
+    if not satno or not cached:
+        return None
+    df: pd.DataFrame = cached["df"]
+    column = next((c for c in df.columns if str(c).strip().lower() == _ENTRY_NUMBER_COLUMN), None)
+    if column is None:
+        return None
+    match = df[df[column].astype(str).str.strip() == str(satno).strip()]
+    if match.empty:
+        return None
+    return {str(k): str(v) for k, v in match.iloc[0].items()}, cached["fetched_at"]
+
+
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
 def _panel_context(user: User) -> dict[str, Any]:

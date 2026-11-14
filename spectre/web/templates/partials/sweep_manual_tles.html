@@ -34,15 +34,10 @@
         {% endif %}
       </td>
       <td style="padding:0.3rem 0.4rem; color:var(--text-dim); font-family:monospace">
-        {# Extract NORAD from TLE line 1 for display #}
-        {% set lines = m.tle.strip().split('\n') %}
-        {% set norad = "" %}
-        {% for line in lines %}
-          {% if line.strip().startswith('1 ') and line.strip()|length >= 7 %}
-            {% set norad = line.strip()[2:7] %}
-          {% endif %}
-        {% endfor %}
-        {{ norad if norad else "—" }}
+        {# The number the sweep uses, from the one reader (SPC-026). A set
+           inside the loop never reached this cell, so it always showed blank. #}
+        {% set norad = m.tle | satno %}
+        {{ norad if norad is not none else "unreadable" }}
       </td>
       <td style="padding:0.3rem 0.4rem; text-align:right">
         <button class="btn-secondary btn-sm"

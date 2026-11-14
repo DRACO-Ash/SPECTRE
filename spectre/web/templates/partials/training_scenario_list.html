@@ -60,7 +60,7 @@
             hx-get="/training/scenario/{{ s.id }}"
             hx-target="#scenario-detail"
             hx-swap="innerHTML"
-            hx-on::after-request="setTimeout(function(){ var el=document.getElementById('scenario-detail'); if(el) el.scrollIntoView({behavior:'smooth', block:'start'}); }, 100)">
+            data-after-request="scrollScenarioDetail">
       View &amp; Load
     </button>
     {% else %}

@@ -78,12 +78,23 @@ upstream data services (UDL, GCAT), which their operators secure.
 | Sign-in throttling | Limits per client address and per username | `spectre/web/routes/login.py`, `spectre/web/rate_limit.py` |
 | UDL call throttling | Limits on UDL authentication, data and sync calls | `spectre/web/rate_limit.py` |
 | Compute bounds | Monte Carlo horizon at most 720 hours, photometry CSV at most 512 KiB, and a per-operator limit shared by both | `spectre/web/routes/pol.py`, `spectre/web/rate_limit.py` |
-| Security headers | Content Security Policy with no third-party hosts, nosniff, frame restrictions, HSTS over HTTPS | `spectre/web/app.py` |
+| Security headers | Content Security Policy with no third-party hosts and `script-src 'self'` alone (no inline script, no handler attribute, no eval), nosniff, frame restrictions, HSTS over HTTPS | `spectre/web/app.py`, `spectre/web/static/js/` |
 | Log injection | Operator-supplied values are neutralised before logging | `spectre/web/log_safety.py` |
 | Administration | Admin-only routes; the last admin cannot be removed, even by concurrent changes | `spectre/web/routes/admin.py` |
 
 `spectre/web/app.py` records, beside the policy, what the Content Security
-Policy does not stop: `script-src` still allows inline script.
+Policy allows and why. Since SPC-199 (evaluation finding F-08) `script-src` is
+`'self'` alone: every script is a first-party file under
+`spectre/web/static/js` or a vendored library, no template carries an inline
+script, an event-handler attribute or an `hx-on` attribute, and htmx runs with
+`allowEval` and `allowScriptTags` off. An injected inline script or handler is
+refused by the browser. The policy does not stop injected markup: an element
+carrying htmx attributes still sends a same-origin request with the CSRF token
+it inherits from `<body>`, so output escaping remains the control against that
+(T9 in the threat model). `style-src` still allows inline style, and frames are
+limited to the console itself for the training page. The engine's draft threat
+model is `docs/threat-model-decision-engine.md`, for the security lead to
+review and sign.
 
 ## Network exposure
 
@@ -104,6 +115,34 @@ marked `UNCLASS // PAIR` in the file, by the owner's ruling of 24 October 2026.
 ● The application holds personal data: operator accounts (username, bcrypt
 password hash, role) and log lines recording usernames and client addresses on
 sign-in attempts. That brings it within UK GDPR; see the open items.
+
+● Decision records (SPC-192) hold the username that ran each Decision Engine
+evaluation and operator-typed free text: the scenario's name, the response names,
+the rationale and the reason a response is not permitted (SPC-195). No retention is applied: how long they are kept, and who may
+read them beyond the operator and admins, is the owner's decision as data
+protection lead. A deleted account's records are kept under its username; that
+is Claude's design choice, awaiting the owner's ruling.
+
+● Since 0.28.0 each decision record also holds the evaluation's stored inputs
+(SPC-193, evaluation finding F-02), so a recommendation can be replayed from
+the record alone: the whole scenario, with the full text of each bound element
+set as it was read (UDL data included, with its data mode), its epoch, age,
+limit and custody, every manoeuvre hypothesis with its seed, each applied NOTSO
+suggestion and the sweep's Threat picture, with the rule and every composite
+score, as one canonical JSON document and its SHA-256. This reverses 0.27.0's
+"no element-set text" and is Claude's choice, not a ruling: the record is held
+in the deployment's own database, as the NOTSO cache is already held, under the
+owner's rulings of 24 and 28 October 2026 that holding cached data is
+acceptable. A record also keeps the deployment's primary rule
+(`SPECTRE_PRIMARY_RULE`, SPC-194) and whether the rule used differed. The
+owner's open retention ruling (SPC-228) now covers the stored inputs too.
+`scripts/replay_decision.py` reads a record from the configured database and
+writes nothing: it opens a SQLite database read-only and does not create one
+that is not there. Each stored document's SHA-256 sits in the same row as its
+text, so it shows accidental change only; the replay also sets the document
+against the record's own rule, code version and input hash columns, so an edit
+that rehashes the document still shows, unless every column is edited to
+match.
 
 ● UDL credentials are held in memory for one sign-in only, never shared with
 another sign-in of the same account, cleared on logout, password change and
@@ -126,7 +165,7 @@ Owner for all items: Ashley Higgins, unless reassigned.
 | Property-based tests | None; `hypothesis` is not used |
 | Structured JSON logging | `spectre/app_logging/config.py` defines it, but the web application never calls it |
 | CONTRIBUTING.md | Absent |
-| Data protection | Operator accounts and sign-in logs are personal data; a DPIA screening and a retention period for logs are due |
+| Data protection | Operator accounts, sign-in logs and decision records are personal data; a DPIA screening, a retention period for logs and for decision records, their stored inputs included (SPC-228), and a ruling on keeping a deleted account's decision records are due |
 
 ## Incident response
 

@@ -1,0 +1,430 @@
+# Command: PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python -m pytest -p no:cacheprovider -o addopts="" -q -rA evaluation/probes/test_p1[1-4]_*.py
+# Run from /home/user/SPECTRE at 2026-11-06T16:15:30Z; HEAD bd6eedb; python Python 3.13.17
+..F.FF.F..FF..FF                                                         [100%]
+=================================== FAILURES ===================================
+________________ test_p13_production_rk45_against_tight_dop853 _________________
+
+    def test_p13_production_rk45_against_tight_dop853() -> None:
+        rows = _case("LEO coplanar_leo blue (about 500 km)", COPLANAR_LEO.blue_tle)
+        rows += _case("GEO geo_drift_in blue", GEO_DRIFT_IN.blue_tle)
+        _EVIDENCE.mkdir(parents=True, exist_ok=True)
+        with _CSV.open("w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"\nP-13 production RK45 rtol {mc.RK45_RTOL} atol {mc.RK45_ATOL}; reference DOP853 rtol 1e-12 atol 1e-14; "
+              f"self-check DOP853 rtol 1e-13 atol 1e-15")
+        for r in rows:
+            print(
+                f"P-13 {r['case']} ({r['regime']}, {r['altitude_km']} km, B* {r['bstar']}, m/CdA {r['ballistic_kg_m2']}) "
+                f"{r['horizon_h']:g} h: end-point RK45 vs ref {r['endpoint_rk45_vs_ref_km']:.3e} km "
+                f"({r['endpoint_rk45_vs_ref_vel_m_s']:.3e} m/s); dense RK45 at horizon {r['dense_rk45_at_horizon_vs_ref_km']:.3e} "
+                f"km, max over arc {r['dense_rk45_max_over_arc_km']:.3e} km; reference self-check {r['ref_self_check_km']:.1e} km; "
+                f"element-set model error at this age {r['elset_model_error_km_at_age']:.1f} km; "
+                f"context, RK45 vs SGP4 from same start {r['context_rk45_vs_sgp4_km']:.2f} km"
+            )
+        print(f"P-13 table written to {_CSV}")
+        pairs = [
+            _pair("coplanar_leo (10 km apart, one plane)", COPLANAR_LEO.red_tle, COPLANAR_LEO.blue_tle),
+            _pair("plane_change (crossing planes, one altitude)", PLANE_CHANGE.red_tle, PLANE_CHANGE.blue_tle),
+            _pair("dissimilar (800 km at 98 deg against 500 km at 51.6 deg)", _DISSIMILAR_RED, COPLANAR_LEO.blue_tle),
+        ]
+        with (_EVIDENCE / "p13_rk45_separation.csv").open("w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=list(pairs[0]))
+            writer.writeheader()
+            writer.writerows(pairs)
+        for p in pairs:
+            print("P-13 separation " + "; ".join(f"{k} {v:.3e}" if isinstance(v, float) else f"{v}" for k, v in p.items()))
+        problems = []
+        for r in rows:
+            tag = f"{r['case']} {r['horizon_h']:g} h"
+            if r["ref_self_check_km"] >= 1e-3:
+                problems.append(f"{tag}: reference not converged")
+            if r["dense_rk45_max_over_arc_km"] >= 0.1:
+                problems.append(f"{tag}: absolute RK45 error {r['dense_rk45_max_over_arc_km']:.3f} km >= 0.1 km")
+            if r["dense_rk45_max_over_arc_km"] >= 0.1 * float(r["elset_model_error_km_at_age"]):
+                problems.append(f"{tag}: absolute RK45 error >= 10 % of the element-set model error")
+        for p in pairs:
+            if p["max_sep_error_km_72h"] >= 0.1:
+                problems.append(f"{p['pair']}: separation error {p['max_sep_error_km_72h']:.3f} km >= 0.1 km at 72 h")
+        print("P-13 expectation violations: " + ("; ".join(problems) if problems else "none"))
+>       assert not problems, problems
+E       AssertionError: ['LEO coplanar_leo blue (about 500 km) 48 h: absolute RK45 error 0.285 km >= 0.1 km', 'LEO coplanar_leo blue (about 50...km >= 0.1 km', 'dissimilar (800 km at 98 deg against 500 km at 51.6 deg): separation error 0.353 km >= 0.1 km at 72 h']
+E       assert not ['LEO coplanar_leo blue (about 500 km) 48 h: absolute RK45 error 0.285 km >= 0.1 km', 'LEO coplanar_leo blue (about 50...km >= 0.1 km', 'dissimilar (800 km at 98 deg against 500 km at 51.6 deg): separation error 0.353 km >= 0.1 km at 72 h']
+
+evaluation/probes/test_p13_rk45_tolerance.py:166: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+P-13 production RK45 rtol 1e-08 atol 1e-10; reference DOP853 rtol 1e-12 atol 1e-14; self-check DOP853 rtol 1e-13 atol 1e-15
+P-13 LEO coplanar_leo blue (about 500 km) (LEO, 500.7 km, B* 0.0001, m/CdA 784.8) 48 h: end-point RK45 vs ref 2.846e-01 km (3.153e-01 m/s); dense RK45 at horizon 2.846e-01 km, max over arc 2.846e-01 km; reference self-check 2.3e-07 km; element-set model error at this age 5.0 km; context, RK45 vs SGP4 from same start 0.74 km
+P-13 LEO coplanar_leo blue (about 500 km) (LEO, 500.7 km, B* 0.0001, m/CdA 784.8) 72 h: end-point RK45 vs ref 6.525e-01 km (7.214e-01 m/s); dense RK45 at horizon 6.525e-01 km, max over arc 6.525e-01 km; reference self-check 8.1e-07 km; element-set model error at this age 7.0 km; context, RK45 vs SGP4 from same start 3.15 km
+P-13 GEO geo_drift_in blue (GEO, 35785.5 km, B* 0.0001, m/CdA 784.8) 48 h: end-point RK45 vs ref 4.248e-03 km (3.007e-04 m/s); dense RK45 at horizon 4.239e-03 km, max over arc 4.239e-03 km; reference self-check 1.4e-07 km; element-set model error at this age 4.0 km; context, RK45 vs SGP4 from same start 11.31 km
+P-13 GEO geo_drift_in blue (GEO, 35785.5 km, B* 0.0001, m/CdA 784.8) 72 h: end-point RK45 vs ref 1.475e-02 km (1.070e-03 m/s); dense RK45 at horizon 1.475e-02 km, max over arc 1.475e-02 km; reference self-check 1.9e-07 km; element-set model error at this age 5.0 km; context, RK45 vs SGP4 from same start 17.91 km
+P-13 table written to /home/user/SPECTRE/evaluation/evidence/physics/p13_rk45_tolerance.csv
+P-13 separation coplanar_leo (10 km apart, one plane); max_sep_error_km_48h 3.839e-04; min_sep_ref_km_48h 1.001e+01; min_sep_error_km_48h 4.998e-08; max_sep_error_km_72h 1.045e-03; min_sep_ref_km_72h 1.001e+01; min_sep_error_km_72h 4.998e-08
+P-13 separation plane_change (crossing planes, one altitude); max_sep_error_km_48h 1.897e-02; min_sep_ref_km_48h 1.041e+01; min_sep_error_km_48h 7.772e-05; max_sep_error_km_72h 4.365e-02; min_sep_ref_km_72h 1.041e+01; min_sep_error_km_72h 7.772e-05
+P-13 separation dissimilar (800 km at 98 deg against 500 km at 51.6 deg); max_sep_error_km_48h 1.603e-01; min_sep_ref_km_48h 3.024e+02; min_sep_error_km_48h 0.000e+00; max_sep_error_km_72h 3.532e-01; min_sep_ref_km_72h 3.024e+02; min_sep_error_km_72h 0.000e+00
+P-13 expectation violations: LEO coplanar_leo blue (about 500 km) 48 h: absolute RK45 error 0.285 km >= 0.1 km; LEO coplanar_leo blue (about 500 km) 72 h: absolute RK45 error 0.652 km >= 0.1 km; dissimilar (800 km at 98 deg against 500 km at 51.6 deg): separation error 0.353 km >= 0.1 km at 72 h
+__________________ test_p14_deep_space_geo_pair_red_and_blue ___________________
+
+    def test_p14_deep_space_geo_pair_red_and_blue() -> None:
+        data = _deep_case("geo_pair", GEO_DRIFT_IN.red_tle, GEO_DRIFT_IN.blue_tle, 24.0)
+        assert data["red_method"] == "d" and data["blue_method"] == "d"
+>       assert any(data["page_mentions"].values()), "deep-space objects evaluated with no flag naming the regime"
+E       AssertionError: deep-space objects evaluated with no flag naming the regime
+E       assert False
+E        +  where False = any(dict_values([False, False, False, False, False, False]))
+E        +    where dict_values([False, False, False, False, False, False]) = <built-in method values of dict object at 0x7f7ec9f30d80>()
+E        +      where <built-in method values of dict object at 0x7f7ec9f30d80> = {'SDP4': False, 'deep space': False, 'deep-space': False, 'lunar': False, ...}.values
+
+evaluation/probes/test_p14_edge_inputs.py:202: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+P-14 deep_space_geo_pair: {"label": "geo_pair", "red_method": "d", "blue_method": "d", "red_period_min": 1434.5, "blue_period_min": 1436.1, "red_regime": "GEO", "blue_regime": "GEO", "red_limit_hours": 72.0, "blue_limit_hours": 72.0, "recommendation": "sensor_retask", "strategy": "minimax", "composite_scores": [[0.296333, 0.2915, 0.549867, 0.564833], [0.297887, 0.292054, 0.30622, 0.320387], [0.297887, 0.292054, 0.30622, 0.320387], [0.297887, 0.292054, 0.30622, 0.320387]], "closest_approach_km": [[400.0, 200.0, 360.0, 200.0], [89.3, 89.3, 89.3, 89.3], [89.3, 89.3, 89.3, 89.3], [89.3, 89.3, 89.3, 89.3]], "bases": [["lookup", "lookup", "lookup", "lookup"], ["computed", "computed", "computed", "computed"], ["computed", "computed", "computed", "computed"], ["computed", "computed", "computed", "computed"]], "modelled_banner": true, "basis_lines": ["Custody: lookup in every cell.", "Custody gap: lookup in every cell.", "Closest approach: lookup in 4 of 16 cells, computed in 12.", "Time to closest approach: lookup in 4 of 16 cells, computed in 12.", "Our delta-V: lookup in 7 of 16 cells, computed in 9.", "Score: lookup in every cell."], "row_notes": [], "cell_refusals": ["Not computed: a manoeuvre with no hypothesis names no burn, and propagating the orbit as it stands would show only where it goes if it does not move. Add a manoeuvre hypothesis to sample this row. This cell's closest approach is a lookup."], "binding_sentences": ["Orbit current: 0.0 h old at evaluation, limit 72 h.", "Orbit current: 0.0 h old at evaluation, limit 72 h."], "computed_caveat": "Computed cells propagate both bound orbits with SGP4 as their element sets stand, with no burn: where the pair goes if the red track does not move, so every row whose action does not move it shares one figure. Our response is not applied to the blue orbit yet, so every response in a computed row has the same closest approach, and the ranking within it is decided by lookup figures. Element-set error, which the sweep takes as 1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, is not in it.", "searched_span_note": null, "objective_guidance": null, "page_mentions": {"SDP4": false, "deep space": false, "deep-space": false, "lunar": false, "solar": false, "envelope": false}}
+_______________ test_p14_deep_space_molniya_red_against_leo_blue _______________
+
+    def test_p14_deep_space_molniya_red_against_leo_blue() -> None:
+        molniya = _redate(_ver("08195"))
+        data = _deep_case("molniya_red", molniya, PLANE_CHANGE.blue_tle, 6.0)
+        assert data["red_method"] == "d"
+>       assert any(data["page_mentions"].values()), "a deep-space red evaluated with no flag naming the regime"
+E       AssertionError: a deep-space red evaluated with no flag naming the regime
+E       assert False
+E        +  where False = any(dict_values([False, False, False, False, False, False]))
+E        +    where dict_values([False, False, False, False, False, False]) = <built-in method values of dict object at 0x7f7ec9da2dc0>()
+E        +      where <built-in method values of dict object at 0x7f7ec9da2dc0> = {'SDP4': False, 'deep space': False, 'deep-space': False, 'lunar': False, ...}.values
+
+evaluation/probes/test_p14_edge_inputs.py:209: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+P-14 deep_space_molniya_red: {"label": "molniya_red", "red_method": "d", "blue_method": "n", "red_period_min": 718.2, "blue_period_min": 95.6, "red_regime": "HEO", "blue_regime": "LEO", "red_limit_hours": 24.0, "blue_limit_hours": 24.0, "recommendation": "manoeuvre", "strategy": "minimax", "composite_scores": [[0.321333, 0.329, 0.599867, 0.627333], [0.233175, 0.239842, 0.266509, 0.293175], [0.233175, 0.239842, 0.266509, 0.293175], [0.233175, 0.239842, 0.266509, 0.293175]], "closest_approach_km": [[400.0, 200.0, 360.0, 200.0], [18031.6, 18031.6, 18031.6, 18031.6], [18031.6, 18031.6, 18031.6, 18031.6], [18031.6, 18031.6, 18031.6, 18031.6]], "bases": [["lookup", "lookup", "lookup", "lookup"], ["computed", "computed", "computed", "computed"], ["computed", "computed", "computed", "computed"], ["computed", "computed", "computed", "computed"]], "modelled_banner": true, "basis_lines": ["Custody: lookup in every cell.", "Custody gap: lookup in every cell.", "Closest approach: lookup in 4 of 16 cells, computed in 12.", "Time to closest approach: lookup in 4 of 16 cells, computed in 12.", "Our delta-V: lookup in 7 of 16 cells, computed in 9.", "Score: lookup in every cell."], "row_notes": [], "cell_refusals": ["Not computed: a manoeuvre with no hypothesis names no burn, and propagating the orbit as it stands would show only where it goes if it does not move. Add a manoeuvre hypothesis to sample this row. This cell's closest approach is a lookup."], "binding_sentences": ["Orbit current: 0.0 h old at evaluation, limit 24 h.", "Orbit current: 0.0 h old at evaluation, limit 24 h."], "computed_caveat": "Computed cells propagate both bound orbits with SGP4 as their element sets stand, with no burn: where the pair goes if the red track does not move, so every row whose action does not move it shares one figure. Our response is not applied to the blue orbit yet, so every response in a computed row has the same closest approach, and the ranking within it is decided by lookup figures. Element-set error, which the sweep takes as 1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, is not in it.", "searched_span_note": null, "objective_guidance": null, "page_mentions": {"SDP4": false, "deep space": false, "deep-space": false, "lunar": false, "solar": false, "envelope": false}}
+_________ test_p14_decayed_before_the_scenario_between_perigee_errors __________
+
+    def test_p14_decayed_before_the_scenario_between_perigee_errors() -> None:
+        """The same element set, the scenario starting 70 minutes after its epoch, over 1 h.
+    
+        SGP4 raises its decay code only while the radius is under one Earth radius, so between perigee passes it
+        returns states again. The window 70 to 130 minutes holds no error instant.
+        """
+        tle = _decaying()
+        start = EPOCH + timedelta(minutes=70)
+        binding = _bind(tle, PLANE_CHANGE.blue_tle, start)
+        scenario = dataclasses.replace(_scenario(binding=binding, horizon_hours=1.0), epoch_utc=start)
+        result = evaluate_scenario(scenario, sampler=_never)
+        page = _page(result)
+        orbit = TLEOrbit(tle)
+        alts = [orbit.propagate(start + timedelta(minutes=m)).altitude_km for m in range(61)]
+        data = {"decay_error_minutes": _decay_map(tle, 240), "red_age_hours": binding.red.age_hours,
+                "red_freshness": binding.red.freshness.value,
+                "red_altitude_km_min_max_in_window": [min(alts), max(alts)],
+                **_flags(result),
+                "page_mentions": _mentions(page, ("decay", "re-ent", "reentry", "below the surface", "below 100 km",
+                                                  "Karman"))}
+        _record("decayed_before_scenario", data, page)
+        computed = [b for row in data["bases"] for b in row if b == "computed"]
+        about_red = [r for r in data["cell_refusals"] if "red element set" in r or "decay" in r]
+>       assert not computed or about_red or any(data["page_mentions"].values()), (
+            "a decayed object yielded a computed closest approach with no flag"
+        )
+E       AssertionError: a decayed object yielded a computed closest approach with no flag
+E       assert (not ['computed', 'computed', 'computed', 'computed', 'computed', 'computed', ...] or [] or False)
+E        +  where False = any(dict_values([False, False, False, False, False, False]))
+E        +    where dict_values([False, False, False, False, False, False]) = <built-in method values of dict object at 0x7f7ec9f07e40>()
+E        +      where <built-in method values of dict object at 0x7f7ec9f07e40> = {'decay': False, 're-ent': False, 'reentry': False, 'below the surface': False, ...}.values
+
+evaluation/probes/test_p14_edge_inputs.py:268: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+P-14 decayed_before_scenario: {"decay_error_minutes": [[52, 69], [139, 156], [226, 240]], "red_age_hours": 1.1666666666666667, "red_freshness": "current", "red_altitude_km_min_max_in_window": [5.035522946845049, 319.78363903227546], "recommendation": "sensor_retask", "strategy": "minimax", "composite_scores": [[0.388, 0.379, 0.6332, 0.644], [0.386785, 0.376785, 0.386785, 0.396785], [0.386785, 0.376785, 0.386785, 0.396785], [0.386785, 0.376785, 0.386785, 0.396785]], "closest_approach_km": [[400.0, 200.0, 360.0, 200.0], [643.1, 643.1, 643.1, 643.1], [643.1, 643.1, 643.1, 643.1], [643.1, 643.1, 643.1, 643.1]], "bases": [["lookup", "lookup", "lookup", "lookup"], ["computed", "computed", "computed", "computed"], ["computed", "computed", "computed", "computed"], ["computed", "computed", "computed", "computed"]], "modelled_banner": true, "basis_lines": ["Custody: lookup in every cell.", "Custody gap: lookup in every cell.", "Closest approach: lookup in 4 of 16 cells, computed in 12.", "Time to closest approach: lookup in 4 of 16 cells, computed in 12.", "Our delta-V: lookup in 7 of 16 cells, computed in 9.", "Score: lookup in every cell."], "row_notes": [], "cell_refusals": ["Not computed: a manoeuvre with no hypothesis names no burn, and propagating the orbit as it stands would show only where it goes if it does not move. Add a manoeuvre hypothesis to sample this row. This cell's closest approach is a lookup."], "binding_sentences": ["Orbit current: 1.2 h old at evaluation, limit 24 h.", "Orbit current: 1.2 h old at evaluation, limit 24 h."], "computed_caveat": "Computed cells propagate both bound orbits with SGP4 as their element sets stand, with no burn: where the pair goes if the red track does not move, so every row whose action does not move it shares one figure. Our response is not applied to the blue orbit yet, so every response in a computed row has the same closest approach, and the ranking within it is decided by lookup figures. Element-set error, which the sweep takes as 1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, is not in it.", "searched_span_note": null, "objective_guidance": null, "page_mentions": {"decay": false, "re-ent": false, "reentry": false, "below the surface": false, "below 100 km": false, "Karman": false}}
+______________ test_p14_all_weights_zero_and_missing_form_fields _______________
+
+    def test_p14_all_weights_zero_and_missing_form_fields() -> None:
+        """Every weight 0 (each is a valid fraction, and the web layer leaves all-zero weights as given), and what the
+        web layer does with a weight or a row value the form does not send."""
+        from spectre.web.routes import decision as route
+    
+        base = _scenario()
+        zero = dataclasses.replace(base, w_custody=0.0, w_closest_approach=0.0, w_dv_cost=0.0, w_time_to_exec=0.0,
+                                   w_reversibility=0.0)
+        result = evaluate_scenario(zero, sampler=_never)
+        reordered = evaluate_scenario(_three(zero), sampler=_never)
+        page = _page(result)
+        columns = route._AdversaryColumns(  # noqa: SLF001
+            ids=["A0", "A1"], names=["one", "two"], types=["manoeuvre", "no_action"], probs=[0.9], confs=[0.8], gaps=[],
+        )
+        rows = route._adversary_rows(columns, [None, None])  # noqa: SLF001
+        inputs = route._Inputs()  # noqa: SLF001
+        inputs.number("", "each scoring weight")
+        blank = inputs.problem
+        data = {
+            **_flags(result),
+            "recommendation_with_responses_reversed": reordered.robust_best_response.name,
+            "page_mentions": _mentions(page, ("all zero", "every weight", "weights are 0", "no weight", "a tie", "tied")),
+            "normalised_all_zero_weights": route._normalised_weights(0.0, 0.0, 0.0, 0.0, 0.0),  # noqa: SLF001
+            "form_default_weights_when_field_absent": {
+                k: route._ScenarioForm.model_fields[k].default for k in ("w_custody", "w_ca", "w_dv", "w_time", "w_rev")  # noqa: SLF001
+            },
+            "blank_weight_field": blank,
+            "row_2_probability_when_form_sends_one_value": rows[1].probability,
+            "row_2_confidence_when_form_sends_one_value": rows[1].confidence,
+            "row_1_and_2_custody_gap_when_form_sends_none": [r.custody_gap_fraction for r in rows],
+        }
+        _record("weights_zero_and_missing_fields", data, page)
+        flagged = any(data["page_mentions"].values()) or data["objective_guidance"]
+>       assert flagged or data["recommendation"] == data["recommendation_with_responses_reversed"], (
+            "all-zero weights give a recommendation set by row order, with no flag"
+        )
+E       AssertionError: all-zero weights give a recommendation set by row order, with no flag
+E       assert (None or 'manoeuvre' == 'no_action'
+E         
+E         - no_action
+E         + manoeuvre)
+
+evaluation/probes/test_p14_edge_inputs.py:350: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+P-14 weights_zero_and_missing_fields: {"recommendation": "manoeuvre", "strategy": "minimax", "composite_scores": [[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]], "closest_approach_km": [[400.0, 200.0, 360.0, 200.0], [20000.0, 10000.0, 18000.0, 10000.0], [6000.0, 3000.0, 5400.0, 3000.0], [10000.0, 5000.0, 9000.0, 5000.0]], "bases": [["lookup", "lookup", "lookup", "lookup"], ["lookup", "lookup", "lookup", "lookup"], ["lookup", "lookup", "lookup", "lookup"], ["lookup", "lookup", "lookup", "lookup"]], "modelled_banner": true, "basis_lines": ["Every figure in every cell is a lookup."], "row_notes": [], "cell_refusals": [], "binding_sentences": [], "computed_caveat": null, "searched_span_note": null, "objective_guidance": null, "recommendation_with_responses_reversed": "no_action", "page_mentions": {"all zero": false, "every weight": false, "weights are 0": false, "no weight": false, "a tie": false, "tied": false}, "normalised_all_zero_weights": [0.0, 0.0, 0.0, 0.0, 0.0], "form_default_weights_when_field_absent": {"w_custody": "0.35", "w_ca": "0.25", "w_dv": "0.20", "w_time": "0.10", "w_rev": "0.10"}, "blank_weight_field": "Enter a number for each scoring weight.", "row_2_probability_when_form_sends_one_value": 0.5, "row_2_confidence_when_form_sends_one_value": 0.5, "row_1_and_2_custody_gap_when_form_sends_none": [0.7, 0.7]}
+_____________________ test_p14_nan_lookup_figure_injected ______________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f7eca0076f0>
+
+    def test_p14_nan_lookup_figure_injected(monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fault injection: the manoeuvre row's lookup closest approach set to NaN for this test only."""
+        monkeypatch.setitem(decision._BASE_CA_KM, ActionType.MANOEUVRE, float("nan"))  # noqa: SLF001
+        base = _scenario()
+        outcome: dict[str, Any] = {}
+        try:
+            result = evaluate_scenario(base, sampler=_never)
+            reordered = evaluate_scenario(_three(base), sampler=_never)
+            page = _page(result)
+            outcome = {**_flags(result), "recommendation_with_responses_reversed": reordered.robust_best_response.name,
+                       "nan_printed_on_page": " nan " in f" {page.lower()} ",
+                       "page_mentions": _mentions(page, ("not a number", "missing", "invalid", "undefined"))}
+            outcome["exception"] = None
+        except Exception as exc:  # noqa: BLE001  recorded, it is the observation
+            page = None
+            outcome["exception"] = f"{type(exc).__name__}: {exc}"
+        _record("nan_lookup_injected", outcome, page)
+>       assert outcome["exception"] or any(outcome["page_mentions"].values()), "a NaN lookup was scored silently"
+E       AssertionError: a NaN lookup was scored silently
+E       assert (None or False)
+E        +  where False = any(dict_values([False, False, False, False]))
+E        +    where dict_values([False, False, False, False]) = <built-in method values of dict object at 0x7f7ec9e31e40>()
+E        +      where <built-in method values of dict object at 0x7f7ec9e31e40> = {'not a number': False, 'missing': False, 'invalid': False, 'undefined': False}.values
+
+evaluation/probes/test_p14_edge_inputs.py:372: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+P-14 nan_lookup_injected: {"recommendation": "manoeuvre", "strategy": "minimax", "composite_scores": [[NaN, NaN, NaN, NaN], [0.29, 0.33, 0.3, 0.35], [0.36, 0.365, 0.363, 0.385], [0.34, 0.355, 0.345, 0.375]], "closest_approach_km": [[NaN, NaN, NaN, NaN], [20000.0, 10000.0, 18000.0, 10000.0], [6000.0, 3000.0, 5400.0, 3000.0], [10000.0, 5000.0, 9000.0, 5000.0]], "bases": [["lookup", "lookup", "lookup", "lookup"], ["lookup", "lookup", "lookup", "lookup"], ["lookup", "lookup", "lookup", "lookup"], ["lookup", "lookup", "lookup", "lookup"]], "modelled_banner": true, "basis_lines": ["Every figure in every cell is a lookup."], "row_notes": [], "cell_refusals": [], "binding_sentences": [], "computed_caveat": null, "searched_span_note": null, "objective_guidance": null, "recommendation_with_responses_reversed": "no_action", "nan_printed_on_page": true, "page_mentions": {"not a number": false, "missing": false, "invalid": false, "undefined": false}, "exception": null}
+___________________________ test_p14_extreme_priors ____________________________
+
+    def test_p14_extreme_priors() -> None:
+        base = _scenario()
+        cases = {"all_zero": [0.0] * 4, "all_one": [1.0] * 4, "row0_one_rest_zero": [1.0, 0.0, 0.0, 0.0],
+                 "row3_one_rest_zero": [0.0, 0.0, 0.0, 1.0]}
+        data: dict[str, Any] = {}
+        pages = {}
+        for name, ps in cases.items():
+            s = _with_p(base, ps)
+            ev, mm = evaluate_scenario(s, _EV, sampler=_never), evaluate_scenario(s, _MINIMAX, sampler=_never)
+            ev_rev = evaluate_scenario(_three(s), _EV, sampler=_never)
+            page = _page(ev)
+            pages[name] = page
+            best_row = min(range(4), key=lambda j: ev.outcome_matrix[ps.index(1.0)][j].composite_score) if 1.0 in ps else None
+            data[name] = {
+                "P": ps, "expected_value_pick": ev.robust_best_response.name,
+                "expected_value_pick_with_responses_reversed": ev_rev.robust_best_response.name,
+                "minimax_pick": mm.robust_best_response.name,
+                "objective_guidance": ev.objective_guidance,
+                "best_response_of_the_certain_row": None if best_row is None else base.friendly_responses[best_row].name,
+                "page_mentions": _mentions(page, ("probability", "no weight", "all zero", "unearned", "has not earned")),
+            }
+        _record("extreme_priors", data, pages["all_zero"])
+        zero = data["all_zero"]
+>       assert zero["objective_guidance"] or zero["expected_value_pick"] == zero["expected_value_pick_with_responses_reversed"], (
+            "every row at P 0 under expected value gives a pick set by row order, with no flag"
+        )
+E       AssertionError: every row at P 0 under expected value gives a pick set by row order, with no flag
+E       assert (None or 'manoeuvre' == 'no_action'
+E         
+E         - no_action
+E         + manoeuvre)
+
+evaluation/probes/test_p14_edge_inputs.py:427: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+P-14 extreme_priors: {"all_zero": {"P": [0.0, 0.0, 0.0, 0.0], "expected_value_pick": "manoeuvre", "expected_value_pick_with_responses_reversed": "no_action", "minimax_pick": "sensor_retask", "objective_guidance": null, "best_response_of_the_certain_row": null, "page_mentions": {"probability": false, "no weight": false, "all zero": false, "unearned": false, "has not earned": false}}, "all_one": {"P": [1.0, 1.0, 1.0, 1.0], "expected_value_pick": "manoeuvre", "expected_value_pick_with_responses_reversed": "manoeuvre", "minimax_pick": "sensor_retask", "objective_guidance": null, "best_response_of_the_certain_row": "sensor_retask", "page_mentions": {"probability": false, "no weight": false, "all zero": false, "unearned": false, "has not earned": false}}, "row0_one_rest_zero": {"P": [1.0, 0.0, 0.0, 0.0], "expected_value_pick": "sensor_retask", "expected_value_pick_with_responses_reversed": "sensor_retask", "minimax_pick": "sensor_retask", "objective_guidance": null, "best_response_of_the_certain_row": "sensor_retask", "page_mentions": {"probability": false, "no weight": false, "all zero": false, "unearned": false, "has not earned": false}}, "row3_one_rest_zero": {"P": [0.0, 0.0, 0.0, 1.0], "expected_value_pick": "manoeuvre", "expected_value_pick_with_responses_reversed": "manoeuvre", "minimax_pick": "sensor_retask", "objective_guidance": null, "best_response_of_the_certain_row": "manoeuvre", "page_mentions": {"probability": false, "no weight": false, "all zero": false, "unearned": false, "has not earned": false}}}
+________________ test_p14_udl_elset_checksum_reaches_the_engine ________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f7eca006190>
+
+    def test_p14_udl_elset_checksum_reaches_the_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+        from spectre.web import elsets
+        from spectre.web.routes import udl
+    
+        good = PLANE_CHANGE.red_tle
+        bad = _corrupt(good)
+        l1, l2 = bad.splitlines()
+        monkeypatch.setattr(udl.httpx, "AsyncClient", _FakeClient)
+        _FakeClient.records = [{"line1": l1, "line2": l2, "dataMode": "REAL"}]
+    
+        # Path 1: fetch_tle_for_satno, then a red track exactly as quick_add_red_track builds it (operator.py:239-251).
+        fetched = asyncio.run(udl.fetch_tle_for_satno(90002, "user", "pass"))
+        assert fetched is not None
+        tle, mode = fetched
+        state = SessionState()
+        state.red_tracks.append(RedTrack(name="UDL_RED", tle=tle, data_mode=mode))
+        state.blue_assets.append(BlueAsset(name="UDL_BLUE", tle=PLANE_CHANGE.blue_tle, data_mode="REAL"))
+        now = EPOCH
+        bound = bind_scenario(state, state.red_tracks[0].stk_name, state.blue_assets[0].stk_name, now)
+        assert bound.binding is not None, bound.problem
+        result = evaluate_scenario(_scenario(binding=bound.binding), sampler=_never)
+        genuine = evaluate_scenario(_scenario(binding=_bind(good, PLANE_CHANGE.blue_tle, now)), sampler=_never)
+        page = _page(result)
+    
+        # Path 2: the background refresh at UDL connect replaces a held UDL set with a newer one (elsets.py:147-167).
+        newer = _corrupt(element_set(PLANE_CHANGE.red, epoch_day=_epoch_day_plus(0.5)))
+        n1, n2 = newer.splitlines()
+        _FakeClient.records = [{"line1": n1, "line2": n2, "dataMode": "REAL"}]
+        held = SessionState(udl_username="user", udl_password="pass")
+        held.red_tracks.append(RedTrack(name="HELD_RED", tle=good, data_mode="REAL"))
+        asyncio.run(elsets.refresh_held_elsets(held, "user", "pass"))
+    
+        absurd = _corrupt(good, column=8)
+        absurd_result = evaluate_scenario(_scenario(binding=_bind(absurd, PLANE_CHANGE.blue_tle, now)), sampler=_never)
+        data = {
+            "fake_http_calls": list(_FakeClient.calls),
+            "genuine_line2": good.splitlines()[1],
+            "fetched_line2": tle.splitlines()[1],
+            "fetched_checksums_valid": [tle_checksum_valid(x) for x in tle.splitlines()],
+            "bound_red_tle_equals_fetched": bound.binding.red.tle == tle,
+            "bound_red_checksums_valid": [tle_checksum_valid(x) for x in bound.binding.red.tle.splitlines()],
+            "computed_closest_approach_km_corrupted": result.outcome_matrix[3][0].closest_approach_km,
+            "computed_closest_approach_km_genuine": genuine.outcome_matrix[3][0].closest_approach_km,
+            "recommendation_corrupted": result.robust_best_response.name,
+            "recommendation_genuine": genuine.robust_best_response.name,
+            "cell_refusals_corrupted": _flags(result)["cell_refusals"],
+            "page_mentions": _mentions(page, ("checksum",)),
+            "refresh_replaced_held_set": held.red_tracks[0].tle == newer,
+            "refresh_outcome": {"updated": held.elset_refresh.updated, "failed": held.elset_refresh.failed},
+            "refreshed_checksums_valid": [tle_checksum_valid(x) for x in held.red_tracks[0].tle.splitlines()],
+            "side_observation_inclination_597_line2": absurd.splitlines()[1],
+            "side_observation_inclination_597_bases": _flags(absurd_result)["bases"][3],
+            "side_observation_inclination_597_closest_approach_km": absurd_result.outcome_matrix[3][0].closest_approach_km,
+        }
+        _record("udl_checksum", data, page)
+>       assert all(data["bound_red_checksums_valid"]), "a UDL element set failing its checksum reached the engine"
+E       AssertionError: a UDL element set failing its checksum reached the engine
+E       assert False
+E        +  where False = all([True, False])
+
+evaluation/probes/test_p14_edge_inputs.py:529: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+P-14 udl_checksum: {"fake_http_calls": ["https://unifieddatalibrary.com/udl/elset/current", "https://unifieddatalibrary.com/udl/elset/current"], "genuine_line2": "2 90002  97.4000  43.0000 0000000   0.0000   1.7000 15.05490646    19", "fetched_line2": "2 90002  98.4000  43.0000 0000000   0.0000   1.7000 15.05490646    19", "fetched_checksums_valid": [true, false], "bound_red_tle_equals_fetched": true, "bound_red_checksums_valid": [true, false], "computed_closest_approach_km_corrupted": 13.4, "computed_closest_approach_km_genuine": 10.4, "recommendation_corrupted": "sensor_retask", "recommendation_genuine": "sensor_retask", "cell_refusals_corrupted": ["Not computed: a manoeuvre with no hypothesis names no burn, and propagating the orbit as it stands would show only where it goes if it does not move. Add a manoeuvre hypothesis to sample this row. This cell's closest approach is a lookup."], "page_mentions": {"checksum": false}, "refresh_replaced_held_set": true, "refresh_outcome": {"updated": ["red HELD_RED"], "failed": []}, "refreshed_checksums_valid": [true, false], "side_observation_inclination_597_line2": "2 90002 597.4000  43.0000 0000000   0.0000   1.7000 15.05490646    19", "side_observation_inclination_597_bases": ["computed", "computed", "computed", "computed"], "side_observation_inclination_597_closest_approach_km": 356.0}
+==================================== PASSES ====================================
+___________________ test_p11_p5_stability_across_seeds_and_n ___________________
+----------------------------- Captured stdout call -----------------------------
+
+P-11 no collision probability is computed by the engine, so a Pc of zero cannot arise; P5 of sampled misses is measured instead. Total wall time 458 s.
+P-11 A plane_change Evasive 1 h (D18) N=50: seeds 20, P5 mean 10.833 km, SD 0.170 km (range 10.515 to 11.063); SD/SD(N=50) 1.00 against 1/sqrt rule 1.00; log-log slope -0.49; engine half-width mean 0.589 km = 1.77 x 1.96 SD; runs within own half-width of pooled P5 (10.808 km from 8000 samples) 20/20; converged flag 20/20
+P-11 A plane_change Evasive 1 h (D18) N=100: seeds 20, P5 mean 10.817 km, SD 0.119 km (range 10.549 to 11.055); SD/SD(N=50) 0.70 against 1/sqrt rule 0.71; log-log slope -0.49; engine half-width mean 0.509 km = 2.18 x 1.96 SD; runs within own half-width of pooled P5 (10.808 km from 8000 samples) 20/20; converged flag 20/20
+P-11 A plane_change Evasive 1 h (D18) N=200: seeds 20, P5 mean 10.848 km, SD 0.078 km (range 10.648 to 11.001); SD/SD(N=50) 0.46 against 1/sqrt rule 0.50; log-log slope -0.49; engine half-width mean 0.343 km = 2.25 x 1.96 SD; runs within own half-width of pooled P5 (10.808 km from 8000 samples) 19/20; converged flag 20/20
+P-11 A plane_change Evasive 1 h (D18) N=400: seeds 20, P5 mean 10.823 km, SD 0.063 km (range 10.688 to 10.944); SD/SD(N=50) 0.37 against 1/sqrt rule 0.35; log-log slope -0.49; engine half-width mean 0.255 km = 2.06 x 1.96 SD; runs within own half-width of pooled P5 (10.808 km from 8000 samples) 20/20; converged flag 20/20
+P-11 B plane_change Orbit Raise 1 h N=50: seeds 20, P5 mean 81.934 km, SD 1.423 km (range 79.056 to 84.062); SD/SD(N=50) 1.00 against 1/sqrt rule 1.00; log-log slope -0.41; engine half-width mean 3.792 km = 1.36 x 1.96 SD; runs within own half-width of pooled P5 (81.833 km from 8000 samples) 20/20; converged flag 15/20
+P-11 B plane_change Orbit Raise 1 h N=100: seeds 20, P5 mean 81.910 km, SD 1.173 km (range 79.911 to 83.584); SD/SD(N=50) 0.82 against 1/sqrt rule 0.71; log-log slope -0.41; engine half-width mean 2.456 km = 1.07 x 1.96 SD; runs within own half-width of pooled P5 (81.833 km from 8000 samples) 19/20; converged flag 19/20
+P-11 B plane_change Orbit Raise 1 h N=200: seeds 20, P5 mean 82.041 km, SD 0.726 km (range 80.247 to 83.245); SD/SD(N=50) 0.51 against 1/sqrt rule 0.50; log-log slope -0.41; engine half-width mean 1.949 km = 1.37 x 1.96 SD; runs within own half-width of pooled P5 (81.833 km from 8000 samples) 19/20; converged flag 20/20
+P-11 B plane_change Orbit Raise 1 h N=400: seeds 20, P5 mean 81.893 km, SD 0.653 km (range 80.716 to 83.354); SD/SD(N=50) 0.46 against 1/sqrt rule 0.35; log-log slope -0.41; engine half-width mean 1.225 km = 0.96 x 1.96 SD; runs within own half-width of pooled P5 (81.833 km from 8000 samples) 19/20; converged flag 20/20
+P-11 C coplanar_leo Evasive 6 h N=50: seeds 6, P5 mean 10.060 km, SD 0.040 km (range 10.013 to 10.130); SD/SD(N=50) 1.00 against 1/sqrt rule 1.00; log-log slope -0.36; engine half-width mean 1.445 km = 18.31 x 1.96 SD; runs within own half-width of pooled P5 (10.035 km from 2400 samples) 6/6; converged flag 1/6
+P-11 C coplanar_leo Evasive 6 h N=100: seeds 6, P5 mean 10.029 km, SD 0.010 km (range 10.020 to 10.048); SD/SD(N=50) 0.25 against 1/sqrt rule 0.71; log-log slope -0.36; engine half-width mean 0.908 km = 45.36 x 1.96 SD; runs within own half-width of pooled P5 (10.035 km from 2400 samples) 6/6; converged flag 4/6
+P-11 C coplanar_leo Evasive 6 h N=200: seeds 6, P5 mean 10.041 km, SD 0.021 km (range 10.018 to 10.079); SD/SD(N=50) 0.52 against 1/sqrt rule 0.50; log-log slope -0.36; engine half-width mean 0.777 km = 18.97 x 1.96 SD; runs within own half-width of pooled P5 (10.035 km from 2400 samples) 6/6; converged flag 6/6
+P-11 C coplanar_leo Evasive 6 h N=400: seeds 6, P5 mean 10.040 km, SD 0.014 km (range 10.028 to 10.059); SD/SD(N=50) 0.34 against 1/sqrt rule 0.35; log-log slope -0.36; engine half-width mean 0.513 km = 18.90 x 1.96 SD; runs within own half-width of pooled P5 (10.035 km from 2400 samples) 6/6; converged flag 6/6
+P-11 expectation violations: none
+___________________ test_p12_sgp4_against_published_vectors ____________________
+----------------------------- Captured stdout call -----------------------------
+
+P-12 sgp4 2.27; files SGP4-VER.TLE, tcppver.out; 33 cases
+P-12 wrapper gravity: radiusearthkm 6378.135, mu 398600.8, j2 0.001082616 (library default 6378.135, 398600.8: WGS-72); opsmode i
+P-12 case | satnum | method | listed | cmp_w | max_dr_direct_km | max_dr_wrapper_km | max_dv_wrapper_km_s | max_dr_wgs84_km | library_first_error | wrapper_first_error | note
+P-12 1 | 5 | SGP4 (near earth) | 13 | 13 | 4.73e-09 | 6.82e-09 | 7.70e-10 | 0.036 |  |  | 
+P-12 2 | 4632 | SDP4 (deep space) | 5 | 5 | 5.00e-09 | 3.71e-06 | 8.46e-10 | 0.014 |  |  | 
+P-12 3 | 6251 | SGP4 (near earth) | 25 | 25 | 4.93e-09 | 7.28e-09 | 6.89e-10 | 0.083 |  |  | 
+P-12 4 | 8195 | SDP4 (deep space) | 25 | 25 | 4.92e-09 | 6.27e-09 | 6.70e-10 | 0.073 |  |  | 
+P-12 5 | 9880 | SDP4 (deep space) | 25 | 25 | 4.90e-09 | 6.72e-06 | 2.30e-09 | 0.080 |  |  | 
+P-12 6 | 9998 | SDP4 (deep space) | 14 | 14 | 4.94e-09 | 7.85e-09 | 7.54e-10 | 0.013 |  |  | 
+P-12 7 | 11801 | SDP4 (deep space) | 5 | 5 | 4.78e-09 | 8.22e-06 | 4.11e-09 | 0.296 |  |  | 
+P-12 8 | 14128 | SDP4 (deep space) | 25 | 25 | 4.95e-09 | 6.96e-09 | 6.78e-10 | 0.015 |  |  | 
+P-12 9 | 16925 | SDP4 (deep space) | 13 | 13 | 4.86e-09 | 9.74e-06 | 9.44e-09 | 0.786 |  |  | 
+P-12 10 | 20413 | SDP4 (deep space) | 26 | 26 | 4.98e-09 | 7.77e-09 | 7.35e-10 | 0.050 |  |  | 
+P-12 11 | 21897 | SDP4 (deep space) | 25 | 25 | 4.99e-09 | 6.11e-06 | 2.23e-09 | 0.097 |  |  | 
+P-12 12 | 22312 | SGP4 (near earth) | 23 | 23 | 4.86e-09 | 7.93e-06 | 1.00e-08 | 1.032 | code 1 at t=494.2028672 min | SGP4 error code 1 at 2006-04-04 19:19:59.999999+00:00 (t=494.2028672 min) | 
+P-12 13 | 22674 | SDP4 (deep space) | 25 | 25 | 4.99e-09 | 7.26e-09 | 7.65e-10 | 0.103 |  |  | 
+P-12 14 | 23177 | SDP4 (deep space) | 13 | 13 | 4.89e-09 | 7.12e-09 | 7.50e-10 | 0.015 |  |  | 
+P-12 15 | 23333 | SDP4 (deep space) | 15 | 15 | 4.89e-09 | 7.07e-09 | 6.87e-10 | 3.322 |  |  | 
+P-12 16 | 23599 | SDP4 (deep space) | 37 | 37 | 4.97e-09 | 9.80e-06 | 9.36e-09 | 0.009 |  |  | 
+P-12 17 | 24208 | SDP4 (deep space) | 13 | 13 | 4.80e-09 | 6.49e-09 | 6.55e-10 | 0.012 |  |  | 
+P-12 18 | 25954 | SDP4 (deep space) | 26 | 26 | 4.95e-09 | 7.54e-09 | 7.37e-10 | 0.011 |  |  | 
+P-12 19 | 26900 | SDP4 (deep space) | 4 | 4 | 4.66e-09 | 3.08e-06 | 6.53e-10 | 0.011 |  |  | 
+P-12 20 | 26975 | SDP4 (deep space) | 25 | 25 | 4.94e-09 | 7.62e-09 | 8.02e-10 | 0.066 |  |  | 
+P-12 21 | 28057 | SGP4 (near earth) | 25 | 25 | 4.94e-09 | 7.47e-06 | 8.36e-09 | 0.090 |  |  | 
+P-12 22 | 28129 | SDP4 (deep space) | 13 | 13 | 5.00e-09 | 3.90e-06 | 1.13e-09 | 0.033 |  |  | 
+P-12 23 | 28350 | SGP4 (near earth) | 13 | 13 | 4.92e-09 | 7.87e-06 | 1.00e-08 | 1.326 | code 1 at t=1560.0 min | SGP4 error code 1 at 2006-06-17 07:13:45.407423+00:00 (t=1560.0 min) | 
+P-12 24 | 28623 | SDP4 (deep space) | 13 | 13 | 4.46e-09 | 6.16e-09 | 6.28e-10 | 0.184 |  |  | 
+P-12 25 | 28626 | SDP4 (deep space) | 13 | 13 | 4.95e-09 | 3.08e-06 | 8.54e-10 | 0.011 |  |  | 
+P-12 26 | 28872 | SGP4 (near earth) | 11 | 11 | 4.78e-09 | 7.31e-09 | 6.71e-10 | 0.044 | code 6 at t=55.0 min | SGP4 error code 6 at 2005-11-29 01:23:58.939104+00:00 (t=55.0 min) | 
+P-12 27 | 29141 | SGP4 (near earth) | 22 | 22 | 4.94e-09 | 6.67e-09 | 7.78e-10 | 0.617 | code 6 at t=440.0 min | SGP4 error code 6 at 2006-06-19 13:45:41.242080+00:00 (t=440.0 min) | 
+P-12 28 | 29238 | SGP4 (near earth) | 13 | 13 | 4.89e-09 | 7.07e-09 | 7.70e-10 | 0.076 |  |  | 
+P-12 29 | 88888 | SGP4 (near earth) | 13 | 13 | 4.69e-09 | 7.82e-06 | 9.56e-09 | 0.052 |  |  | 
+P-12 30 | 33333 | SDP4 (deep space) | 5 | 5 | 4.87e-09 | 7.09e-09 | 6.64e-10 | 13068.212 | code 4 at t=25.0 min | SGP4 error code 4 at 2005-11-29 00:53:58.939104+00:00 (t=25.0 min) | 
+P-12 31 | 33334 | SDP4 (deep space) | 1 | 0 | nan | nan | nan | nan | code 3 at t=0.0 min | SGP4 error code 3 at 2006-06-23 20:35:47.504544+00:00 (t=0.0 min) | library error 3 at epoch: no reference vectors
+P-12 32 | 33335 | SDP4 (deep space) | 73 | 73 | 4.95e-09 | 3.08e-06 | 9.37e-10 | 0.011 |  |  | 
+P-12 33 | 20413 | SDP4 (deep space) | 70 | 70 | 1.59e-07 | 1.17e-07 | 7.62e-10 | 0.289 | code 6 at t=1844345.0 min | SGP4 error code 6 at 2009-07-02 14:05:00.000288+00:00 (t=1844345.0 min) | 
+P-12 overall wrapper max |dr| 9.800e-06 km (case 16, 23599); max |dv| 1.004e-08 km/s (case 12, 22312)
+P-12 overall direct max per-component |dr| 1.585e-07 km, |dv| 4.997e-10 km/s
+P-12 vectors compared: wrapper 666, direct 666; deep-space cases 24 of 33; cases with a library error code 7; cases where the wrapper raised 7; min WGS-84 offset where compared 0.009 km
+P-12 wrapper against Satrec at the identical instant: max difference 0.000e+00 (km and km/s)
+P-12 largest offset of the datetime instant from the listed time, after microsecond rounding: 1.00e-06 s
+P-12 table written to /home/user/SPECTRE/evaluation/evidence/physics/p12_sgp4_vectors.csv
+_________________________ test_p14_stale_elset_30_days _________________________
+----------------------------- Captured stdout call -----------------------------
+
+P-14 stale_30_days: {"red_age_hours": 720.0, "red_limit_hours": 24.0, "red_freshness": "out of date", "recommendation": "manoeuvre", "strategy": "minimax", "composite_scores": [[0.321333, 0.329, 0.599867, 0.627333], [0.223333, 0.28, 0.266667, 0.333333], [0.293333, 0.315, 0.329667, 0.368333], [0.273333, 0.305, 0.311667, 0.358333]], "closest_approach_km": [[400.0, 200.0, 360.0, 200.0], [20000.0, 10000.0, 18000.0, 10000.0], [6000.0, 3000.0, 5400.0, 3000.0], [10000.0, 5000.0, 9000.0, 5000.0]], "bases": [["lookup", "lookup", "lookup", "lookup"], ["lookup", "lookup", "lookup", "lookup"], ["lookup", "lookup", "lookup", "lookup"], ["lookup", "lookup", "lookup", "lookup"]], "modelled_banner": true, "basis_lines": ["Every figure in every cell is a lookup."], "row_notes": [], "cell_refusals": ["Not computed: the red orbit is out of date or its age is unknown, so a miss computed from it would not be earned. This cell's closest approach is a lookup.", "Not sampled: the red orbit is out of date, at its limit already or of unknown age, so a miss sampled from it would not be earned. This cell's closest approach is a lookup."], "binding_sentences": ["Orbit out of date: 30.0 d old at evaluation against a 24 h limit, so a burn since its epoch would not be seen.", "Orbit current: 0.0 h old at evaluation, limit 24 h."], "computed_caveat": null, "searched_span_note": null, "objective_guidance": null, "page_mentions": {"out of date": true, "Modelled estimate": true, "lookup": true}}
+______________________ test_p14_decayed_within_the_window ______________________
+----------------------------- Captured stdout call -----------------------------
+
+P-14 decayed_within_window: {"decay_error_minutes": [[52, 69], [139, 156], [226, 243], [313, 330]], "red_freshness": "current", "recommendation": "manoeuvre", "strategy": "minimax", "composite_scores": [[0.321333, 0.329, 0.599867, 0.627333], [0.223333, 0.28, 0.266667, 0.333333], [0.293333, 0.315, 0.329667, 0.368333], [0.273333, 0.305, 0.311667, 0.358333]], "closest_approach_km": [[400.0, 200.0, 360.0, 200.0], [20000.0, 10000.0, 18000.0, 10000.0], [6000.0, 3000.0, 5400.0, 3000.0], [10000.0, 5000.0, 9000.0, 5000.0]], "bases": [["lookup", "lookup", "lookup", "lookup"], ["lookup", "lookup", "lookup", "lookup"], ["lookup", "lookup", "lookup", "lookup"], ["lookup", "lookup", "lookup", "lookup"]], "modelled_banner": true, "basis_lines": ["Every figure in every cell is a lookup."], "row_notes": [], "cell_refusals": ["Not computed: SGP4 could not propagate the red element set across the horizon, so a miss without those instants could hide the closest. This cell's closest approach is a lookup.", "Not computed: a manoeuvre with no hypothesis names no burn, and propagating the orbit as it stands would show only where it goes if it does not move. Add a manoeuvre hypothesis to sample this row. This cell's closest approach is a lookup."], "binding_sentences": ["Orbit current: 0.0 h old at evaluation, limit 24 h.", "Orbit current: 0.0 h old at evaluation, limit 24 h."], "computed_caveat": null, "searched_span_note": null, "objective_guidance": null, "page_mentions": {"decay": false, "propagat": true, "re-ent": false, "lookup": true}}
+_________________ test_p14_decayed_blue_refuses_a_sampled_row __________________
+----------------------------- Captured stdout call -----------------------------
+
+P-14 decayed_blue_sampled_row: {"recommendation": "sensor_retask", "strategy": "minimax", "composite_scores": [[0.388, 0.379, 0.6332, 0.644], [0.29, 0.33, 0.3, 0.35], [0.36, 0.365, 0.363, 0.385], [0.34, 0.355, 0.345, 0.375]], "closest_approach_km": [[400.0, 200.0, 360.0, 200.0], [20000.0, 10000.0, 18000.0, 10000.0], [6000.0, 3000.0, 5400.0, 3000.0], [10000.0, 5000.0, 9000.0, 5000.0]], "bases": [["lookup", "lookup", "lookup", "lookup"], ["lookup", "lookup", "lookup", "lookup"], ["lookup", "lookup", "lookup", "lookup"], ["lookup", "lookup", "lookup", "lookup"]], "modelled_banner": true, "basis_lines": ["Every figure in every cell is a lookup."], "row_notes": [], "cell_refusals": ["Not computed: SGP4 could not propagate the blue element set across the horizon, so a miss without those instants could hide the closest. This cell's closest approach is a lookup.", "Not sampled: the blue element set cannot be propagated to 2026-10-17 12:55 UTC. This cell's closest approach is a lookup."], "binding_sentences": ["Orbit current: 0.9 h old at evaluation, limit 24 h.", "Orbit current: 0.9 h old at evaluation, limit 24 h."], "computed_caveat": null, "searched_span_note": null, "objective_guidance": null}
+_______________________ test_p14_nan_inputs_fail_loudly ________________________
+----------------------------- Captured stdout call -----------------------------
+
+P-14 nan_inputs: {"AdversaryAction.probability=NaN": "ValueError: AdversaryAction.probability must be in [0, 1]; got nan", "AdversaryAction.confidence=NaN": "ValueError: AdversaryAction.confidence must be in [0, 1]; got nan", "AdversaryAction.custody_gap_fraction=NaN": "ValueError: AdversaryAction.custody_gap_fraction must be in [0, 1]; got nan", "FriendlyResponse.cost=NaN": "ValueError: FriendlyResponse.cost must be in [0, 1]; got nan", "FriendlyResponse.reversibility=NaN": "ValueError: FriendlyResponse.reversibility must be in [0, 1]; got nan", "FriendlyResponse.time_to_execute_hours=NaN": "ValueError: FriendlyResponse.time_to_execute_hours must be finite and >= 0; got nan", "Scenario.w_custody=NaN": "ValueError: Scenario.w_custody must be in [0, 1]; got nan", "Scenario.horizon_hours=NaN": "ValueError: Scenario.horizon_hours must be finite and > 0; got nan"}
+_____ test_p14_contradictory_observation[SelectorStrategy.EXPECTED_VALUE] ______
+----------------------------- Captured stdout call -----------------------------
+
+P-14 contradictory_observation_expected_value: {"strategy": "expected_value", "tree_refusal": null, "likelihood": ["no burn", "no burn"], "picks": [[1, 0], [2, 0]], "update_lines": ["The update after turn 1 rests on this likelihood model: what turn 1 lets us see of red is the bound red track's custody, as the sweep judges it, carried over turn 1 with each row's burn. Custody lost at a burn in the turn shows that red burnt, not which burn; custody held through it shows that red did not; custody lost for any other reason, or not read, shows nothing. Row 1, Hold course, gives no burn; row 2, Posture, gives no burn. Each row gives what it gives for certain, so rows that give the same thing are not told apart. It is the custody rule, not calibrated against any outcome, so the update is a lookup; the same rule reads turn 2 in a 3-turn tree.", "The update says which turn-1 branch we are on, not what red does next: red's move in each later turn is weighed by the rows' P as entered, since nothing sourced says how its turn-1 move bears on its next.", "You stated that turn 1 shows a burn, which no row gives under this likelihood model, so nothing was updated."], "matrix_recommendation": "Hold"}
+_________ test_p14_contradictory_observation[SelectorStrategy.MINIMAX] _________
+----------------------------- Captured stdout call -----------------------------
+
+P-14 contradictory_observation_minimax: {"strategy": "minimax", "tree_refusal": null, "likelihood": ["no burn", "no burn"], "picks": [[1, 0], [2, 0]], "update_lines": ["Each later pick may rest only on what the turns before it let us see of red: the bound red track's custody, as the sweep judges it, carried over each turn with each row's burn. Custody lost at a burn in the turn shows that red burnt, not which burn; custody held through it shows that red did not; custody lost for any other reason, or not read, shows nothing. In turn 1: row 1, Hold course, gives no burn; row 2, Posture, gives no burn. Each row gives what it gives for certain, so branches that show the same thing share one pick. It is the custody rule, not calibrated against any outcome.", "Minimax does not use probability, so no update after turn 1 is shown; its later picks rest only on what each turn lets us see.", "You stated that turn 1 shows a burn; Minimax does not use probability, so it updated nothing."], "matrix_recommendation": "Hold"}
+=========================== short test summary info ============================
+PASSED evaluation/probes/test_p11_p5_stability.py::test_p11_p5_stability_across_seeds_and_n
+PASSED evaluation/probes/test_p12_sgp4_vectors.py::test_p12_sgp4_against_published_vectors
+PASSED evaluation/probes/test_p14_edge_inputs.py::test_p14_stale_elset_30_days
+PASSED evaluation/probes/test_p14_edge_inputs.py::test_p14_decayed_within_the_window
+PASSED evaluation/probes/test_p14_edge_inputs.py::test_p14_decayed_blue_refuses_a_sampled_row
+PASSED evaluation/probes/test_p14_edge_inputs.py::test_p14_nan_inputs_fail_loudly
+PASSED evaluation/probes/test_p14_edge_inputs.py::test_p14_contradictory_observation[SelectorStrategy.EXPECTED_VALUE]
+PASSED evaluation/probes/test_p14_edge_inputs.py::test_p14_contradictory_observation[SelectorStrategy.MINIMAX]
+FAILED evaluation/probes/test_p13_rk45_tolerance.py::test_p13_production_rk45_against_tight_dop853
+FAILED evaluation/probes/test_p14_edge_inputs.py::test_p14_deep_space_geo_pair_red_and_blue
+FAILED evaluation/probes/test_p14_edge_inputs.py::test_p14_deep_space_molniya_red_against_leo_blue
+FAILED evaluation/probes/test_p14_edge_inputs.py::test_p14_decayed_before_the_scenario_between_perigee_errors
+FAILED evaluation/probes/test_p14_edge_inputs.py::test_p14_all_weights_zero_and_missing_form_fields
+FAILED evaluation/probes/test_p14_edge_inputs.py::test_p14_nan_lookup_figure_injected
+FAILED evaluation/probes/test_p14_edge_inputs.py::test_p14_extreme_priors - A...
+FAILED evaluation/probes/test_p14_edge_inputs.py::test_p14_udl_elset_checksum_reaches_the_engine
+8 failed, 8 passed in 471.82s (0:07:51)
+# exit code 1

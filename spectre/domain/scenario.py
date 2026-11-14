@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 
 import numpy as np
 
+from spectre.astro.closest_approach import golden_minimum
 from spectre.astro.propagator import TLE_ERRORS, TLEOrbit
 from spectre.domain.models import (
     BlueAsset,
@@ -33,7 +34,6 @@ _MIN_STEP_S = 1.0
 _SAMPLES_PER_CHORD = 8
 # Closest approach is refined to this, in seconds.
 _TCA_TOLERANCE_S = 0.01
-_GOLDEN = (math.sqrt(5.0) - 1.0) / 2.0
 
 
 class ScenarioPlanner:
@@ -140,22 +140,16 @@ def _samples(pair: _Pair, start: datetime, stop: datetime) -> list[tuple[datetim
 
 
 def _closest(pair: _Pair, lo: datetime, hi: datetime) -> tuple[datetime, float]:
-    """Golden-section search for the closest approach between *lo* and *hi*."""
-    a, b = 0.0, (hi - lo).total_seconds()
-    c, d = b - _GOLDEN * (b - a), a + _GOLDEN * (b - a)
-    fc = pair.range_km(lo + timedelta(seconds=c))
-    fd = pair.range_km(lo + timedelta(seconds=d))
-    while b - a > _TCA_TOLERANCE_S:
-        if fc < fd:
-            b, d, fd = d, c, fc
-            c = b - _GOLDEN * (b - a)
-            fc = pair.range_km(lo + timedelta(seconds=c))
-        else:
-            a, c, fc = c, d, fd
-            d = a + _GOLDEN * (b - a)
-            fd = pair.range_km(lo + timedelta(seconds=d))
-    mid = (a + b) / 2.0
-    return lo + timedelta(seconds=mid), pair.range_km(lo + timedelta(seconds=mid))
+    """Golden-section search for the closest approach between *lo* and *hi*.
+
+    The search is the shared one in spectre.astro.closest_approach (SPC-102).
+    range_km reads a failed propagation as infinite, never NaN, as
+    golden_minimum requires.
+    """
+    t, miss = golden_minimum(
+        lambda s: pair.range_km(lo + timedelta(seconds=s)), 0.0, (hi - lo).total_seconds(), _TCA_TOLERANCE_S,
+    )
+    return lo + timedelta(seconds=t), miss
 
 
 def _runs(samples: list[tuple[datetime, float | None]]) -> Iterator[tuple[int, int]]:

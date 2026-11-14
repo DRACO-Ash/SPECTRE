@@ -18,7 +18,7 @@
       <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim)">
         NORAD SATNO
         <input type="number" name="satno" value="50321" min="1" required
-               style="font-size:0.85rem; font-weight:700; color:var(--ops-gold)"
+               style="font-size:0.85rem; font-weight:700; color:var(--gold)"
                placeholder="e.g. 50321" />
       </label>
 
@@ -38,10 +38,10 @@
 
       <div style="display:flex; gap:0.5rem; margin-bottom:0.4rem; flex-wrap:wrap">
         <label style="font-size:0.72rem; display:flex; align-items:center; gap:0.3rem; cursor:pointer">
-          <input type="radio" name="pol_source" value="udl" {% if has_udl %}checked{% endif %}> Session
+          <input type="radio" name="pol_source" data-action-change="polSource" value="udl" {% if has_udl %}checked{% endif %}> Session
         </label>
         <label style="font-size:0.72rem; display:flex; align-items:center; gap:0.3rem; cursor:pointer">
-          <input type="radio" name="pol_source" value="udl_direct" {% if not has_udl %}checked{% endif %}> Direct
+          <input type="radio" name="pol_source" data-action-change="polSource" value="udl_direct" {% if not has_udl %}checked{% endif %}> Direct
         </label>
       </div>
 
@@ -103,15 +103,7 @@
 
   </form>
 
-  <script>
-  document.querySelectorAll('input[name="pol_source"]').forEach(function(radio) {
-    radio.addEventListener('change', function() {
-      document.querySelectorAll('.pol-src-panel').forEach(function(p) { p.style.display = 'none'; });
-      var panel = document.getElementById('pol-src-' + this.value);
-      if (panel) panel.style.display = '';
-    });
-  });
-  </script>
+  {# Each source radio shows its own panel: polSource in /static/js/pol.js (SPC-199). #}
 
 </section>
 

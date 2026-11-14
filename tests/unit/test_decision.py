@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, datetime
 
 import pytest
@@ -11,6 +12,7 @@ from spectre.domain.decision import (
     AdversaryAction,
     FriendlyResponse,
     OutcomeMetrics,
+    ProbabilityRule,
     Scenario,
     SelectorStrategy,
     compute_outcome_metrics,
@@ -27,9 +29,9 @@ def _epoch() -> datetime:
 
 def _adv(id: str = "A1", name: str = "Proximity approach",
           atype: ActionType = ActionType.MANOEUVRE,
-          prob: float = 0.6, conf: float = 0.8) -> AdversaryAction:
+          prob: float = 0.6, conf: float = 0.8, gap: float = 0.8) -> AdversaryAction:
     return AdversaryAction(id=id, name=name, action_type=atype,
-                            probability=prob, confidence=conf)
+                            probability=prob, confidence=conf, custody_gap_fraction=gap)
 
 
 def _fr(id: str = "R1", name: str = "COLA manoeuvre",
@@ -101,11 +103,12 @@ class TestComputeOutcomeMetrics:
         r = _fr()
         s = _scenario([a], [r])
         om = compute_outcome_metrics(a, r, s)
-        # Custody kept; 200 x (1 + 5 x 0.3) = 500 km; 0.25 x 0.99 + 0.20 x 0.15
-        # + 0.10 x 6/72 + 0.10 x 0.2 = 0.305833.
+        # Custody kept; 200 x (1 + 5 x 0.3) = 500 km and 0.3 x 50 = 15 m/s, each in orders of magnitude
+        # (SPC-191): 0.25 x ln 100 / ln 5,000 + 0.20 x ln 16 / ln 1,001 + 0.10 x 6/72 + 0.10 x 0.2
+        # = 0.25 x 0.540691 + 0.20 x 0.401315 + 0.008333 + 0.02 = 0.243769.
         assert om == OutcomeMetrics(
             custody_maintained=True, custody_gap_hours=0.0, closest_approach_km=500.0,
-            time_to_closest_hours=28.8, delta_v_cost_km_s=0.015, composite_score=0.305833,
+            time_to_closest_hours=28.8, delta_v_cost_km_s=0.015, composite_score=0.243769,
         )
 
     def test_composite_score_in_unit_interval(self):
@@ -198,8 +201,9 @@ class TestRankResponses:
 
 class TestFindRobustResponse:
     def _two_adversary_scenario(self):
-        a1 = _adv(id="A1", atype=ActionType.MANOEUVRE)
-        a2 = _adv(id="A2", atype=ActionType.NO_ACTION)
+        # Equal P that sum to 1 (SPC-203): each row's share is 0.5, as it was at P 0.6 each before, so no remainder.
+        a1 = _adv(id="A1", atype=ActionType.MANOEUVRE, prob=0.5)
+        a2 = _adv(id="A2", atype=ActionType.NO_ACTION, prob=0.5)
         r1 = _fr(id="R1", atype=ActionType.MANOEUVRE, cost=0.4, rev=0.7)
         r2 = _fr(id="R2", atype=ActionType.SENSOR_RETASK, cost=0.1, rev=0.9)
         r3 = _fr(id="R3", atype=ActionType.NO_ACTION, cost=0.0, rev=1.0)
@@ -220,26 +224,31 @@ class TestFindRobustResponse:
         assert r1.id == r2.id
 
     def test_composite_scores_match_the_hand_calculation(self):
-        """A1 (manoeuvre, confidence 0.8) against R1 (manoeuvre, cost 0.4,
+        """A1 (manoeuvre, custody gap share 0.8) against R1 (manoeuvre, cost 0.4,
         reversibility 0.7, 6 h), 72 h horizon, default weights:
         custody kept, 0.35 x 0; closest approach 200 x (1 + 5 x 0.4) = 600 km,
-        0.25 x (1 - 600/50,000) = 0.247; ΔV 0.02 km/s of 0.1, 0.20 x 0.2 = 0.04;
+        in orders of magnitude from the 10 km keep-out to 50,000 km (SPC-191),
+        0.25 x ln(50,000/600) / ln 5,000 = 0.25 x 0.519285 = 0.129821; ΔV
+        0.02 km/s, 20 m/s, 0.20 x ln 21 / ln 1,001 = 0.20 x 0.440676 = 0.088135;
         time 6/72, 0.10 x 0.0833 = 0.008333; reversibility 0.10 x 0.3 = 0.03.
-        Total 0.325333. A1/R3 (doing nothing against the manoeuvre) loses
-        custody for the whole 0.8 x 72 h gap: 0.35 x 0.8 + 0.249 + 0.008333 =
-        0.537333. Before audit F-035 that gap was scaled by R3's reversibility
-        of 1.0 to nothing, and R3 scored 0.257333. The other four follow the
-        same rules."""
+        Total 0.256290. A1/R3 (doing nothing against the manoeuvre) loses
+        custody for the whole 0.8 x 72 h gap: 0.35 x 0.8 + 0.25 x ln 250 /
+        ln 5,000 (0.648272) + 0.008333 = 0.450401. Before audit F-035 that gap
+        was scaled by R3's reversibility of 1.0 to nothing. The other four
+        follow the same rules: 5,000 km against no action is ln 10 / ln 5,000
+        = 0.270346, and R1's 15,000 km ln(10/3) / ln 5,000 = 0.141358. Under
+        the linear scales before SPC-191 the rows were 0.325333, 0.267333,
+        0.537333 and 0.253333, 0.243333, 0.233333; each rule's pick is the same."""
         _, om = self._two_adversary_scenario()
         assert [[m.composite_score for m in row] for row in om] == [
-            [0.325333, 0.267333, 0.537333],
-            [0.253333, 0.243333, 0.233333],
+            [0.25629, 0.180401, 0.450401],
+            [0.161808, 0.08592, 0.07592],
         ]
 
     @pytest.mark.parametrize(("strategy", "pick"), [
-        (SelectorStrategy.MINIMAX, "R2"),         # worst cases 0.325, 0.267, 0.537
-        (SelectorStrategy.EXPECTED_VALUE, "R2"),  # equal weights: 0.289, 0.255, 0.385
-        (SelectorStrategy.MINIMIN, "R3"),         # best cases 0.253, 0.243, 0.233
+        (SelectorStrategy.MINIMAX, "R2"),         # worst cases 0.256, 0.180, 0.450
+        (SelectorStrategy.EXPECTED_VALUE, "R2"),  # equal weights: 0.209, 0.133, 0.263
+        (SelectorStrategy.MINIMIN, "R3"),         # best cases 0.162, 0.086, 0.076
     ])
     def test_each_selector_picks_its_response(self, strategy, pick):
         """The sensor retask keeps custody cheaply, so the robust rules pick it;
@@ -247,15 +256,17 @@ class TestFindRobustResponse:
         s, om = self._two_adversary_scenario()
         assert find_robust_response(s, om, strategy).id == pick
 
-    def test_expected_value_with_no_probability_mass_takes_the_first_response(self):
-        """With every probability zero, every response's expected score is 0
-        and the first listed is returned, not a division by zero."""
+    def test_expected_value_with_no_probability_mass_has_no_pick(self):
+        """Under the rule a record 0.28.0 or 0.29.0 wrote is replayed by, with every probability zero, expected value
+        has no weight to pick on: no pick, never the first listed by row order and never a division by zero (SPC-200,
+        evaluation F-31). Under the remainder rule the remainder carries the whole weight (SPC-203,
+        tests/unit/test_decision_p_remainder.py)."""
         a1 = _adv(id="A1", atype=ActionType.MANOEUVRE, prob=0.0)
         a2 = _adv(id="A2", atype=ActionType.NO_ACTION, prob=0.0)
         rs = [_fr(id="R1", cost=0.4, rev=0.7), _fr(id="R2", atype=ActionType.NO_ACTION, cost=0.0, rev=1.0)]
-        s = _scenario([a1, a2], rs)
+        s = dataclasses.replace(_scenario([a1, a2], rs), probability_rule=ProbabilityRule.SHARES)
         om = [[compute_outcome_metrics(a, r, s) for r in rs] for a in (a1, a2)]
-        assert find_robust_response(s, om, SelectorStrategy.EXPECTED_VALUE).id == "R1"
+        assert find_robust_response(s, om, SelectorStrategy.EXPECTED_VALUE) is None
 
     def test_no_friendly_raises(self):
         s  = _scenario(fr_list=[])
@@ -272,18 +283,20 @@ class TestEvaluateScenario:
         s      = _scenario()
         result = evaluate_scenario(s)
         assert result.robust_best_response.id == "R1"
-        assert result.outcome_matrix[0][0].composite_score == 0.305833
+        assert result.outcome_matrix[0][0].composite_score == 0.243769   # as test_returns_outcome_metrics
 
     def test_outcome_matrix_shape(self):
-        adv_list = [_adv(id=f"A{i}") for i in range(3)]
+        """Three rows at P 0.3 leave 0.1, which the engine weighs as a fourth row of its own (SPC-203)."""
+        adv_list = [_adv(id=f"A{i}", prob=0.3) for i in range(3)]
         fr_list  = [_fr(id=f"R{i}")  for i in range(2)]
         s        = _scenario(adv_list, fr_list)
         result   = evaluate_scenario(s)
-        assert len(result.outcome_matrix) == 3
+        assert len(result.outcome_matrix) == 4
+        assert result.scenario.adversary_actions[3].remainder
         assert len(result.outcome_matrix[0]) == 2
 
     def test_ranked_per_adversary_shape(self):
-        adv_list = [_adv(id=f"A{i}") for i in range(2)]
+        adv_list = [_adv(id=f"A{i}", prob=0.5) for i in range(2)]
         fr_list  = [_fr(id=f"R{i}")  for i in range(3)]
         s        = _scenario(adv_list, fr_list)
         result   = evaluate_scenario(s)

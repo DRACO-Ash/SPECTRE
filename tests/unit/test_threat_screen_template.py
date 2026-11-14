@@ -11,7 +11,9 @@ cannot drift from what the route passes.
 
 from __future__ import annotations
 
+import html as html_lib
 import re
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -22,11 +24,15 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from spectre.domain.models import ThreatActor, ThreatSweepEntry, ThreatTarget
 from spectre.domain.threat_assessment import (
     AccessEvidence,
+    ActorRange,
     ActorVerdict,
+    Band,
     CapabilityEvidence,
+    ScreeningResult,
     assess_threat,
     rank_actors,
 )
+from tests.unit._i13 import i13_problems
 
 _TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "spectre" / "web" / "templates"
 _TEMPLATE = "partials/threat_screen.html"
@@ -230,3 +236,96 @@ class TestTheUnitsRuleHoldsHereToo:
     def test_warning_time_leads_the_stat_cards(self) -> None:
         html = _render(_context())
         assert html.index("Warning Time") < html.index("&#916;V Required")
+
+
+# ── SPC-169: RANGE and UNDERSTANDING beside the unchanged verdict ──
+
+def _spanned() -> ScreeningResult:
+    low = ActorRange(floor=Band.MINIMAL, ceiling=Band.CRITICAL, understanding="LOW", history_held=False,
+                     at_ceiling=True, statement="Understanding LOW. Governing: information base, Identity not earned.",
+                     cue="pull its element-set history: could raise the Threat floor to HIGH, 3 Threat steps, "
+                         "about 30 min")
+    moderate = ActorRange(floor=Band.HIGH, ceiling=Band.CRITICAL, understanding="MODERATE", history_held=True,
+                          at_ceiling=False)
+    spans = {"43874": moderate, "44797": low, "41838": low}
+    return rank_actors([replace(v, understanding=spans[v.actor_satno]) for v in _context()["screening"].ranked])
+
+
+_SCREEN_BANDS = re.compile(r"\b(MINIMAL|LOW|MEDIUM|HIGH|CRITICAL|MODERATE)\b")
+_DISAGREEMENT = re.compile(r'<div class="screen-understanding-disagreement"[\s\S]*?</div>')
+
+
+def _plain(fragment: str) -> str:
+    return " ".join(html_lib.unescape(re.sub(r"<[^>]+>", " ", fragment)).split())
+
+
+class TestTheRangeAndUnderstandingColumns:
+    def test_the_table_gains_two_columns_after_the_verdict(self) -> None:
+        html = _render(_context(screening=_spanned()))
+        headers = re.findall(r'<th scope="col"[^>]*>([^<]*)</th>', html)
+        assert headers[4:7] == ["Verdict", "Range", "Understanding"]
+        assert "Threat HIGH to CRITICAL" in html and "Threat MINIMAL to CRITICAL" in html
+        assert "Understanding LOW: no history held" in html and "Understanding MODERATE" in html
+
+    def test_the_verdict_column_is_unchanged(self) -> None:
+        cell = r'<td><span style="color:[^"]*; font-weight:700">[A-Z]+</span></td>'
+        before = re.findall(cell, _render(_context()))
+        assert before == re.findall(cell, _render(_context(screening=_spanned())))
+        assert len(before) == 3
+
+    def test_the_range_takes_the_ceilings_status_token(self) -> None:
+        html = _render(_context(screening=_spanned()))
+        assert re.search(r'<td class="screen-range" style="color:var\(--spectre-status-critical\)">'
+                         r"Threat HIGH to CRITICAL</td>", html)
+
+    def test_the_understanding_cell_explains_itself_and_names_the_cue(self) -> None:
+        """Finding 7: the statement and the cue are text a keyboard or screen reader reaches, in a details element."""
+        html = _render(_context(screening=_spanned()))
+        cell = re.search(r'<td class="screen-understanding[^"]*">\s*<details>\s*<summary>([^<]*)</summary>'
+                         r'\s*<div>([^<]*)</div>\s*<div>([^<]*)</div>\s*</details>\s*</td>', html)
+        assert cell is not None
+        assert cell.groups() == (
+            "Understanding LOW: no history held", "Understanding LOW. Governing: information base, Identity not earned.",
+            "Raise it by: pull its element-set history: could raise the Threat floor to HIGH, 3 Threat steps, "
+            "about 30 min.")
+        assert "title=" not in cell.group(0)
+
+    def test_without_a_statement_the_cell_is_its_label(self) -> None:
+        assert re.search(r'<td class="screen-understanding col-dim">Understanding MODERATE</td>',
+                         _render(_context(screening=_spanned())))
+
+    def test_an_actor_without_a_range_reads_not_assessed(self) -> None:
+        html = _render(_context())
+        assert html.count('<td class="screen-range col-dim">not assessed</td>') == 3
+
+    def test_the_new_disagreement_renders_in_its_own_block(self) -> None:
+        screening = _spanned()
+        assert screening.understanding_disagreement
+        html = _render(_context(screening=screening))
+        block = _DISAGREEMENT.search(html)
+        assert block is not None
+        assert _plain(block.group(0)) == screening.understanding_disagreement
+        assert "If that assessment is wrong" in html, "the existing disagreement stays"
+
+    def test_no_block_without_the_case(self) -> None:
+        assert "screen-understanding-disagreement" not in _render(_context())
+
+    def test_the_profile_rows_span_the_wider_table(self) -> None:
+        html = _render(_context(screening=_spanned()))
+        header = re.search(r"<thead>[\s\S]*?</thead>", html)
+        row = re.search(r'<tr class="scr-child[^"]*"[^>]*>([\s\S]*?)</tr>', html)
+        assert header is not None and row is not None
+        spans = [int(n) for n in re.findall(r'colspan="(\d+)"', row.group(1))]
+        assert row.group(1).count("<td") - len(spans) + sum(spans) == header.group(0).count("<th ") == 13
+
+    def test_i13_in_the_new_cells_and_block(self) -> None:
+        html = _render(_context(screening=_spanned()))
+        block = _DISAGREEMENT.search(html)
+        assert block is not None
+        found = [*re.findall(r'<td class="screen-range[^"]*"[^>]*>([^<]*)</td>', html),
+                 *(_plain(c) for c in re.findall(r'<td class="screen-understanding[^"]*"[^>]*>[\s\S]*?</td>', html)),
+                 _plain(block.group(0))]
+        assert len(found) >= 7
+        for text in found:
+            for sentence in re.split(r"(?<=\.)\s+|(?<=held)\s+(?=Understanding)", text):
+                assert i13_problems(sentence) == [], sentence

@@ -26,6 +26,8 @@ from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
+from spectre.astro.catalogue import catalogue_number
+
 logger = logging.getLogger(__name__)
 
 
@@ -392,7 +394,7 @@ def parse_notso_text_with_rejects(raw_text: str) -> tuple[list[NOTSORecord], lis
             rejects.append(f"message {i + 1}: parse error")
         else:
             if record is None:
-                rejects.append(f"message {i + 1}: no labelled NORAD ID")
+                rejects.append(f"message {i + 1}: {_no_norad_reason(msg)}")
             else:
                 records.append(record)
     for reason in rejects:
@@ -449,15 +451,33 @@ def _fields(text: str) -> dict[str, str]:
     return fields
 
 
+_SATNO_KEYS = ("SATNO", "SAT NO", "NORAD ID", "NORAD", "CATALOG NO")
+
+
+def _satno_field(fields: dict[str, str]) -> str:
+    """The message's own catalogue number field, or "" when it has none."""
+    return next((fields[key] for key in _SATNO_KEYS if fields.get(key)), "")
+
+
 def _norad_id_of(fields: dict[str, str], text: str) -> int | None:
-    """The catalogue number from its own field, else a labelled one in the text."""
-    norad_raw = (
-        fields.get("SATNO") or fields.get("SAT NO") or
-        fields.get("NORAD ID") or fields.get("NORAD") or
-        fields.get("CATALOG NO") or ""
-    )
-    m = re.search(r"\d+", norad_raw)
-    return int(m.group()) if m else _extract_norad_id(text)
+    """The catalogue number from its own field, else a labelled one in the text.
+
+    The field's first word is read as a TLE's columns 3 to 7 are (SPC-026):
+    digits, or an Alpha-5 letter and 4 digits. Taking the first run of digits
+    filed "A0001" and "I0001" against object 1 and "USA 270" against 270; a
+    field that is not a catalogue number now gives None, never a guess.
+    """
+    raw = _satno_field(fields)
+    if not raw:
+        return _extract_norad_id(text)
+    return catalogue_number(raw.split()[0].lstrip("#"))
+
+
+def _no_norad_reason(text: str) -> str:
+    """Why a message has no NORAD ID: no field for one, or a field that cannot be read."""
+    if _satno_field(_fields(text)):
+        return "NORAD ID cannot be read as a catalogue number"
+    return "no labelled NORAD ID"
 
 
 def _predicted_dv(fields: dict[str, str], text: str) -> float | None:

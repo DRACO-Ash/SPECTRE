@@ -104,7 +104,7 @@
           <label style="display:flex; align-items:flex-start; gap:0.55rem; cursor:pointer; width:100%">
             <input type="checkbox" name="obj_{{ obj.id }}" value="{{ obj.id }}"
                    style="margin-top:0.15rem; accent-color:#f59e0b; flex-shrink:0; width:0.85rem; height:0.85rem"
-                   onchange="updateObjectivesJson()">
+                   data-action-change="updateObjectivesJson">
             <div style="flex:1; min-width:0">
               <div style="font-size:0.67rem; font-weight:600; color:var(--text-primary); line-height:1.4">
                 {{ obj.description }}
@@ -180,7 +180,7 @@
       </button>
       <button type="button" class="btn-secondary"
               style="font-size:0.68rem; color:#ef4444; border-color:rgba(239,68,68,0.35)"
-              onclick="document.getElementById('scenario-detail').innerHTML=''"
+              data-action="clearScenarioDetail"
               title="Close this panel without submitting. A scored attempt stays on record as started; use Reset to cancel it">
         Abandon
       </button>
@@ -190,34 +190,6 @@
 
 </div>
 
-<script>
-(function() {
-  {% if scenario.time_limit_minutes %}
-  var remaining = {{ scenario.time_limit_minutes * 60 }};
-  var timerInterval = setInterval(function() {
-    remaining--;
-    if (remaining < 0) {
-      clearInterval(timerInterval);
-      document.getElementById('timer-display').textContent = '0:00';
-      return;
-    }
-    var m = Math.floor(remaining / 60);
-    var s = remaining % 60;
-    document.getElementById('timer-display').textContent = m + ':' + (s < 10 ? '0' : '') + s;
-    if (remaining < 120) document.getElementById('timer-display').style.color = '#ef4444';
-  }, 1000);
-  // The countdown is a display only: the server measures the elapsed time
-  // from when the attempt started and judges the time limit itself.
-  document.getElementById('scenario-submit-form').addEventListener('submit', function() {
-    clearInterval(timerInterval);
-  });
-  {% endif %}
-
-  window.updateObjectivesJson = function() {
-    var checked = Array.from(
-      document.querySelectorAll('#scenario-submit-form input[type=checkbox]:checked')
-    ).map(function(cb) { return cb.value; });
-    document.getElementById('objectives-json').value = JSON.stringify(checked);
-  };
-})();
-</script>
+{# The countdown and the objectives list are scenario-attempt in /static/js/training.js (SPC-199). The countdown
+   is a display only: the server measures the elapsed time and judges the time limit itself. #}
+<span hidden data-init="scenario-attempt"{% if scenario.time_limit_minutes %} data-remaining-s="{{ scenario.time_limit_minutes * 60 }}"{% endif %}></span>

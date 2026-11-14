@@ -1,178 +1,1727 @@
-# Decision Engine — Phase Roadmap
+# Decision Engine: as built, and the phases that built it
 
-*Last updated: 2026-04-08*
+*Rewritten for 0.24.0 (SPC-152) to describe the engine as it stands at the end of that release, and updated for
+three owner rulings of 2026-11-05: the 300 s evaluation budget (SPC-178), degraded custody scored between held and
+lost (SPC-179) and the record of whether each P was edited (SPC-183); for the score scales of SPC-191, which are
+Claude's design choices, not rulings; for the decision record of SPC-192; and for every rule's pick side by side
+with a primary rule (SPC-194) and replay from the stored record (SPC-193); for responses the operator marks not
+permitted (SPC-195); for the judgement basis, the lookup register and the code version on the results (SPC-196);
+and for the element-set acceptance check and the operating envelope (SPC-201, SPC-200); for what P means, a
+probability over mutually exclusive actions with the remainder weighed (SPC-203); and for collect first tied to the
+engine's own recommendation (SPC-204) and the weight stability beside it (SPC-205); and for element-set error in
+every closest approach the engine propagates (SPC-202); and for 0.38.0: a game tree's own cost cap, measured under
+load (SPC-188), the best branch under each response (SPC-189), ties shown as ties (SPC-206), scores with no colour
+bands (SPC-208) and decide-by only on the operator's own response time (SPC-211); and for the lookup model's
+relations registered and every result resting on one labelled training only (SPC-207), and the update's likelihood
+said to be uncalibrated, with a calibration harness that has no data yet (SPC-210).
+The history of each step is in CHANGELOG.md and docs/CHANGE-LEDGER.md; this page says what the engine does now and
+why.*
 
----
+**Plan status.** The owner ruled on 28 October 2026 to invest in every phase. The build plan is `.board/items.json`,
+SPC-100 to SPC-152, summarised in `.board/README.md`. Three points of the original plan were corrected before the
+build and stand:
+● Phase 2 needs the blue element set: `MonteCarloResult` holds element statistics at the horizon, not trajectories,
+  so closest approach needs a separation series.
+● Score on the P5 closest approach, not P95: for a miss distance the conservative figure is the smallest one.
+● The Phase 4 tree is server-rendered with details and summary elements rather than D3.js, which is not vendored.
 
-## Current State: Phase 1 (Deterministic)
+Gate for Phase 2 (SPC-110) and Phase 3 (SPC-120): tests/unit/test_decision_reference_cases.py passes with that
+phase's path added to PATHS, at both window starts (SPC-102).
 
-**Status: ✅ Complete and in production**
+## The question it answers
 
-Phase 1 evaluates a user-defined grid of adversary actions × friendly responses using deterministic analytic estimates and a weighted composite scoring function.
+The operator's question is: "Something moved. Can it reach one of mine, how long have I got, does it mean anything,
+and what do I need to decide, by when?" The sweep answers the first three. The Decision Engine is output 4, the
+recommended response: given what red might do next, which of our responses holds up best, and what each figure
+behind that ranking rests on.
 
-### What Phase 1 does
+The operator enters up to five adversary actions and up to five friendly responses. The engine fills an outcome
+matrix, one cell per pair, ranks the responses for each adversary action, and picks one response under each of the
+three rules, never one the operator marked not permitted, the deployment's primary rule's pick heading the result. With a turn depth of 2 or 3 it also builds a game tree in which red may move again after each of our
+responses. The result is a modelled recommendation, never an order, and the page says so.
 
-- Operator enters N adversary actions (type, probability, confidence) and M friendly responses (type, cost, reversibility, time-to-execute)
-- Engine computes an N × M outcome matrix; each cell contains:
-  - `composite_score` (weighted sum, lower = better for friendly)
-  - `custody_maintained` (bool — can friendly satellite keep track?)
-  - `closest_approach_km` (minimum separation during horizon — analytic SMA-difference approximation)
-  - `time_to_intercept_h`, `delta_v_cost_km_s` (analytic estimates from orbital mechanics rules of thumb)
-- Three selector strategies: **Minimax** (minimise worst-case), **Expected Value** (probability-weighted), **Minimin** (optimistic, best best case; renamed from "Maximin", which named the cautious rule it did not implement)
-- Results: modelled-recommendation banner ("Modelled estimate, not a computed solution") + full outcome matrix + per-adversary ranked response cards
+## Every figure states its basis
 
-### Key files
+Each figure carries a `FigureBasis` (SPC-101) of one of four kinds, shown beside it as "(computed)", "(sampled)",
+"(lookup)" or "(judgement)" with the rule behind it in words:
+● **Computed**: propagated from real element sets, both objects on one propagator, with no randomness.
+● **Sampled**: the P5 of many propagated realisations of a hypothesised red burn, with its spread and how well that
+  P5 is known.
+● **Lookup**: a fixed rule of thumb or table value. It moves the ranking but rests on no orbit. Every one the engine
+  reads is in docs/lookup-register.md (SPC-196).
+● **Judgement**: a value the operator set or kept on the panel (SPC-196). It is not evidence. The results list each
+  one under "Judgement inputs", set out below.
 
-| File | Role |
-|------|------|
-| `spectre/domain/decision.py` | Core data model + `evaluate_scenario()` |
-| `spectre/web/routes/decision.py` | `GET /plan/decision/panel`, `POST /plan/decision/evaluate` |
-| `spectre/web/templates/partials/decision_panel.html` | Scenario builder form |
-| `spectre/web/templates/partials/decision_results.html` | Outcome matrix + recommendation |
+The composite score is a weighted sum of custody, closest approach, our delta-V, time to execute and reversibility,
+lower being better. Its weights are uncited (SPC-151), so the score is always a lookup, whatever its inputs are.
+Closest approach and our delta-V are each valued in orders of magnitude (SPC-191): closest approach scores its full
+penalty at or inside the keep-out distance the operator sets on the panel and none at 50,000 km, and our delta-V
+reaches its full penalty at the engine's 1,000 m/s per-burn limit. The next section sets out both scales.
 
-### Known Phase 1 limitations
+Custody lost and closest approach are separate terms (SPC-219, evaluation F-20). The score adds each term, weighted,
+with nothing joining them (`decision.score_terms`, `decision._score`): a close approach while custody is lost scores
+what the two score apart, no more, though an approach we cannot see may be worse than the two added together. No
+source for a term joining them was found, so none is added and the assumption is stated instead: beside the outcome
+matrix and the game tree (`decision.TERMS_INDEPENDENT_LINE`), in the operator guide's limitations and in the lookup
+register's assumptions with no constant. A sourced interaction term would change every score, so a record's replay
+would then need the stored inputs version raised; none is planned.
 
-- Outcome metrics are **analytic estimates**, not SGP4 propagations (closest approach via SMA difference approximation)
-- Adversary actions have no manoeuvre hypothesis — all actions are treated as constant-SMA from a propagation standpoint
-- No uncertainty — single deterministic outcome per (adversary, response) pair
-- ΔV cost is estimated from orbital mechanics rules of thumb, not simulated
+## Score scales (SPC-191)
 
----
+**Status: built. Each scale is Claude's design choice, not a ruling.** Evaluation finding F-10 (Critical) found the
+score nearly blind to closest approach. Closest approach entered it linearly over 0 to 50,000 km at weight 0.25, so
+1 m/s of our delta-V weighed the same as 400 km of miss, and our delta-V saturated at 100 m/s, so 100 and 500 m/s
+scored the same. A 1 m/s burn that opened a miss from 1 km to 100 km ranked below doing nothing (probe P-17). The
+owner said on 2026-11-10 "F-10 first". **The technical authority has not yet signed the scale rationale**, which
+F-10's closing evidence requires, so F-10 stays open until it does.
 
-## Phase 2: Monte Carlo Integration
+● **Closest approach, in orders of magnitude from a keep-out distance K** (Claude's choice). The term is 1 for a
+  miss at or inside K, 0 at or beyond 50,000 km, the far anchor kept from before, and ln(50,000 / miss) /
+  ln(50,000 / K) between. It is continuous and falls strictly between the anchors, and each tenfold of miss is worth
+  the same: about 0.27 of the term at K 10 km. The operator's question is whether something can reach one of theirs,
+  a question of magnitude: 1 km and 100 km differ in kind, 20,000 km and 20,100 km do not.
+● **K is the operator's** (Claude's choice). It is a Scenario field, keep_out_km, set on the panel as the labelled
+  number field "Keep-out distance (km)", from 0.1 to 10,000 km, below the far anchor so the scale has room. A value
+  outside that range, or not a finite number, is refused with a sentence, as every other panel number is. A cleared
+  field is refused too, as a cleared horizon is: the form reads a blank as absent, so a default there would score a
+  cleared field at 10 km unasked. The result states the distance it used exactly as entered.
+● **The default K is 10 km** (Claude's choice, unsourced). A miss of a few kilometres is close for any asset, but
+  10 km rests on no source, and the panel, the score's basis note and the result each say so. A scenario opened from
+  the sweep, a reference case and a scenario built in code take the default. K enters the scenario's provenance hash
+  as every other scenario field does.
+● **Our delta-V, in orders of magnitude up to the per-burn limit** (Claude's choice). The term is ln(1 + dv) /
+  ln(1,001) for dv in m/s, and 1 at the engine's per-burn limit, MAX_BURN_M_S, 1,000 m/s, and above. 1 m/s scores
+  0.10, 10 m/s 0.35, 100 m/s 0.67 and 500 m/s 0.90, where 100 and 500 m/s both scored 1 before.
+● **One function each.** `_norm_ca` and `_norm_dv` in `spectre/domain/decision.py` are the only places the score
+  reads a miss or our delta-V. The cell score, the sampled score's percentiles and spread, the computed and sampled
+  response figures, the burn score note, the sampled caveat's spread and the game tree's path score all go through
+  them. The burn score note is now the term before the burn less the term after it, not a linear share of the km,
+  and it reports the cell whose score the burn moves most, which on this scale need not be the one where it buys
+  most kilometres. The game tree's path score reads our burns along a sequence added up on the same scale, so
+  burns adding up to 1,000 m/s or more score the full delta-V term, and its basis note says so.
+● **Break-even at the defaults.** Opening a miss from 1 km to 100 km lowers the score by 0.25 x (1 - ln 500 /
+  ln 5,000) = 0.0676. Our delta-V adds 0.20 x ln(1 + dv) / ln 1,001, which equals that at about 9.3 m/s. A burn
+  under about 9.3 m/s that buys that move now scores better than doing nothing; under the old scales the break-even
+  was about 0.25 m/s. P-17's 1 m/s burn to 100 km scores 0.2039 against 0.2514 for doing nothing, and minimax picks it.
+  The break-even moves with K: about 38 m/s at K 1 km, and none at K 100 km, where a 1 km and a 100 km miss both
+  score the full penalty.
+● **The evaluation probe stays as evidence of 0.24.2.** Evaluation probe P-17 is frozen with the evaluation and
+  reads a constant SPC-191 removed, so it no longer runs against this code. Its inversion, F-10's closing evidence
+  in the code, is `tests/unit/test_decision_score_scales.py`, which recommends the 1 m/s burn to 100 km.
+● **What moved.** No reference case's pick changed: in every case at both window starts, Hold is still the pick under
+  all three rules. No pinned pick in the test suite changed. Pinned scores were re-derived by hand from the two
+  formulas. Scores on far misses fall, so many cells that were amber now read green under the results' colour bands
+  (green below 0.25, amber below 0.50). In the 12 cells of the lookup scenario evaluation probe P-17 uses, misses of
+  200 to 15,000 km, every score drops by 0.07 to 0.16 and 5 cells change band, four of them amber to green and one
+  red to amber. A miss under about 10 km barely moves, and a small burn of ours scores more than before. The bands
+  themselves were finding F-18: no source set their thresholds, and SPC-208 removed them in 0.38.0, so no score is
+  coloured by its value now.
 
-**Status: Next sprint**
+## Judgement inputs, the lookup register and the code version (SPC-196)
 
-**Dependency:** `spectre/astro/monte_carlo.py` (already built and tested)
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed at the
+end of this section.** Evaluation finding F-05 (Critical, gate G5) found every figure tagged computed, sampled or
+lookup, but the operator's own values (each response's cost, reversibility and time to execute, each row's P and
+Conf, the weights, the keep-out distance) carried no judgement tag, the lookup constants no source, owner or date,
+and the code version was never shown. Gate G5 was rated Red; that rating stands until the evaluation is repeated.
 
-### What changes
+● **A fourth basis, judgement.** `Basis.JUDGEMENT` in `spectre/domain/provenance.py` is a value the operator set
+  or kept on the panel. It is declared first, the weakest of the four: `weakest()` of a judgement and anything else
+  is the judgement, so a judgement never lends a figure more standing than a lookup. A lookup is at least a fixed,
+  registered rule, the same for every operator; a judgement is one operator's opinion at one evaluation. The Threat
+  Understanding model grades a judgement as it grades a lookup, LOW, and refuses a judgement as evidence.
+● **Judgement inputs on the results.** Under the basis lines, the results list every input on the panel that enters
+  a score or a pick, each marked in words: the weights, the keep-out distance, the horizon and the number of turns;
+  each response's type, cost, reversibility and time to execute, and its burn's target separation, delta-V budget and
+  axis when it has one; each row's type, P and Conf, and its custody gap share where the rule of thumb reads it, which
+  is on a manoeuvre row whose custody is not read, against a response that neither manoeuvres nor retasks a sensor;
+  each manoeuvre hypothesis and its sample count; and, for a tree, the turn-1 observation stated. Each line says what
+  reads its inputs. The headline response's type, cost, reversibility and time to execute, and each row's type, P,
+  Conf and gap share in the matrix, carry the same mark beside them.
+● **Set or kept.** A value on the panel when the operator evaluates is the operator's judgement, whether set or kept
+  where the panel started it: the form records no edit of it, so its note names where a new panel starts it, never
+  that it was typed. A delta-V budget left blank is the registered default, 50 m/s, which the operator kept by
+  leaving it blank, and its note says so. The values a new panel starts at are in the lookup register, and a test
+  holds the panel's fields and the route's form to them.
+● **What is not a judgement says what it rests on.** A P the form records as never edited is the panel's default
+  (SPC-183), marked "(lookup)"; a P and Conf from an applied NOTSO suggestion (SPC-130) carry the suggestion's own
+  basis. A manoeuvre hypothesis is marked by where it came from: entered on the panel, a judgement of what red might
+  do; an archetype chosen, a judgement, with its typical delta-V a lookup from `MANOEUVRE_ARCHETYPES`; a burn
+  detected in the element-set history, what red did, computed from element sets. Its line says its row's closest
+  approach is sampled from it only when the row was sampled, and otherwise that nothing was sampled from it.
+● **A figure's mark names the evidence and rules it rests on, taking the inputs as given.** The operator's inputs
+  are not counted in a figure's basis: every figure rests on the weights alike, so counting them would mark every
+  figure a judgement and tell none from another. A lookup that applies a rule of thumb to an input, such as cost x
+  0.05 km/s of delta-V, is marked lookup for the rule, and the input is listed as a judgement. The score is marked
+  lookup, as before, and no stronger.
+● **The lookup register.** `docs/lookup-register.md` lists every numeric constant in the Decision Engine's own
+  modules, and the lookups it reads from other modules to set a figure, a score, a pick or its advice (the manoeuvre
+  archetypes, the collect-first times, the NOTSO interval, the element-set age limits and others), each with its
+  value, where it is in the code, what it does, its source or "none: rule of thumb", its owner ("unassigned" where
+  none is recorded, and the owner's rulings where they exist) and the date it was set. The rules of thumb that were
+  bare numbers in the lookup model (cost x 5 and cost x 2 on closest approach, cost x 0.05 km/s of delta-V, half a
+  sensor retask's time to execute, 0.4 of the horizon) are now named constants, with no change of value, and so are
+  the values a new panel starts Conf, cost, reversibility, time to execute and the horizon at.
+  `tests/unit/test_lookup_register.py` fails when a constant the register names leaves the code or changes value
+  without the register; when one of the engine's own modules gains a numeric module constant the register does not
+  list, however it is assigned; when the lookup model's functions hold a bare number other than 0 and 1; and when
+  the panel or the route's form starts a field anywhere but its registered value.
+● **The code version on the results.** The figure-basis lines end with the code version that computed the result,
+  from its provenance, in words: "Code version 0.28.0: the version SPECTRE reports for the code that computed this
+  result, from its provenance." It names a release only for a released build. A result with no provenance says its
+  code version is not recorded.
+● **Stored inputs unchanged.** No Scenario or response field was added, so the stored inputs keep schema version 1,
+  and a record written by 0.28.0 reads and replays as before. The reader now refuses a stored NOTSO suggestion whose
+  basis is a judgement, which no writer stores.
+● **Claude's design choices, awaiting the owner's ruling.** Judgement ranks below lookup rather than beside it. A
+  judgement is an input's basis, not a derived figure's, for the reason above. A value kept at the panel's start is
+  the operator's judgement, as is a budget left blank, rather than a lookup, since the form records no edit of them
+  as it does for P; recording one would change the stored inputs. Conf is listed though it moves no figure, as the
+  finding names it. A detected burn is marked computed and listed with the inputs, so its row's line says what it
+  rests on. The register's completeness check covers the engine's own modules; the constants of other modules it
+  lists are held to their value, not checked for newcomers.
 
-- `AdversaryAction` gains an optional `hypothesis: ManoeuvreHypothesis` field (from `monte_carlo.py`)
-- When a hypothesis is attached, `compute_outcome_metrics()` replaces the analytic estimate with a Monte Carlo run:
-  - Samples N realisations of the adversary manoeuvre (perturbed ΔV, timing, pointing)
-  - Propagates each sample forward via RK45 + J2 + drag
-  - Computes closest approach for each realisation → distribution
-  - Returns `closest_approach_km_p5`, `closest_approach_km_p50`, `closest_approach_km_p95`
-- `OutcomeMetrics` gains `ca_percentiles: dict[int, float]` and `ca_std_km: float`
-- Scoring uses the P95 closest approach (conservative) instead of the point estimate
-- `ScenarioResult` gains `monte_carlo_runs: int`, `mc_wall_time_s: float`
+## Phase 1: the matrix, bound to real objects
 
-### UI additions
+**Status: built.**
 
-- Decision panel: "Adversary Manoeuvre Hypothesis" collapsible section per action row
-  - ΔV magnitude (km/s), RIC direction, uncertainty σ, archetype dropdown (from `MANOEUVRE_ARCHETYPES`)
-  - n_samples slider (100–2000, default 500)
-- Results: outcome matrix cells show P5–P95 band instead of single score; hover tooltip shows full percentile distribution
-- New "Uncertainty" column in per-adversary rankings showing σ of composite score across MC runs
+● **Unbound**, every figure is a lookup: closest approach is 200, 3,000, 5,000 or 10,000 km by adversary action
+  type, raised by the response's cost, custody follows a rule of thumb set by each row's custody gap share
+  (default 0.7), and our delta-V is the response's cost times 50 m/s for a manoeuvre. A bound scenario takes these
+  lookups only where nothing is computed or sampled (SPC-125): custody before it is read, our delta-V where no burn is
+  sized, and a refused row's closest approach. Each is marked lookup.
+● **Bound** (SPC-100): a scenario may be bound to one held red track and one held blue asset. The result names
+  them, shows each element set's epoch and age at evaluation against its regime's limit (72 h for GEO and a perigee
+  beyond GEO, 24 h otherwise, HEO and Molniya-class included) and puts both element sets in its provenance. The lookup model refuses a bound scenario, so no bound
+  figure rests on a lookup constant where a computed or sampled figure exists.
+● **P and Conf** are the operator's. P is the chance of the row's action, the rows mutually exclusive, so their P
+  sum to at most 1, and the rest is weighed as a row of the engine's own, no adversary action (SPC-203, set out
+  below). P weights expected value. Conf records how sure the intelligence behind P is and moves no figure
+  (SPC-161). Neither is ever filled in unasked.
+● **Three rules pick the response**: minimax (least worst case, the default and the cautious rule), expected value
+  (least probability-weighted score) and minimin (least best case, the optimistic rule, not a robust one). Each
+  reads the remainder row as it reads the operator's rows.
 
-### Implementation steps
+Key files: `spectre/domain/decision.py` (the model and `evaluate_scenario`), `spectre/web/routes/decision.py` (the
+panel, binding, evaluation and job routes), `spectre/web/decision_binding.py`, `spectre/web/decision_custody.py`,
+`spectre/web/decision_threat.py`, `spectre/web/decision_job.py`, and the panel and results templates under
+`spectre/web/templates/partials/`.
 
-1. Add `hypothesis: ManoeuvreHypothesis | None = None` to `AdversaryAction`
-2. Update `compute_outcome_metrics()` to branch on `hypothesis` presence
-3. Add `ca_percentiles` / `ca_std_km` to `OutcomeMetrics`
-4. Update `decision_panel.html` with per-row hypothesis accordion
-5. Update `decision_results.html` to show P5/P50/P95 bands in cells
-6. Add `hypothesis_*` form fields to `decision_evaluate` route
+## Phase 2: a sampled closest approach
 
----
+**Status: built (SPC-110 to SPC-117).** Gate passed by `monte_carlo_nominal` in
+tests/unit/test_decision_reference_cases.py.
 
-## Phase 3: SGP4-Propagated Outcomes
+● An adversary row may carry a **manoeuvre hypothesis** (SPC-111, SPC-114): an archetype, a delta-V in m/s, a
+  radial, in-track and cross-track direction, a delta-V spread, samples (100 to 2,000, default 500) and a burn time
+  in hours from the scenario epoch, the moment Evaluate is pressed (from 72 h before it to the horizon). Blank fields
+  take the archetype's; an archetype's direction is assumed in-track and says so. The hypothesis starts from the
+  bound red track's own state at the burn time; a burn detected in the element-set history, opened from the sweep,
+  starts from the element set before it (SPC-150).
+● With both sides bound, that row's closest approach and its time are **sampled** (SPC-112): each sample's burn is
+  drawn, propagated by RK45 with J2 and drag beside the blue asset, and its closest approach found. The row scores on
+  P5, and its time of closest approach is the earliest at or below P5. One series serves the row, except that a
+  response with a sized burn gets its own series after that burn, so its cells differ from the rest of the row.
+● Before anything runs, a row is **refused**, keeping its cell a lookup and saying why, for fewer than 50 samples,
+  an orbit not current, a red element set newer than the burn (it may already contain it; for a row of several
+  burns, at or after every one of them), a start more than 10 km
+  or 100 m/s from the bound red track, or a cost over the cap. While running, a failed sample or a series that does
+  not converge refuses the row by name.
+● **Converged** means P5, P50 and P95 are each known to within 1 km, or 5 per cent of P5 where that is larger
+  (SPC-117): the operator reads P5 to answer "can it reach one of mine", and 8 km at 800 km changes no answer.
+  Below 20 km the 1 km floor governs.
+● **The cost cap** is 12,000 sample-hours, what the 300 s budget covers at the slowest rate measured (40 sample-hours
+  a second), with 9 minutes of set-up counted per sample. The owner ruled on 2026-11-05 to raise the budget from 120
+  s, when the cap was 4,800 (SPC-178). An over-cap row is refused naming the longest horizon that would fit; the
+  panel says about 11.8 h fits at 500 samples with no burn to size, since SPC-224 charges each sampled row twice for
+  the second seed its convergence is checked on (23.7 h on one seed). Nothing else ends a run before its budget: the
+  page polls without limit, no reaper ends a job (it stops only when cancelled, replaced, signed out of, when the
+  sign-in expires 8 h after it began, or at shutdown), and no server or container timeout applies to it.
+● **Off the request** (SPC-113): a scenario that samples runs as a session job the page polls every 2 s, naming the
+  hypothesis being sampled, the samples done and the budget used, with a Cancel button. One sampled evaluation runs
+  on the server at a time; a second waits and its budget starts when it runs. A stopped evaluation scores nothing and
+  says why.
+● **On screen** (SPC-115): a sampled cell shows P5 to P95 with the median, the half-width all three are known to, and
+  the score's spread across samples. Since SPC-213 the closest approach's basis note gives P5 its own half-width and
+  names the convergence figure apart, as the widest of the three, and since SPC-214 it states the integrator's own
+  error; since SPC-225 it states the WGS-72 to WGS-84 handover, and since SPC-224 the seed it was drawn on and the
+  second its convergence was checked on. Since SPC-202 every sample also draws both objects' element-set error along
+  track, and the cell says so with each side's error and age; the hover names what is still not in the band:
+  element-set error across track and the hypothesis being wrong.
 
-**Status: After Phase 2**
+## Phase 3: computed outcomes, custody and our burns
 
-**Dependency:** Phase 2 complete; both red and blue TLEs available in session state
+**Status: built (SPC-118 to SPC-125).** Gate passed by `decision_phase3` in
+tests/unit/test_decision_reference_cases.py.
 
-### What changes
+● **Computed closest approach** (SPC-120): with both sides bound, a row whose action does not move red (no action,
+  a sensor retask, a posture change) gets the pair's closest approach with no burn, propagated by SGP4 from both
+  element sets, searched every 60 s with each local minimum refined to 0.01 s. A manoeuvre row with no hypothesis is
+  refused, saying to add one: where red goes if it does not move is not the outcome of a manoeuvre. Since SPC-200 the
+  search holds the RK45 path's re-entry floor, 100 km: an object below it at any instant searched has decayed, and
+  every computed cell is refused, saying so. Since SPC-202 the miss carries a band beside it, the miss less and plus
+  both element sets' error at the closest approach in quadrature, and the score reads the band's lower edge.
+● **One propagator per figure**: computed is SGP4 on both objects, sampled is RK45 on both. When a matrix holds
+  both, the result states the measured gap between the two propagators.
+● **The span searched** (SPC-118) runs from the scenario epoch to the earlier of the horizon's end and the moment
+  either element set passes its limit, and the page states a trimmed span.
+● **The time of closest approach** carries an uncertainty (SPC-118, SPC-124): both element sets' position error over
+  the closing speed, erring wide, and the hours after the epoch are printed no finer than that uncertainty. Since
+  SPC-202 a sampled TCA's uncertainty holds only the error's growth from the scenario epoch to the TCA, since every
+  sample draws the error at the epoch.
+● **Custody** (SPC-123) is the operator's definition: timely and actionable information to judge whether a burn is
+  normal and how the warning time changed. With a red track bound, the route reads its custody as the sweep does and
+  carries it over the horizon on the assumption that no newer element set arrives: it is lost from the earliest of
+  the scenario epoch if lost already, the newest element set passing its limit, and a hypothesised burn that set cannot show.
+  A row of several burns is read at the earliest burn it applies (SPC-184).
+  Degraded custody, which can judge the warning time but not whether a burn is normal, is degraded until one of
+  those would lose it. The owner ruled on 2026-11-05 that it scores between held and lost (SPC-179): each hour
+  degraded carries 0.25 of the custody penalty an hour lost carries, a ruling and not a sourced figure. The hours it
+  is degraded are shown as degraded in the cell, its basis and the result's custody note, never as held or lost, a
+  span under 0.1 h as "under 0.1 h" rather than 0.0 h, and the custody gap counts lost hours only. Once one of those
+  rules loses it, it is lost, as held custody is. A manoeuvre with no burn time takes the worst case, a burn at the scenario epoch, and says
+  so, unless custody is lost at the epoch already. Our response is not applied to custody.
+● **Our response burns** (SPC-121): a manoeuvre response may carry a target separation, a delta-V budget (50 m/s
+  unless given) and an axis. Its burn is sized, not optimised: the manoeuvre library's first guess is doubled
+  towards the target and halved back to within 1 per cent, in at most 16 trials, both senses flown. Our burn is
+  applied to the blue asset by RK45, so once any response is sized every computed cell is RK45 too, with the SGP4
+  figure shown beside it. The cell says what the burn buys. A burn that cannot reach the target within the budget
+  flies the whole budget, and the cell says how far short it falls; its delta-V is that burn's. A burn that would
+  come after the closest approach or the span searched, or whose arc fails or re-enters, is refused in its cell, and
+  its delta-V stays a lookup.
+● **Show trajectory** (SPC-124): every propagated cell links to the Hill-frame view of its pair and window, labelled
+  as a third model that shows the shape of the approach, not the cell's figures. A sampled cell has a histogram of
+  its samples' times of closest approach, with the same figures as a table.
 
-- Replace analytic closest-approach estimate with full SGP4 propagation:
-  - Start from red TLE at scenario epoch
-  - Apply adversary manoeuvre hypothesis (sampled from MC)
-  - Propagate both objects to horizon; compute actual minimum separation via `TLEOrbit.propagate()`
-  - Apply response ΔV to blue TLE; propagate; recompute separation
-- `OutcomeMetrics.custody_maintained` becomes a true SGP4 result (line-of-sight check at each step)
-- Enables time-of-closest-approach (TCA) calculation
+## The sweep's Threat picture and collect first
 
-### UI additions
+**Status: built (SPC-171; any age, SPC-181).** Threat Understanding concept, docs/threat_confidence_concept.md,
+section 7.5, and section 9, decision 9.
 
-- TCA timestamp shown in each outcome matrix cell (tooltip)
-- "Show Trajectory" button per outcome cell → opens the Hill-frame CW geometry visualiser for that (adversary, response) pair
-- Summary: TCA distribution histogram (Chart.js) for the selected best response
+● The engine reads the Threat range, Understanding, cues and decide-by of the last sweep in the session, when it was
+  of the bound red track, at any age, and decide-by only for the blue asset it was set for, so the two never
+  disagree. The session holds one picture, so a later sweep of another red track replaces it, as does a sweep whose
+  model failed. Threat and Understanding are shown as separate sentences, each with its axis named.
+● Every figure and sentence the picture feeds carries its age at evaluation in words beside it: the threat lines,
+  the decide-by, the collect-first advice and rows, the expected-value guidance and each row's Understanding, for
+  example "from the sweep's picture assessed 3 h 10 min before this evaluation". A picture states when it was
+  assessed; one assessed after the evaluation has no age to show, so it is not read.
+● The sweep words its decide-by against its own clock. One still ahead at evaluation holds only clock times and is
+  shown as the sweep worded it. One that has passed by the evaluation is said again against the evaluation: when it
+  was, and when the intercept could arrive, in hours after the evaluation, or that it could have arrived before it.
+  So the line never says "Decide by" a past time, and it agrees with the advice below it.
+● **Decide-by needs the operator's response time** (SPC-211, evaluation F-23, the lead's ruling). Each target's
+  decide-at is its soonest credible arrival less the response time for it: its own where set, else the sign-in's.
+  Until 0.38.0 a 12 h default chosen by the developer, tuned, not sourced, stood in when neither was set, and moved
+  every decide-by and collect-first deadline with it. Now a target in reach with neither set gives no decide-by: the
+  sweep says decide-by needs a response time, names each such target, and shows no time, since that target's
+  decide-at is unknown and could be the earliest. With no decide-by no collection can be shown to land before it, so
+  a straddle acts on the ceiling, as with a decide-by withheld. A decision record keeps the decide-by the sweep set
+  in its stored Threat picture, the time and the sentence, and a replay reads them back as stored and never works
+  decide-by out again, so a record whose decide-by rested on the old default replays exactly and still says so.
+● The sweep's advice is judged against the action line: the Threat band at which the owner may set that a response
+  changes, HIGH by default, tuned, not sourced, said in a sentence of its own beside every advice that names it.
+  When the Threat range straddles it and a collection with value above 0, whose result SPECTRE can read, lands
+  before decide-by, the sweep would collect first (SPC-182: owner ruling, 2026-11-05, as concept section 4.10 first
+  said, so a collection need not be able to move the range off the line); with no such collection, or decide-by
+  passed, it says act on the ceiling. A collection whose result SPECTRE cannot read, holding UDL conjunctions or a
+  second provider's history, never counts, since its result never lands.
+● The engine collects first only for a collection whose outcomes give different recommended responses (SPC-204, set
+  out below). The outcome matrix reads no Threat band, so none does, and the advice says the collection would narrow
+  the Threat range but cannot change the recommended response, and never says to delay the decision for it.
+● Collections are listed beside the ranking, never scored, so the recommendation is always one of the operator's own
+  rows.
+● Under expected value, a bound row whose Understanding is LOW, or any row whose P the form records as never
+  edited, carries the guidance that expected value rests on a probability the evidence has not earned, and
+  recommends minimax. The selector is never switched for the operator.
+● **Whether each P was edited** is recorded by the form (SPC-183), so a deliberate 0.5 is the operator's own. The
+  NOTSO region inside the form is asked again on every change, with every row's id and P, and answers with a hidden
+  field per edited row, keyed by its id, which the next change and Evaluate send back. A row is edited once its P is
+  posted as anything but the text the panel gives every row, and stays edited, through re-renders and row additions
+  and removals. Evaluate also reads the P posted beside the record, so an edit to anything but 0.5 just before
+  pressing it counts; an edit away from 0.5 and back that the region has not yet answered is not recorded, and the
+  row shows the guidance, the cautious side. A row whose P came from an applied NOTSO suggestion counts as edited.
+  htmx's HX-Trigger-Name header names the element that asks, the region, not the field that changed, so the record
+  compares each P with the panel's text instead. Retyping the same value is no change to the browser and is not
+  recorded, so a deliberate 0.5 is made by changing P and setting it back. A row whose P was never edited says its P
+  is the panel's default and only its Conf the operator's.
 
-### Implementation steps
+Concept section 9 records the choices this rests on, each Claude's choice when built: decision 9 (where the
+engine reads the Threat range and decide-by), decision 10 (collect first with no decide-by), decision 11 (what counts
+as an untouched probability, ruled on 2026-11-05: the form tracks whether each P was edited, SPC-183), decision 12
+(collect-first rows are listed, not scored) and decision 13 (what a scenario opened from the sweep can carry,
+SPC-150; every burn of the transfer, SPC-184).
 
-1. Add `propagate_outcome()` in `decision.py` — wraps `TLEOrbit.propagate()`
-2. Require `blue_tle` and `red_tle` in `evaluate_scenario()` for Phase 3 path
-3. Add TCA to `OutcomeMetrics`
-4. Wire "Show Trajectory" button → `POST /plan/geometry/intercept` with cell parameters
+## Every burn of a transfer
 
----
+**Status: built (SPC-184).** Owner ruling, 2026-11-05: carry every burn of the transfer (concept section 9,
+decision 13).
 
-## Phase 4: Multi-Turn Adversary Modelling
+● A scenario opened from the sweep carries every burn of the entry's transfer on its row, each at its own UTC time
+  with its own prograde, normal and radial parts in m/s, read as in-track, cross-track and radial. The departure
+  burn's parts are its VNB parts, as before, which match on a near-circular orbit; each later burn's are split in
+  red's own RIC frame at its state on the transfer, where the engine applies it, since a Lambert or minimum-time
+  solution splits its arrival burn at the target's state. The burns are one adversary action with one P, never
+  alternatives. The departure burn fills the row's fields; the panel lists every burn in words before Evaluate and
+  carries the later burns beside the first burn's fixed time. A transfer of one burn fills the panel as before.
+● A solution whose listed burns do not sum to its delta-V does not list every burn: a V-bar or H-bar hop solution
+  lists its entry and final burns of 3 hops. Its row carries the departure burn alone, as before SPC-184, and the
+  panel says why.
+● Wherever the row is sampled, and wherever our burn is sized against it, red makes every burn the row applies in
+  time order, each in the RIC frame of its own state at that burn. A burn due after the span searched ends is handed
+  to no sample, so no figure flies it. Our sized burn's line, and the closest approach an after-TCA refusal names,
+  say red's nominal transfer and how many of its burns it flies; the row's burn line names the burn its series
+  starts from.
+● A burn at or before the bound red element set's epoch is never applied, since that set may already include it.
+  Exactly those are dropped and the rest kept, and the panel, the result, the session log and the provenance name
+  each burn applied and each dropped. The row then starts from its first applied burn, from the bound red track's
+  own state there. A row whose every burn is dropped is refused as a single burn that set may include is, and when
+  its first burn is exactly at the set's epoch, where a single burn's check would not refuse, by a sentence of its
+  own.
+● A later burn over 1,000 m/s, the limit on the departure burn's own field, held by the burn's size, is named on the
+  panel before Evaluate, and Evaluate refuses the row naming the limit.
+● Custody reads the earliest burn the row applies. The cost counts the row's integration from that burn, as for
+  one burn there, and the panel fits its sample count to the budget from it.
+● Each figure's basis names how many of the row's burns it applies: the sampled closest approach and its time
+  name the burns red flies before the span searched ends, custody names the burn it reads, our sized burn names
+  the burns it was sized against, and a lookup or the score applies none.
+● The game tree gives each burn of the transfer a turn of its own (below, D3, SPC-187); before SPC-187 it refused
+  a row of several burns, and a record written then is still built that way.
 
-**Status: After Phase 3**
+Decisions taken building it, Claude's and not rulings:
+● **Each later burn's spread.** A later burn is sampled with the row's pointing, timing and drag spreads, and a
+  delta-V spread in proportion to its size (the first burn's spread over the first burn's delta-V). Each burn
+  draws from a seed of its own, set by the row's seed and the burn's number, so a burn draws the same spread
+  whichever burns before it are dropped. Its timing is drawn on its own, not tied to the first burn's; a later
+  burn drawn before the first is made at the first.
+● **At or before.** A burn exactly at the red element set's epoch is dropped from a row of several burns, as the
+  ruling words it. A single burn at that epoch is still sampled, as before (`decision._after_burn` refuses only a
+  burn strictly before it), so the single-burn path is unchanged.
+● **Which solutions list every burn.** A solution lists every burn when its burns' sizes sum to its delta-V, to
+  1 part in a million. The sweep's own sums agree to about 1e-13 m/s; a hop solution's fall short by a third or
+  more. The hop's own burns are not rebuilt here: its final burn is placed on red's unburnt orbit, so it is not a
+  flown sequence to carry.
+● **The later burns' frame.** The solver's arrival burn is split anew at red's own state on the two-body transfer
+  arc (`maneuvers.Burn.own_ric`); the sweep's own figures are unchanged. The engine's RK45 arc, with J2 and drag,
+  differs slightly from that two-body arc, as the departure burn's SGP4 start does.
+● **The tree refused every row carrying more than one burn**, even when only one of them was applied, since each
+  later turn burned again from the row's first burn as hypothesised. Since SPC-187 the engine sets the turns so each
+  applied burn has one of its own; a record built over equal turns still refuses such a row.
+● **Show trajectory** draws the first burn the row applies, since the view takes one burn, and the cell names the
+  later burns it does not draw.
+● **The panel's fields set burn 1 only.** The later burns are carried as the sweep gave them; a transfer carries at
+  most 8 burns, and a later burn after the horizon is refused beside the form.
 
-**Dependency:** Phase 3 complete
+## Phase 5: a probability from NOTSO history
 
-### What changes
+**Status: built (SPC-130 to SPC-132).**
 
-- Scenarios become sequential: adversary may respond to a friendly response with a second action
-- `Scenario` gains a `turns: int` field (default 1; Phase 4 enables 2–3)
-- Game tree: depth-first search over adversary → friendly → adversary → friendly chains
-- Minimax becomes full recursive minimax tree search
-- Expected Value selector uses Bayesian update of adversary probabilities after observing first-turn outcome
+● Every adversary row's **NOTSO suggestion** shows as the panel opens and follows every change (SPC-185): a
+  suggested P and Conf from the bound red track's NOTSO history, with its basis and an unticked control to apply
+  it. Nothing is written into P or Conf; applying stays the operator's tick, and a ticked suggestion is applied at
+  Evaluate only while it is still the one shown. Owner ruling, 2026-11-05: load every row automatically when the
+  panel opens. Before, from SPC-131, each row had a Load from NOTSO control and no row's history was read until
+  the operator pressed it.
+● P is the chance of at least one reported event of the row's action type within the horizon, at the rate the
+  history shows over the periods the cache covers. Gaps in the cache and time before launch are left out, never read
+  as quiet. Nothing is offered below 3 events or under 0.01. Conf is capped at 0.3, the most Threat Understanding
+  lets any manufacturable item be worth. Both are lookups, rounded down.
+● P carries an exact 95 in 100 Poisson interval on the events counted, its edges rounded outward. Under expected
+  value the result says whether the pick holds across each row's interval, naming the P where it would change, and
+  with two or more such rows across every corner of their joint range. Minimax and minimin read no probability and
+  show no interval. Since SPC-203 the remainder of P takes up each move, a P is checked only up to where the rows'
+  P reach 1, and the joint range is the box of the intervals cut where they would sum above 1; with the rows' P at
+  exactly 1 no remainder row is evaluated, so nothing is checked and the line says so.
+● The results show a NOTSO timeline per applied suggestion: covered periods, gaps and each counted notice, readable
+  without colour.
 
-### UI additions
+Concept section 9 records these as decision 16 (what the panel loads from NOTSO), decision 17 (the interval on a
+NOTSO-derived P) and decision 18 (how the interval reaches the pick).
 
-- "Turn depth" selector (1–3) in scenario builder
-- D3.js collapsible game tree showing branch scores (`decision_gametree.html`)
-- Per-turn recommendation sequence: "Turn 1: Collision avoidance → if adversary persists → Turn 2: Repositioning"
+## Phase 4: the game tree and its view
 
-### Implementation steps
+**Status: built (SPC-140, SPC-141, SPC-142).** Code: `spectre/domain/decision_tree.py` (the tree),
+`spectre/domain/tree_selectors.py` (the picks), `spectre/domain/turn_update.py` (the update after turn 1) and
+`spectre/web/tree_view.py` with `partials/decision_tree.html` (the view).
 
-1. `Scenario.turns` field + recursive `evaluate_turn()` helper
-2. `GameNode` dataclass (action, response, children, subtree_score)
-3. D3.js tree partial (`decision_gametree.html`)
-4. Route: add `turns` form field to `POST /plan/decision/evaluate`
+### What the operator does
 
----
+● On the panel, choose a **turn depth** of 1, 2 or 3. One turn is the outcome matrix alone. Two or three turns let
+  red move again after each of our responses.
+● Optionally state what **turn 1 shows** of red: a burn, no burn, or nothing. Only expected value reads it, for the
+  update after turn 1. It moves no figure and writes no P. One turn has no later pick for it to update, so an
+  observation stated with a depth of 1 is refused beside the form rather than dropped unsaid.
+● Press Evaluate. Once the tree has what it needs (below), a depth whose tree cannot fit the branch cap or the cost
+  cap is refused at once, beside the form, naming the largest depth that would fit at the same sizes. Nothing runs.
 
-## Phase 5: NOTSO-Informed Priors
+### What the engine does
 
-**Status: Parallel development alongside Phase 3/4**
+● A tree needs both sides bound and current, and a propagated orbit from every row: a manoeuvre row needs a
+  hypothesis, and no row's cell may be refused. Without these the result is one turn and says why.
+● Turn 1 is the matrix. Each later turn starts from where the turn before left both orbits: red sample by sample
+  after its hypothesised burn, blue after our sized burn. Every figure in a tree is RK45 with J2 and drag.
+● The tree runs as one evaluation in the one sampled slot, inside the 300 s budget. A run that overruns keeps the
+  deepest turn built in full and says so.
 
-**Dependency:** `spectre/data/notso_cache.py` (already built); `spectre/astro/notso.py` (already built)
+### What the result shows
 
-### What changes
+● The tree's own lines: its size, how the turns split the span, what each node's and each sequence's figures mean,
+  and when each row burns again.
+● **The recommendation per turn** for the selector in use: turn 1's pick, then each later turn's pick after each
+  thing the turns before may show, following our own picks. A turn-1 pick that differs from the matrix's says so.
+● **The update after turn 1**, under expected value: the likelihood model, naming what each row shows and saying
+  the likelihood is uncalibrated, with no calibration data yet (SPC-210), then the update for the observation the
+  operator stated, with its basis, which says the same, or a line saying no observation was stated so
+  nothing was updated. An observation no row gives under the model, a tree with no later turn built, or a tree that
+  gives no pick updates nothing and says so.
+● **What each turn lets us see**, in the same place under minimax or minimin: the same custody rule, naming what
+  each row shows in turn 1, since it sets what each later pick may depend on, then that the rule does not use
+  probability, so nothing is updated and no P weighs red.
+● **The tree itself**, server-rendered as nested collapsible branches. Each branch names its turn, red's move and our
+  response, and the path of moves it rests on. Opened, it shows its closest approach from its turn on (with P5, P50,
+  P95 and the half-width when sampled), the time of that closest approach with its uncertainty, our burn this turn in
+  m/s, and its sequence's closest approach, delta-V, custody and score, each with its kind in words and the rule
+  behind it. A branch on the plan the recommendation follows says so in words. Under a response the rule does not
+  pick, the best continuation, every later response the rule's pick there, says so in words of its own, in italic
+  with no star, never as the plan (SPC-189). Responses that tie are each named, and the plan follows each (SPC-206).
+● Beside the tree, two notes say what its figures assume (SPC-220, SPC-219): each branch of the last turn shown, turn 3
+  at most and the deepest built in full for a tree built in part, is valued as if no one moves after it, to the end of the span searched, so a move either side would make
+  later is in no figure; and custody lost and closest approach are added to each sequence's score as separate
+  terms. Both are stated only for a tree built (`tree_view.LEAVES_LINE`, `decision.TERMS_INDEPENDENT_LINE`).
+● **The tree drawn** (SPC-190), beside the branches: the section after next says how.
+● A tree built in part names the deepest turn built in full and shows nothing below it. A tree refused before it
+  runs is headed as asked for and none built, and states why.
+● The view reads at phone width and says everything in words as well as colour. Its only script collapses and zooms
+  the drawn tree; the drawing and the branches in words work without it.
 
-- If NOTSO records exist for the adversary satellite (via `notso_cache.py`), prior probabilities on adversary actions are seeded from historical NOTSO type distribution
-  - e.g. 8 of last 10 NOTSOs for this object were `MANOEUVRE` → P(manoeuvre) = 0.8 as default
-- `OperatorBehaviourProfile` (from `spectre/astro/notso.py`) feeds `AdversaryAction.probability` defaults
-- After scenario evaluation, NOTSO-derived confidence intervals shown in results
+### Design decisions D1 to D11 (SPC-140, SPC-141)
 
-### UI additions
+These are the design's choices, recorded for the owner. The owner ruled on each on 2026-11-05 (`.board/README.md`,
+owner rulings): keep D1, D2, D4, D5 and D7 to D11; change D3 and D6 (SPC-187, SPC-188).
 
-- "Load from NOTSO" button in adversary action rows → auto-fills probability + confidence from cache
-- In results: NOTSO history mini-timeline per adversary action row
+● **D1. Turn 1 is the matrix.** One root per cell; `evaluate_scenario` is unchanged and one turn has no tree. The
+  matrix's own pick is unchanged by the tree. Owner ruling, 2026-11-05: keep.
+● **D2. One propagator.** Every figure in a tree is RK45 with J2 and exponential drag for both orbits, from their
+  SGP4 states at the scenario epoch, since no element set exists for an orbit after a burn. Turn 1's computed cells
+  go on RK45 too, with the SGP4 figure shown beside them, and no node or cell names SGP4. Owner ruling, 2026-11-05: keep.
+● **D3. Turns set by the engine, every burn inside its own.** As first built the span searched was split into equal
+  turns, each row's red burn at the same offset after each turn started, and a row of several burns refused the
+  tree. Owner ruling, 2026-11-05: accept unequal turns, with their lengths determined by the engine, never set by the
+  operator (SPC-187). **Built:** `turn_update.turn_plan` places each boundary from the rows' burn times so every burn
+  falls inside its own turn. A row's burns fall one to a turn: taken in turn 1, its burn j falls in turn j at its own
+  time; taken in turn k, its burn j falls in turn k + j - 1, the same time after that turn starts as burn j does
+  after turn j starts, so a single burn falls at the same offset after each turn starts, as before; a burn that would
+  fall after the last turn is not made. Each response executes its time to execute after each turn starts, with a
+  target separation sized again against red's nominal burns in that turn. A transfer taken in turn 1 makes its later
+  burns in the turns they fall in, carried there sample by sample as the matrix flew them, whatever red does next, so
+  it is one action with one P, as SPC-184 holds. The tree is refused, and the one-turn result stands, when a row
+  makes more burns within the span than there are turns, when no moment falls after one row's burn j and by another
+  row's burn j + 1, or when a burn made again, or a response's burn, falls outside a turn it is made in, each naming
+  the burn and the turn.
+● **D4. Samples carried as themselves.** Sample k is carried from turn to turn as sample k. Each turn's draws are
+  seeded from the row's seed, the turn and the red path, so the same evaluation gives the same tree. A sample whose
+  drawn timing puts its burn after its turn ends keeps that burn, and the turn after makes it then. Owner ruling, 2026-11-05: keep.
+● **D5. What a figure means.** Each node's closest approach runs from its turn's start to the span's end, as if no
+  one moves again. A sequence's closest approach is the smallest along it, P5 of each sample's own minimum where red
+  was sampled; its delta-V is our burns added up, a lookup when any turn's is; its custody is the bound red track's
+  with the earliest red burn on it; its score is the one-turn weighted sum on those figures, a lookup. Owner ruling, 2026-11-05: keep.
+● **D6. The caps.** At most 1,000 branches, the sum over turns k of (rows times responses) to the k, and a cost cap,
+  with 16 sizing trials charged for every sizing. As first built the tree shared the matrix's cost cap, 12,000
+  sample-hours since the 300 s budget. Owner ruling, 2026-11-05: raise the evaluation budget to 300 s (SPC-178,
+  built), then measure trees under load and set their own cap from the measurements (SPC-188). **Built (SPC-188):**
+  the tree's own cap is 21,000 sample-hours by the same cost model, the budget times 70 sample-hours a second, about a
+  fifth under the slowest tree measured under load. So coplanar_leo at 150 samples over three 2 h turns, about 15,400
+  sample-hours, refused under the shared cap, fits now, as does 200 samples, about 19,800; at 250 samples, about
+  24,100, it is refused. The next section gives the measurements and their basis.
+● **D7. Refused before anything runs, the matrix kept.** An unbound or out-of-date side, a row with no orbit to carry
+  on, turns the engine cannot set with every burn inside its own (SPC-187; over equal turns, a row of several burns,
+  SPC-184, then a burn outside its turn), too many branches or too high a cost refuses the tree, in that order, and
+  the one-turn result stands with the reason. Owner ruling, 2026-11-05: keep.
+● **D8. Never cut short silently.** A spent budget keeps the deepest turn built in full, naming the run's own budget;
+  a failed or unconverged branch keeps the turns built and names the branch, since a pick over a tree missing a
+  branch could miss its worst case. Owner ruling, 2026-11-05: keep.
+● **D9. Picks over what we could have seen.** A turn's pick may depend only on what the turns before it showed, so
+  red moves that show the same thing are one information set and one pick must serve every branch in it. Minimax
+  takes the worst sequence over every red move and every branch in the set, minimin the best, and expected value the
+  mean weighted by P and by the update. A set with no weight has no pick and says so. The first response wins a tie.
+  Owner ruling, 2026-11-05: keep. Since SPC-206 (evaluation F-13) a tie is said: the pick the record holds is still
+  the response with the lowest value, but every response within the tie tolerance is named in the line, in the order
+  entered, and the plan follows each.
+● **D10. The likelihood model is the engine's own custody rule.** Custody lost at a burn in the turn shows a burn,
+  not which; held through it shows no burn; degraded, lost for another reason, or not read, shows nothing. Each row
+  gives one of these for certain. This was chosen over a new detection model with made-up rates. The update is a
+  lookup. Owner ruling, 2026-11-05: keep. Degraded custody scores between held and lost since SPC-179, but it is
+  neither held through a turn nor lost at a burn from held, so it still shows nothing. Since SPC-210 (evaluation
+  F-22) the results say wherever the update's probability is shown that the likelihood is uncalibrated, with no
+  calibration data yet.
+● **D11. Red's next move is weighed by P as entered.** Nothing sourced says how red's turn-1 move bears on its next,
+  so the update says which turn-1 branch we are on, not what red does next, and the same rule reads turn 2 in a
+  3-turn tree. A persistent-intent model needs a stated prior strength, which is the owner's decision. A row's
+  applied NOTSO suggestion carries its interval into a range on every share it touches. Owner ruling, 2026-11-05: keep P as entered
+  each turn.
 
----
+### Turns set by the engine (SPC-187)
 
-## Summary Table
+**Status: built.** Owner ruling, 2026-11-05, on D3: unequal turns, their lengths set by the engine, never by the
+operator. D3 above says what the engine does. The result's first line names each turn's length and says the engine
+set them from the rows' burn times; a transfer's line names each of its burns' times after its own turn starts.
 
-| Phase | Core capability | Key new data | Status |
-|-------|----------------|--------------|--------|
-| **1** | Deterministic analytic scoring | `OutcomeMetrics` (analytic) | ✅ Complete |
-| **2** | Monte Carlo uncertainty on adversary manoeuvre | `ManoeuvreHypothesis`, P5/P50/P95 bands | Next sprint |
-| **3** | SGP4-propagated outcomes + TCA | `propagate_outcome()`, TCA timestamp | After Phase 2 |
-| **4** | Multi-turn game tree | `GameNode`, recursive minimax | After Phase 3 |
-| **5** | NOTSO-informed priors | `OperatorBehaviourProfile` integration | Parallel with Phase 3/4 |
+Decisions taken building it, Claude's and not rulings:
+● **Where a boundary goes.** At the equal split where that falls after every row's burn of the turn ending and by
+  every row's next burn, so trees whose burns fit equal turns are built exactly as before; otherwise midway between
+  the latest burn of the turn ending and the earliest of the next, or, with no burn after it, midway between that
+  burn and the end of the span searched (`turn_update._MIDWAY`, 0.5). A row whose first burn falls at or after the
+  end of the span searched refuses the tree, naming that burn, before any boundary is placed. The midway point
+  leaves each burn's timing spread the most room either side.
+● **A transfer is committed once taken.** Taken in turn 1 its later burns are carried into the turns they fall in,
+  as the matrix flew them, whatever red's move in those turns, since the transfer is one action with one P
+  (SPC-184). Taken again in a later turn it makes each burn the same time after its own turn starts.
+● **No two burns of one transfer share a turn.** A transfer making more burns within the span than there are turns
+  refuses the tree, rather than putting two in the last turn.
+● **Records built over equal turns.** Stored inputs version 5 holds the turn rule. Versions 1 to 4, written by 0.28.0
+  to 0.36.0, hold none and read as equal turns (`TurnRule.EQUAL`), so a tree recorded then is built over the same
+  equal turns, with the same seeds, and replays exactly; the replay says so before it compares anything. The
+  provenance hash leaves the turn rule out for one turn and for equal turns, so those records' input hashes still
+  match. A scenario over equal turns is never stored again.
 
----
+### Decisions taken building the view (SPC-142)
 
-## Build order
+The owner ruled on each on 2026-11-05: keep D12 and D13; change D14 and D15 (SPC-189, SPC-190).
 
-```
-Phase 2 (MC) → Phase 3 (SGP4) → Phase 5 (NOTSO priors, parallel with 3)
-                              → Phase 4 (multi-turn)
-```
+● **D12. The operator states the observation.** The update is shown for the one observation the operator states
+  for turn 1, held on the scenario and in its provenance, and for none otherwise. Showing every possible update at
+  once read as if each had happened. Owner ruling, 2026-11-05: keep.
+● **D13. Refused at once only when it cannot fit.** The panel refuses a depth over the branch cap or the cost cap
+  before anything runs, naming the largest that would fit, since only a smaller depth or a smaller scenario helps.
+  A tree refused for another reason (a side unbound, a row with no orbit, a burn outside its turn) still evaluates,
+  and the result states the reason beside the one-turn matrix, since the matrix is still worth having. Owner ruling, 2026-11-05: keep.
+● **D14. The plan, marked in words.** A branch is marked when every response on it is the rule's pick for what the
+  turns before it showed. The selector picks in every information set, but the recommendation and its marks follow
+  our own picks: a branch reached only through a response the rule would not choose carries no mark. Owner ruling, 2026-11-05: mark
+  the best branch under each response, including responses the rule would not pick (SPC-189). **Built (SPC-189):**
+  the section after next says how.
+● **D15. Plain details and summary.** The tree is server-rendered with no script and no new library, so nothing is
+  added to track or scan. Owner ruling, 2026-11-05: an interactive tree diagram (SPC-190). **Built (SPC-190):** the
+  section after next says how; the plain branches stay as its text alternative.
 
-Phase 2 is the highest value add: it converts the engine from a calculator into an uncertainty-aware tool. Phase 3 grounds the results in real physics. Phase 4 is the most complex and should only start once Phase 3 validation is complete.
+### The tree's own cost cap (SPC-188)
+
+**Status: built.** Owner ruling, 2026-11-05, on D6: measure trees under load and set their own cap from the
+measurements.
+
+● **How it was measured.** `scripts/measure_tree_cost.py` runs four trees the engine builds in full, Hold course and
+  an Evasive row against Hold and Avoid on the reference element sets, each by `evaluate_tree` under the 300 s budget
+  as the console runs it, while one other process per core keeps every core busy. On 2026-11-12, in the build
+  container (4 cores, Intel Xeon at 2.10 GHz, Python 3.13), the rates by `tree_cost` were:
+
+| Tree | Cost, sample-hours | Turn 1's share | Wall, s, loaded | Rate, a second |
+|--------|--------|--------|--------|--------|
+| plane_change, 300 samples, two 1 h turns, Avoid not burning | 2,749 | 24% | 28.7 | 95.6 |
+| coplanar_leo, 200 samples, two 2 h turns, Avoid sized to 20 km | 4,307 | 28% | 38.6 | 111.6 |
+| plane_change, 500 samples, two 1 h turns, Avoid not burning | 4,559 | 24% | 50.2 | 90.8 |
+| plane_change, 300 samples, three 0.5 h turns, Avoid not burning | 7,529 | 7% | 76.5 | 98.5 |
+
+  Idle, the same trees ran at 123 to 151. The script takes about 4 minutes.
+● **The cap.** The slowest, 90.8, less about a fifth, the matrix's own margin, rounded down to 5, is 70
+  (`decision_tree._SLOWEST_TREE_SAMPLE_HOURS_PER_S`), so the cap is 300 s times 70, 21,000 sample-hours
+  (`MAX_TREE_SAMPLE_HOURS`). A tree at the cap takes about 231 s at the slowest rate measured, leaving 69 s. Turn 1,
+  the matrix, is at most about 30 per cent of any tree's cost by the model, so the matrix's slower rate cannot
+  dominate a tree; the matrix's own rows are still checked against the matrix's cap. Its at-cap option runs one tree just
+  under the cap, plane_change with 800 samples over three 0.5 h turns, 19,951 sample-hours, refused under the shared
+  cap: under the same load it was built in full in 206.4 s, 96.7 a second, inside the 300 s budget.
+● **Where the figures hold.** They are this container's, not a deployment target's. Run the script on the target
+  and set the rate from its figures before relying on the cap there; the code comment and the lookup register say
+  the same.
+● **Records from before.** A tree 0.28.0 to 0.37.0 recorded was checked against the shared cap. Stored inputs
+  version 6 holds the tree's cap (`TreeCap.OWN`); versions 1 to 5 read as `TreeCap.SHARED`, so the replay checks
+  such a tree against the matrix's cap again and refuses or builds it as it did then, and says so before it compares
+  anything. The provenance hash leaves the cap out for one turn and for the shared cap, so those records' input
+  hashes still match. A scenario under the shared cap is never stored again.
+
+Decisions taken building it, Claude's and not rulings: the margin of about a fifth, as the matrix's cap takes; the
+four cases, chosen to build in full and converge in under 9 minutes together; and one busy process per core as the
+load.
+
+### The best branch under each response (SPC-189)
+
+**Status: built.** Owner ruling, 2026-11-05, on D14: mark the best branch under each response, including responses
+the rule would not pick.
+
+● The selector already picks in every information set, under responses it would not choose too, so the mark is read
+  from those picks (`tree_selectors.continuation`): a branch is the best continuation under a response the rule does
+  not pick when every response after that one is the rule's pick for what the turns before it showed. The mark names
+  that response and its turn: "Best continuation under minimax after Avoid in turn 1, which minimax does not pick
+  there; not on the plan".
+● It is said in words of its own, in italic, with no star, and never on a branch on the plan, so the plan's own
+  mark, "On the plan minimax recommends" with its star, is unchanged and the two never read alike.
+● A branch whose own response the rule does not pick is that response, not a continuation, and carries no mark;
+  below it, its best continuation does. Under a response marked not permitted (SPC-195) nothing is valued, so no
+  branch below it is marked.
+● Nothing a record holds changes: the marks are worked out from the selection when the view is built.
+
+### The tree drawn (SPC-190)
+
+**Status: built. Claude's design, not a ruling:** a server-rendered drawing with a first-party script, so no
+third-party library joins the supply chain; the owner may still ask for a vendored one (D15).
+
+● **Drawn on the server.** `tree_view.diagram` lays the tree out left to right, turn 1 in the first column and each
+  later turn in the next, each leaf a row of its own and each branch with branches after it midway between its first
+  and last, and `partials/decision_tree.html` writes it as one inline SVG above the plain branches. Each box carries
+  its branch's heading and two of its own figures, its sequence's score and closest approach along it, each with its
+  basis kind in words, written exactly as the branch below writes them, so the two cannot differ; a test holds every
+  box's figures to that branch's text. A box on the plan says "On the plan" with its star, a best continuation under
+  a response the rule does not pick says "Best continuation, not on the plan", and a branch excluded as not permitted
+  is dashed and says so, so nothing rests on colour.
+● **Without script** the drawing shows in full and does nothing more; its collapse and zoom controls stay hidden, so
+  no control is offered that cannot work. It sits in a frame of its own that scrolls.
+● **With script** (`static/js/tree_diagram.js`, under the policy's script-src 'self', with no inline script and no
+  handler attribute) each box with branches after it carries a control that collapses or opens them: a button in
+  the tab order, Enter or Space working it, its name saying what it will do and to which branch, and aria-expanded
+  saying whether its branches show. Zoom in, zoom out and reset are buttons beside the drawing, and the drawing
+  scrolls inside its own box when zoomed, so the page never scrolls sideways at phone width.
+● The plain branches below stay the text alternative: everything the drawing shows is there in words, with every
+  figure and its basis.
+● `tests/browser/test_panels.py` collapses a branch, opens it again and zooms, by mouse and by keyboard, in Chromium
+  under the policy.
+
+## The decision record (SPC-192)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed at the
+end of this section.** Evaluation finding F-01 found that a finished evaluation lived only in the sign-in's memory
+and one line of the session log, so once the sign-in ended no one could show what the operator was recommended,
+chose or rejected. That is the record half of gate G1 ("Advisory, decision recorded", rated Red: "Record: none
+(F-01)"). SPC-192 addresses the record half only: the advisory half was not reassessed, and neither was the gate's
+Red rating, which stands until the evaluation is repeated. The engine now keeps one record for each finished
+evaluation, in the `decision_records` table beside the accounts.
+
+● **What a record holds.** It is written when the evaluation finishes, whether the request answered it or a job ran
+  it: when, in UTC; the signed-in operator's username; the scenario's name; the rule used and the response the
+  one-turn matrix recommends under it, by id and name; for a game tree, the rule's own pick for turn 1, which can
+  differ from the one-turn matrix's, and the tree's recommendation lines as the results showed them, or why it has
+  none; the picks of all three rules, minimax, minimin and expected value, each taken with the engine's own
+  `find_robust_response` on the same matrix, which reads the figures and changes none; when expected value's
+  probability is not earned, the guidance the results give for it, whichever rule ran; the code version, the
+  calibration source and every input hash from the result's provenance; the turns; the keep-out distance; and the
+  scenario's responses by id and name, so a decision is checked against them. Since 0.28.0 it also holds the
+  deployment's primary rule and whether the rule used differed from it (SPC-194), and the evaluation's stored inputs
+  with their SHA-256 (SPC-193); both are set out in the next two sections.
+● **What 0.27.0 did not hold.** A record written by 0.27.0 holds no element-set text and no raw input, and no primary
+  rule: its hashes say which inputs were used but cannot rebuild them, so it cannot be replayed. init_db adds the new
+  columns to a 0.27.0 database in place; such a record reads "Primary rule: not recorded" and the replay command says
+  it holds no stored inputs.
+● **Text both databases take alike.** PostgreSQL's text refuses U+0000, which SQLite stores. A name holding it is kept
+  with the replacement character, U+FFFD, in its place, so the record is still written; a rationale holding any
+  control character other than tab, line feed and carriage return is refused with a sentence.
+● **When none is written.** An evaluation refused before it runs, stopped by Cancel, a sign-out, a newer evaluation
+  or shutdown before its sampling finished, or that fails writes no record. Nor does one whose account was deleted
+  before the record was written: the write checks, in its own transaction, that the account still exists under the
+  same id and name, so a later account handed the freed id by SQLite cannot inherit it. A record the database will
+  not take is logged, and the results then say that no decision can be recorded against them.
+● **A record whose results were never shown.** Once a job's sampling has finished it writes its record, in a state
+  Cancel does not stop, and only then shows the results. A record can therefore describe results the operator never
+  saw: the console was reloaded or closed while the job ran, or a newer evaluation or a sign-out came while the
+  record was being written, when the job stops with its record kept. The operator can decide it on the Decision
+  records page.
+● **The operator's decision.** The results end with a form, outside the evaluate form, that asks what the operator
+  decided: one of the scenario's own responses, None of these, or Decision deferred, with a rationale of at most
+  2,000 characters, required for None of these. The same form sits under each of the operator's own records not yet
+  decided on the Decision records page, so a record whose results are gone can still be decided: the operator can
+  decide it on the Decision records page. A record takes one decision, once, stored with its own UTC time: a second
+  is refused with a sentence, and only the operator who ran the evaluation may decide it. A record that is not the
+  operator's is refused with the same sentence as one that does not exist. An admin reads every record but decides
+  only their own.
+● **Decision records.** A page reached from the Decision Engine panel lists the operator's own records, newest first,
+  each with when, the scenario, the rule used and its pick (for a tree, the one-turn matrix's pick and the tree's
+  own), the primary rule and its pick, the recommendation shown, and whether the rule used differed, all three
+  rules' picks (a record from before 0.28.0 says "Recommended:" for the rule used's pick and that the results showed
+  only that rule), when expected value's probability is not earned, and
+  the decision, its rationale and its time, or "No decision recorded". An admin sees every record
+  and whose it is. Records are kept by account, so they are there after signing out and in again.
+● **Retention and access.** No retention is applied: records are kept until the owner decides otherwise. A record
+  holds a username, free text (the scenario's name, the response names, the rationale and, since SPC-195, the reason
+  a response is not permitted) and, since 0.28.0, the
+  evaluation's stored inputs, element-set text included, so retention and access are the owner's decision, as data
+  protection lead. The owner's open retention ruling (SPC-228) now covers the stored inputs too.
+● **Claude's design choices, awaiting the owner's ruling.** The recommendation stored is the one-turn matrix's pick,
+  with a tree's own turn-1 pick beside it. A job's record is written in a RECORDING state that Cancel cannot stop.
+  A record is kept when its account is deleted, under the username it was made with, readable by an admin and
+  decided by no one; erasing it with the account instead is the data protection lead's call. The Decision records
+  page has no pagination and no limit.
+
+## Every rule side by side, and the primary rule (SPC-194)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed at the
+end of this section.** Evaluation finding F-03 (Critical, gate G3) found one rule per evaluation, chosen on the panel
+and changeable after a result was seen, with no side-by-side result and no flag when the rules disagree. Gate G3
+("All rules' results available; disagreement flagged") was rated Red; that rating stands until the evaluation is
+repeated.
+
+● **Three picks on every result.** The results show the picks of minimax, minimin and expected value side by side,
+  each with its rule's one-line meaning, each the engine's own `find_robust_response` on the result's own matrix: the
+  same function, `rule_comparison.matrix_picks`, gives the record its three picks, so the page and the record have one
+  source. The picks rest on the composite scores, a lookup, and the results say so.
+● **Agreement in words.** When the three picks agree, a line says "All three rules agree: each picks" the response.
+  When they do not, a line says "The rules disagree:" and names each pick with the rules that make it, as in
+  "minimax and expected value pick Avoid (F1); minimin picks Hold (F0)". Under expected value, when its probability
+  is not earned, the existing guidance stays beside its pick, whichever rule ran; it says what minimax picks, not
+  what it recommends, since the recommendation is the primary rule's. Since SPC-203 a row at P 0 leaves its weight
+  to the remainder of P, so expected value always has weight to pick on. Only a record 0.28.0 or 0.29.0 wrote,
+  replayed under the rule it was evaluated by, can hold every row at P 0 with nothing to weigh: expected value then
+  has no pick, on the matrix as on the tree, the replay says so, and it is never counted as agreeing with another
+  rule. `find_robust_response` itself gives no pick there (SPC-200, evaluation F-31), so nothing is starred
+  under expected value either.
+● **A tree's turn-1 pick under each rule.** Where a game tree was built, each rule's turn-1 pick is
+  `tree_selectors.select` over the tree already built, turns built in full only; nothing is sampled again. A second
+  line says whether the rules agree on turn 1, flagged in the same colour as a disagreement on the matrix. It names
+  the turns asked and, when the budget stopped the tree sooner, the turns built in full, as in "Over the 2 turns,
+  built in full to turn 1 only". Expected value can have no pick when every row has P 0, and the line says so. With
+  every response marked not permitted (SPC-195), no rule has a pick and the line says that, not that the rules
+  disagree.
+● **The deployment's primary rule.** `SPECTRE_PRIMARY_RULE` names it: minimax, minimin or expected_value, read where
+  the other settings are read (`spectre/config/settings.py`). Unset, it is minimax, the cautious rule. The panel's
+  selector starts on it. The headline recommendation is the primary rule's pick. When the operator chose another
+  rule, the result says the primary rule and its pick beside the chosen rule's, so no rule chosen after the fact can
+  hide the primary's answer. With the primary rule having no pick, the headline reads "No recommendation" and the
+  primary line says why. The evaluation itself still runs under the rule chosen: the matrix's star, the ranking's
+  blue highlights, the interval lines of SPC-132 and a tree's lines and update follow it, and a line above the
+  matrix says the star marks the rule chosen's pick and, when that is not the primary rule, names the primary's
+  beside it. Every line under the headline is set smaller than the headline.
+● **The session log** names the recommendation as the results showed it: the primary rule's pick, with the rule
+  chosen's beside it when it was another rule.
+● **On the record.** Each record keeps the primary rule when it ran and whether the rule used differed from it, in
+  two new columns that init_db adds to a 0.27.0 database in place. The record's `recommended_*` columns keep the
+  rule used's pick, as in 0.27.0; the records page calls it the rule used's pick, and says the primary rule's pick
+  was the recommendation shown, so "recommendation" means one thing on every page. A rule with no pick is held as an
+  empty id and name and listed as picking nothing, with the reason: every row had P 0, or, since SPC-195, every
+  response was marked not permitted. A record from before says its primary
+  rule was not recorded, and keeps its old wording, "Recommended:".
+● **Claude's design choices, awaiting the owner's ruling.** Minimax as the default primary rule, being the cautious
+  rule. A value of `SPECTRE_PRIMARY_RULE` that names no rule is not refused at boot: it is logged as a warning, once
+  per value, and read as minimax, so a typing slip leaves the console running on the cautious rule. A posted rule
+  that names none, or none posted, falls back to the primary rule. The primary rule is read when the results are
+  shown and when the record is written, so a change to the setting applies to the next evaluation.
+
+## Replay from the stored record (SPC-193)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed at the
+end of this section.** Evaluation finding F-02 (Critical, gate G2) found that provenance hashed the inputs and
+stored none, so a recommendation could not be reproduced once the sign-in ended; identical inputs already repeated
+exactly (probe P-15). Gate G2 was rated Red; that rating stands until the evaluation is repeated.
+
+● **What is stored.** With each record, one canonical JSON document and its SHA-256: the whole Scenario (rows,
+  responses with any veto and its reason (SPC-195), weights, horizon, turns, keep-out distance and observation; every hypothesis with its dispersions,
+  sample count and seed, and a transfer's later burns; each accepted NOTSO prior with its cover and counted notices;
+  the Threat picture with its cues; and the binding, each bound element set's text as read, its epoch, age, limit,
+  data mode and custody), the rule the evaluation ran under, the composite score matrix, the code version, and
+  whether the evaluation's time budget ran out. The text is canonical: keys sorted, no spaces, ASCII with every other character escaped, no NaN. A name holding U+0000
+  is stored exactly, escaped, which both databases take.
+● **Written and read strictly.** `spectre/domain/decision_inputs.py` writes every dataclass field by field from its
+  own declaration, so a field added later cannot be left out unseen, and reads strictly: it refuses text whose
+  SHA-256 does not match, a repeated key, text not in canonical form, a schema or version it does not know, an
+  unknown or a missing field at any depth, a value of the wrong kind, a scenario the engine's own checks refuse, and
+  scores that do not fit the scenario. Each refusal names where in the document it is.
+● **Replay.** `scripts/replay_decision.py RECORD_ID` reads the record from the configured database, rebuilds the
+  Scenario from its stored inputs, evaluates it again under the stored rule with `evaluate_tree`, as the console
+  does, and reports whether the recommendation (the primary rule's pick), the rule used's pick, each rule's pick, a
+  tree's turn-1 pick and every composite score match the record exactly, compared at full precision.
+● **Set against the record's own columns.** The SHA-256 sits in the same row as the text it covers, so on its own it
+  shows only accidental change: an edit that rehashes the text passes it. The replay therefore also sets the record's
+  own columns against the hashed inputs: its rule and code version columns against those inside the document, and
+  every input hash the record holds, from the original result's provenance, against the replay's own. An edit to the
+  stored inputs that is rehashed, such as a bound element set renamed, cannot match the input hashes held apart, and
+  the report names each one that differs.
+● **Versions and the time budget, said first.** Before replaying, the command says which code version wrote the
+  hashed inputs, read from inside the document, not from the unhashed column; when that is another code version than
+  the one running, it says the comparison is across versions, and the verdict says so too. When the evaluation recorded ran out of its
+  300 s budget, a sampled row refused, a burn left unsized or a tree built in part, the stored inputs say so; the
+  replay runs in full with no budget, so it says before comparing that what the budget left out may differ, and the
+  verdict says so again if the replay differs. A record written by 0.28.0 or 0.29.0 is replayed under the rule it was
+  evaluated by, and the command says so first too (SPC-203, set out below); so is a record of 0.28.0 to 0.31.0,
+  under the miss rule it was evaluated by (SPC-202). A record with no stored inputs is said to hold none, with no version
+  line. It exits 0 when the replay matches, 1 when it differs, 2 for a usage error and 3 when there is nothing to
+  replay, or no database at the configured SQLite path.
+● **It writes nothing.** A SQLite database is opened read-only, and one that is not at the configured path is not
+  created: the command says there is none and exits 3. A PostgreSQL database is only read.
+● **Element-set text is held.** Storing it reverses 0.27.0's "no element-set text". This is Claude's choice: the
+  record is held in the deployment's own database, as the NOTSO cache already is, under the owner's rulings of
+  24 and 28 October 2026 that holding cached data is acceptable. docs/SECURITY.md lists it, and the owner's open
+  retention ruling (SPC-228) now covers the stored inputs too.
+● **Claude's design choices, awaiting the owner's ruling.** One schema version, 1, when built; since SPC-195 the
+  document is written as version 2, since SPC-203 as version 3 and since SPC-202 as version 4, every earlier version
+  still read (see the sections on each).
+  Replay runs with no wall-time budget, so an evaluation the 300 s budget cut short, a sampled row refused or a tree
+  built in part, is replayed in full and the comparison may then differ; the stored inputs record whether the budget
+  ran out, so the report says why, and names where. The code version is stored in the document, so it is covered by
+  the hash, and it is the one the report says first. A record whose inputs could not be encoded is not written, and the
+  results say no decision can be recorded, as for any record the database will not take. The replay is a command
+  for an administrator with access to the database; no route or page offers it.
+
+## Responses not permitted (SPC-195)
+
+**Status: built. Each choice below is Claude's design choice, not a ruling.** Evaluation finding F-04 (Critical, gate
+G4, "Hard constraints enforced as vetoes before aggregation") found that no field could mark a response unacceptable,
+so a response that breaks a legal, rules-of-engagement or safety constraint was recommended whenever it scored best
+(probe P-06). Gate G4 was rated Red; that rating stands until the evaluation is repeated. Constraint libraries drawn
+from doctrine or from rules of engagement are the owner's to supply later: what is built is the operator's own veto,
+response by response, with a reason in words.
+
+● **A veto on each response** (Claude's choice). Each friendly response row on the panel carries a labelled "Not
+  permitted" checkbox and a labelled reason field. The reason is required when the box is ticked, at most 500
+  characters of one line, stored without its surrounding spaces; a reason holding a control character is refused
+  with a sentence. A reason typed with the box not ticked is refused rather than dropped unsaid. The box posts its
+  row's own id, so a tick that names no row, or two rows sharing an id, is refused and the panel asks to be reloaded;
+  so is a tick posted with no reasons at all, which is never read as permitted.
+  The veto and its reason are fields of the response, `vetoed` and `veto_reason`, not permitted by default.
+● **Removed before aggregation** (Claude's choice). `find_robust_response` ranks only the responses not marked not
+  permitted, under every rule, so a vetoed response is never any rule's pick: not the headline, not a pick beside it,
+  not a pick in the record. A tie is broken among the permitted responses alone, the one with the lowest score still
+  the pick a record holds, and since SPC-206 every tied permitted response is named, so a tie never brings a vetoed
+  response back. With every row at P 0, expected value still has no pick.
+  The NOTSO interval lines read the same permitted responses. On a game tree, a response not permitted is never
+  valued in any information set, so no turn picks it and no plan mark falls on its branches; the recommendation per
+  turn names each such response as never picked.
+● **Still evaluated and shown** (Claude's choice). A vetoed response is evaluated exactly as before, so every figure
+  is the same vetoed or not, and the operator sees what was excluded and why. It is greyed in the matrix, with "Not
+  permitted:" and its reason in words in its column's heading and a dashed outline on its cells; in the rankings it
+  is listed after every permitted response with no rank number, so it is never ranked first, and carries the same
+  words; on the tree each branch of it carries them beside its heading, and every later branch below it is greyed
+  too, saying it follows that response, since the whole sequence is excluded. A line above the matrix names each
+  response marked not permitted with its reason and says that no rule picks it. On the panel the box keeps its own
+  width, so its words stay beside it at any width.
+● **Every response marked not permitted** (Claude's choice). No rule has a pick, so the headline reads "No
+  recommendation", the agreement line says no rule picks a response since every response is marked not permitted,
+  and a tree's agreement line says the same of turn 1, not that the rules disagree; both are flagged in the colour a
+  disagreement takes, since nothing is recommended. The primary rule's line says why, nothing is starred, nothing is ranked, a tree's turn 1 has no pick and says why,
+  and the record stores no pick. Under expected value with a probability not earned, the guidance says minimax picks
+  nothing, for the same reason.
+● **On the record** (Claude's choice). Each response a record lists carries its reason when it was marked not
+  permitted, so the Decision records page lists which responses were vetoed and why. The operator may still record a
+  vetoed response as their decision, but only with a rationale; the decision select labels it as marked not
+  permitted, and the decision, on the results and on the records page, says it was marked not permitted, with its
+  reason.
+● **Stored inputs, version 2** (Claude's choice). The stored inputs wrote version 2 of their document, which
+  holds each response's veto and reason, and version 3 since SPC-203, which keeps it (set out in the next section).
+  A record written by 0.28.0 holds version 1, with no veto: it is still read,
+  every response permitted, and replays as before. A version 1 document holding a veto is refused, naming where.
+  The scenario's provenance hash leaves out the veto of a response that is permitted, so a scenario with nothing
+  vetoed hashes exactly as it did in 0.28.0, and such a record's input hashes still match its replay; a veto changes
+  the hash. Where the record's responses or its stored inputs mark any response not permitted, the replay sets the
+  one against the other, so a veto dropped from the record's column is caught.
+● **Not built.** Scenario-level constraints, a constraint applied across responses or tied to a rule set, wait on
+  the constraint libraries above. The veto weighs nothing: it is not a penalty in the score, and no score or weight
+  changes with it.
+
+## Element-set integrity and the operating envelope (SPC-201, SPC-200)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed in the
+envelope document.** Evaluation finding F-25 (Critical, gate G9), with F-34, found that element sets from UDL reached
+the engine with no checksum or range check: probe P-14 changed one digit of an inclination, 97.4 to 98.4 degrees, with
+the old checksum, and the computed miss moved from 10.4 to 13.4 km with no flag; the background refresh replaced a
+good held set with it; an inclination of 597.4 degrees was accepted. Finding F-09 (Critical, gate G10), with F-30 and
+F-31, found no stated operating design domain, and decayed objects passing silently; F-29 found deep-space orbits
+evaluated with no regime statement, which this closed in part, by a flag; SPC-215 states each set's regime and
+whose figures it takes, and found no source for regime-specific ones. Gates G9 and G10 were rated Red; those ratings stand until the evaluation is repeated.
+
+● **The operating envelope is written down** in docs/decision-engine-envelope.md: the regimes, element-set ages,
+  horizons, scenario sizes, turns and inputs the engine is fit for, each with where in the code it is enforced and
+  what lies outside it. `tests/unit/test_decision_engine_envelope.py` holds every row to the code.
+● **One acceptance check for an element set** (`spectre/astro/elset_check.py`): both line numbers, lengths,
+  checksums and plain ASCII characters; one readable catalogue number on both lines, and the number asked for when a
+  set is fetched for one; an epoch that reads as a day of its year; every field the check reads written in the
+  format's own characters, so a corruption the checksum cannot see, such as a 0 changed to e, is refused; the
+  inclination, eccentricity, mean motion and the three angles inside their ranges; and an orbit SGP4 can start from.
+  B* and the two derivatives of the mean motion are checked as readable, not against a range, since none is
+  sourced. Every path an element set enters by runs it, the Pattern of Life history behind custody included, and the
+  binder runs it again. A refused set is not stored and never replaces a held one; the refusal is logged without the
+  set's text and shown in a sentence naming the object and what failed, on the page or, where the path has none, in
+  the run log. The bundled watchlist passes in full.
+● **Checked at evaluation entry.** Each bound set on SDP4, SGP4's deep-space branch, is flagged under "Outside the
+  operating envelope" on the result, not refused: for a GEO set, its staleness limit and element-set error model are
+  the GEO rules of thumb, tuned rather than sourced; for any other orbit on SDP4 they are rules of thumb set for LEO
+  and GEO, not validated for it. SPC-215 found no source for limits of their own. An object below the re-entry floor at an
+  instant the SGP4 search reads, or that SGP4 itself reports decayed, is refused there and said once on the result
+  (F-30). All 5 weights at 0 are
+  refused beside the form, and expected value with every row at P 0 gives no pick and says so (F-31); since SPC-203 the remainder of P
+  carries the weight the rows leave, so that arises only replaying a record 0.28.0 or 0.29.0 wrote.
+
+## What P means: the remainder of P (SPC-203)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed at the
+end of this section.** Evaluation finding F-12 (High) found that expected value divided each P by the sum over the
+rows entered, with no residual row and no check that P sums to 1, so a single row at P 0.1 was evaluated exactly as
+at P 1.0 (probe P-03b): a 1 in 10 manoeuvre was weighed as certain, and the chance that none of the listed actions
+happens was never weighed. Gates were not reassessed; their ratings stand until the evaluation is repeated.
+
+● **P is a probability over mutually exclusive actions** (the brief's choice). The rows' P must sum to at most 1,
+  with a tolerance of 1e-9 for rounding (`P_SUM_TOLERANCE`, in docs/lookup-register.md). A sum above it is refused
+  at the panel, before anything runs, and by the Scenario itself, with the same sentence: "Your rows' P sum to 1.5,
+  above 1. P is the chance of each adversary action, and the rows must be mutually exclusive, so their P sum to at
+  most 1; the engine weighs the rest as no adversary action. Lower the P of one or more rows." The sum is said to
+  the ninth decimal at most, so floating-point noise never reaches the page.
+● **The remainder row** (the brief's choice). When the sum is below 1, the engine adds one row of its own, last: "No
+  adversary action (remainder of P)", a no-action row at 1 less the sum. It is evaluated as any no-action row, a
+  lookup unbound and computed where both sides are bound, and every rule reads it: minimax, minimin and expected
+  value, the three picks side by side, the game tree, where it is one of red's moves in every turn, the update after
+  turn 1, the NOTSO interval lines and the record. In the matrix and the rankings it is named in full and labelled
+  "the engine's remainder, not your row"; its source line gives its P and the sum it rests on; on the tree each of
+  its branches says beside its heading "(red's move here is the engine's remainder, not your row)"; and the banner
+  counts the operator's actions "and the remainder of P". At a sum of exactly 1, within the tolerance, nothing is
+  added.
+● **The tree counts the remainder as a red move, and says so** (Claude's choice). A tree weighs the remainder only
+  if it branches on it, so it is one of red's moves in the branch count, the cost, the largest depth that fits and
+  whether a run is needed. An operator who listed 3 rows at P 0.3 has 4 red moves: against 3 responses that is 1,884
+  branches over 3 turns, past the 1,000 cap, where 3 rows summing to 1 make 819 and fit. Every size or cost refusal,
+  at the panel and before a run, and the built tree's lines, then add "Red's moves count the remainder of P, the
+  engine's no-action row, beside your 3 rows: rows whose P sum to 1 leave no remainder, and one red move fewer."
+● **Beside an operator's own no-action row the remainder is still its own row** (the brief's choice, and why). The
+  operator's no-action row is one of the actions they listed, at the P they gave it, a judgement about that action;
+  the remainder is the chance that none of the listed actions happens, which the operator did not state. Folding it
+  into their row would change their P unasked and lose which part is theirs. The two rows' cells are alike, and the
+  remainder's source line says why it stands apart.
+● **The share beside each P** (the brief's choice). Each row shows "Share=" beside its P: the share of expected value
+  it takes, which is its P, marked with its P's basis. The share is written exactly as the P beside it is (Claude's
+  choice), so the two always read alike: the operator's P as entered, "P=0.0 · Share=0.0", and the remainder's, 1
+  less their sum, to the ninth decimal at most for both, so floating-point noise never reaches the page. The
+  remainder's P is marked with the weakest basis of the operator's P it rests on, and it shows "Conf: none".
+● **The panel's default stays 0.5** (the brief's choice). It is already marked as the panel's default until edited
+  (SPC-183). Three new rows sum to 1.5 and are refused until the operator sets P; the guide says so.
+● **NOTSO suggestions** (the brief's choice). A ticked suggestion replaces its row's P, so the route applies the
+  suggestions before it builds the scenario and sums the P as they will be evaluated; a sum above 1 they make is
+  refused naming the rows that carry them, as in "With the NOTSO suggestion applied to row 1, your rows' P sum to
+  1.02, above 1." Typed P that a suggestion replaces are not summed.
+● **What moved.** Re-derived from each matrix's own cells, not pasted:
+  ■ Probe P-03b inverted: one manoeuvre row against Hold and Avoid (cost 0.1). At P 1.0 expected value picks Avoid;
+    at P 0.1 the remainder's 0.9 of no adversary action, against which Hold scores least, takes it to Hold, and
+    minimin moves from Avoid to Hold for the same reason. Before, both P gave Avoid under every rule.
+  ■ The integration form's single manoeuvre row at P 0.6 against Hold and Avoid (the veto tests' two responses):
+    minimin moves from Avoid (F2) to Hold (F1), its best case now the remainder's 0.4 of no adversary action;
+    minimax and expected value stay on Avoid. The veto tests now post P 1, so every rule still picks one response.
+  ■ Every row at P 0 through the panel: expected value had no pick; it now picks the best response against no
+    adversary action, Hold (F1) on the form.
+  ■ A record of 0.29.0 at P 0.1 (`tests/unit/_decision_records_0_29_0.json`): expected value picked Avoid then and
+    would pick Hold now; the replay reproduces Avoid, as the operator was shown.
+  ■ Fixtures whose P summed above 1 were set to each row's old share of the sum, so every pinned expected-value pick
+    and score holds. Three fixtures took new P to sum to at most 1, and no test pinned their expected-value pick:
+    the judgement fixture (0.6 to 0.4 beside an untouched 0.5) moves from Avoid (R2) to Hold (R1), and the
+    understanding fixture at its default P (its other row 0.7 to 0.5) from Watch (F2) to Evade (F1); the stored
+    inputs' lookup fixture keeps its picks.
+  ■ No reference case's pick changed: its one no-action row at P 0.5 now has the remainder row beside it, with the
+    same cells, and Hold is still the pick under all three rules at both window starts.
+● **Stored inputs, version 3** (the brief's choice of what, Claude's of how). The remainder row is derived, never
+  stored as a row: version 3 adds the scenario's probability rule and, beside the rows, the remainder's id, name and
+  P, or null, and its score row after theirs. The reader refuses a remainder that is not the one the rows leave, a
+  version 3 document whose P sum above 1, and a version 3 document under any rule but the remainder rule: a result
+  under the 0.29.0 rule is only ever a replay of an older record, a replay writes no record, and the writer refuses
+  to store one. So only a version 1 or 2 document reads as evaluated before SPC-203, and only its replay says so.
+  The reader names a document's schema, then its version, before checking its fields, so a document of a version this
+  code does not read is refused for that version, not for a field this version would hold. The scenario's provenance
+  hash leaves out the remainder row and each
+  row's flag, and leaves out the rule for a record of 0.28.0 or 0.29.0, so those records' input hashes still match.
+● **Records of 0.28.0 and 0.29.0 replay as they were evaluated** (the brief's choice of what, Claude's of how).
+  Versions 1 and 2 hold no probability rule, and read as the rule those releases evaluated by, `ProbabilityRule.SHARES`:
+  each row weighed by its P over the rows' sum, with no remainder, P summing above 1 included. The replay therefore
+  reproduces every pick and score exactly, and says first that the record was evaluated under that rule and that
+  this code evaluates a new scenario with the remainder.
+● **Claude's design choices, awaiting the owner's ruling:**
+  ■ A Scenario field, `probability_rule`, carries the rule, so one engine evaluates both, rather than a second code
+    path for replay; a scenario built in code or on the panel takes the remainder rule.
+  ■ The remainder row is added at evaluation (`with_remainder`), not held by the Scenario the operator built, so the
+    record stores the operator's rows and the result shows the rows the engine weighed.
+  ■ The tolerance works both ways: a sum within 1e-9 below 1 adds no remainder row, as one within 1e-9 above it is
+    read as 1. The sum is added exactly (`math.fsum`), so 0.1, 0.2 and 0.7 sum to 1.
+  ■ The remainder row has no Conf, and its P is marked with the weakest basis of the operator's P, since it is 1 less
+    their sum; it is not listed among the judgement inputs, since nothing on the panel sets it.
+  ■ The NOTSO interval checks hold the other rows at their P with the remainder taking up the move; a P is checked
+    no higher than the rows can sum to 1, and rows moved together over the corners of their box cut where the sum
+    would pass 1 (the box's corners within the sum and the points on its edges where the sum reaches 1). The update
+    after turn 1 reads each share's range over the same corners.
+  ■ With the rows' P at exactly 1 no remainder row is evaluated, so no NOTSO interval is checked, alone or together:
+    a higher P is refused, and a lower one leaves a remainder of P whose cells this evaluation does not hold. 0.29.0
+    checked such an interval by rescaling the rows' shares; this code does not, and the line says why and that with
+    the rows' P summing below 1 the remainder row is evaluated and the interval checked. Evaluating a remainder row
+    at P 0 for the check alone would add a row the brief rules out at a sum of 1, and its cells to the record. The
+    update then reads its shares at the P entered.
+  ■ The tree counts the remainder as a red move in its size and cost, and every refusal of size or cost says so,
+    rather than leave it out of the count and build a tree that does not weigh it.
+  ■ On the tree, the label sits beside a remainder branch's heading, not inside it, so the heading keeps its one
+    form, "Turn 1 of 2: red No adversary action (remainder of P), our Hold".
+  ■ Version 3 holds the remainder rule alone, so a version 3 record can never replay as one evaluated before
+    SPC-203; the rule field is kept so the document says the rule it was evaluated by.
+  ■ The sum is checked at Evaluate, not as each field changes, as every other panel number is.
+
+## Collect first tied to the recommendation (SPC-204)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed at the
+end of this section.** Evaluation finding F-14 (High) found that the collect-first advice rested on Threat range band
+steps against a fixed, unsourced action line, and tied that line to a change in the operator's response, but the
+threat picture moves no figure in the matrix, so no collection outcome could change the engine's
+recommendation: probe P-10 evaluated one bound scenario under opposite pictures and found the matrix and the pick
+identical, while one picture was told to collect first. Gates were not reassessed; their ratings stand until the
+evaluation is repeated.
+
+● **Decision relevance, computed from the engine** (the brief's choice of what, Claude's of how). For a scenario
+  with a threat picture and a cue, `decision.cue_relevance` takes the recommended response under each of the cue's
+  outcomes, the picture's range moved to the cue's benign and to its hostile floor and ceiling, with the rule judged
+  by. Each outcome's matrix is the evaluation the engine would run under that picture: `ScenarioResult.matrix_under`
+  runs the same cell step the evaluation ran, `_build_matrix`, under the outcome's picture, from the plans the
+  evaluation made. Those plans (sampling, the computed approach and burns, custody, the span searched) are made from
+  the scenario with no picture in them, so no band can reach one, and a band can reach a figure or a score only in
+  the cell step, which is run again. Each picture's matrix is built once per result. A test sets the relevance
+  against a whole new evaluation under each outcome's picture, under every rule, on the lookup path, on P-10's bound
+  scenario and with a test stand-in that moves figures: they agree. The outcome matrix reads no Threat band, so the
+  two picks are always the same, and that is a tested, stated result, not an assumption: should a later release let
+  a band move a figure, the advice follows, as the stand-in shows.
+● **The advice in the engine** (the brief's choice). Where the sweep would collect first, the engine collects first
+  only for a cue whose outcomes give different recommended responses and that lands by decide-by, and then names the
+  recommended response under each outcome. With no such cue it names the sweep's cue and says so in words, never
+  recommending delay: "Collecting "pull its element-set history" would narrow the Threat range but cannot change
+  the recommended response: the outcome matrix reads no Threat band." Where the sweep says act on the ceiling or
+  below the action line, its advice stands, and when the picture holds a cue and none of them can change the
+  recommended response, a sentence says so: "No collection the picture holds can change the recommended response:
+  the outcome matrix reads no Threat band." A collect-first row is listed only for a cue that is collected first.
+● **The action line is described as what it is** (the brief's choice). The old wording, which tied the line to a
+  change in the operator's response, is gone from every sentence, the operator guide included, and a test finds it
+  in any case, spacing or quotation. The advice names "the action line at Threat HIGH" and says in a
+  sentence of its own: "The action line is the Threat band at which the owner may set that a response changes:
+  Threat HIGH by default, tuned, not sourced." The sweep's own advice keeps its range-narrowing purpose with this
+  wording.
+● **What moved.** Probe P-10 inverted: the same bound scenario under opposite pictures now gives advice that says
+  the collection cannot change the recommendation, and nothing in the engine says collect first
+  (`tests/unit/test_decision_relevance.py`). Every engine test of collect first and its rows now runs with a test
+  stand-in, `tests/unit/_band_stand_in.py`, that lets the picture move figures, and says so. The sweep's advice to
+  act on the ceiling, or that the range is below the line, now carries the sentence above when the picture holds a
+  cue. No pick, figure or score changed.
+● **Claude's design choices, awaiting the owner's ruling:**
+  ■ Relevance is judged by the primary rule's pick on the results page, since that is the recommendation shown; a
+    result read on its own judges it by the rule the evaluation ran.
+  ■ The sweep's own gates stand beneath it: the range must straddle the action line and the cue must have value
+    above 0 and a result SPECTRE can read (since SPC-182, no longer that it can take the range off the line), as
+    well as change the pick and land by decide-by. Relevance is added, not substituted, so the action line stays the
+    owner's knob.
+  ■ The matrix under another picture is built again from the evaluation's plans, not by a whole new evaluation,
+    which would sample and propagate again for each outcome. To make that the same evaluation, every plan is now
+    made from the scenario with its picture taken out, which changes nothing today, since no plan read it. A result
+    the engine did not build, which holds no plans, scores each cell again from the figures it was built from.
+  ■ The test stand-in moves two figures of the response the band disfavours, custody for the whole horizon and a
+    closest approach inside the keep-out distance, rather than one: neither alone moves the picks of every fixture
+    that reads it.
+  ■ Where an outcome's picture moves a cell but not the pick, the advice says that under either outcome the engine
+    recommends the same response. It says the outcome matrix reads no Threat band only when no outcome of any cue the
+    picture holds moves any cell, so the reason is earned for the whole picture, not assumed from one cue.
+  ■ The advice that cannot change the recommendation names the sweep's cue in quotation marks, since a cue is worded
+    as an instruction, and carries no action-line sentence, since it does not judge against the line.
+  ■ The sentence beside the sweep's other advice is added only when the picture holds a cue and none can change the
+    recommended response. Where a cue could but lands after decide-by, the sweep's advice to act on the ceiling stands
+    alone. "Treat it as Threat CRITICAL" is the sweep's wording, kept: the sentence beside it says the matrix reads no
+    Threat band.
+
+## The weight stability beside the recommendation (SPC-205)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling; they are listed at the
+end of this section.** Evaluation finding F-16 (High) found the default weights uncited direct ratings and no weight
+stability computed or shown, though in the bound scenarios of probe P-16 moving our delta-V's weight by 0.089 (0.20
+to 0.111), or reversibility's by 0.082, flipped the pick under minimax and expected value. Gates were not reassessed;
+their ratings stand until the evaluation is repeated.
+
+● **One function in the domain** (the brief's choice). `spectre/domain/weight_stability.py` `weight_stability`
+  takes a rule's pick on the one-turn matrix and, for each of the five weights, finds the smallest change of that
+  weight that changes the pick, in each direction, the other four scaled in proportion to keep the sum 1, as the
+  panel's normalisation scales them, and what it changes to; or that no change from 0 to 1 does. The results page
+  and the decision record both read it.
+● **Exact, not sampled** (the brief's choice). For fixed cell figures every composite score is linear in the moved
+  weight along that path, its five terms (`decision.score_terms`, from the figures the engine kept unrounded on each
+  cell) weighed by the moved weights. The pick can change only where two responses' expected-value lines cross, or
+  where the row-wise maxima or minima of two responses meet for minimax and minimin, which is where a line of one
+  meets a line of the other. Every such point inside 0 to 1 is found and the pick read at each and between each. A
+  response marked not permitted is never a pick it reports.
+● **Ties and rounding as the engine has them** (the brief's choice of what, Claude's of how). The engine rounds each
+  composite score and picks on the rounded scores, a tie going to the first permitted response, as
+  `find_robust_response` decides. At each point read the search scores every cell as the engine would at those
+  weights, rounds it to 6 decimal places, as the engine rounds it, and aggregates and picks as
+  `find_robust_response` does. So a tie the rounding makes is the
+  engine's tie, and only a move that breaks it the engine's way changes the pick; and where two lines meet but the
+  rounded scores part them, the rounding decides, as it does in the engine. A change at the point itself reads "at"
+  and "at least"; one only beyond it, "past" and "more than".
+● **The words never overstate** (Claude's choice). Each change is rounded down to 3 decimal places, so "at least" or
+  "more than" is never above the exact change. The weight's value it names is rounded away from the panel's, and the
+  engine's pick there is checked to be the one the line names; where 3 places would pass a further change, a place
+  more is shown. A change found only where every response scores alike says so, and that the first listed takes it.
+● **On the page** (the brief's choice). Beside the recommendation, in words: "The recommendation holds unless a
+  weight moves by at least 0.165: our delta-V's weight from 0.200 to 0.034 makes it manoeuvre (F0)." A details
+  element lists every weight, lowered and raised, with what the search rests on. A rule chosen other than the
+  primary rule has its pick's line beside it. The game tree's picks are not covered, and a line says so, on the
+  results and on the records page for a record of more than one turn.
+● **On the record** (the brief's choice of what, Claude's of which). A new column, `weight_stability`, holds the
+  recommendation's line as the results said it, written with the record; init_db adds it to an older database in
+  place, and a record from before reads "Weight stability: not recorded". It is stored, not derived, because the
+  stored inputs hold each cell's score but not the figures its terms come from, so deriving it would mean evaluating
+  the scenario again, sampled rows included. The stored inputs are unchanged, at version 3, and versions 1 to 3
+  still read and replay.
+● **What moved.** Probe P-16's bound scenarios, through the real engine (`tests/unit/test_weight_stability.py`):
+  under the score scales P-16 measured, those of 0.24.2, restored by a test stand-in, the computed scenario gives
+  0.0889 on our delta-V (0.200 to 0.111) and 0.0818 on reversibility under minimax, and 0.0873 and 0.0807 under
+  expected value; the sampled scenario gives 0.0889 and 0.0818 under both rules, as P-16 measured; each to the
+  manoeuvre (F0), within P-16's 0.001 scan step. Custody 0.65, closest approach 0.75 (0.705 under expected value on
+  the computed scenario, where P-16's scan found 0.706) and time to execute 0.9 match P-16 too. Under the scales
+  built since SPC-191 the same scenarios hold until our delta-V's weight falls by 0.165, or, on the computed scenario
+  under expected value, by more than 0.154. A whole evaluation with the weight moved by 0.154 still picks the sensor
+  retask, and at 0.045 the manoeuvre. A brute-force fine scan through the engine's own scoring, done in the test
+  only, agrees with the exact search on every weight, direction and rule. No pick, figure or score changed; the
+  composite score is the same float as before, its terms now named.
+● **Claude's design choices, awaiting the owner's ruling:**
+  ■ The chosen rule's pick has its own line whenever the rule chosen is not the primary rule, even when the two
+    pick alike, since the weights can move the two picks apart.
+  ■ Weights that do not sum to 1, as a scenario built in code may hold, are read over their sum, as the panel scales
+    them; a weight that carries the whole weight cannot be moved in proportion, and its line says so. Every weight at
+    0 gives no stability, and the line says why.
+  ■ A change under 0.001 is said to be under 0.001, and the pick then holds only at the panel's weights; the line
+    says which way the weight moves to change it.
+  ■ The points are where the unrounded lines meet; the rounded pick turns within a millionth or so of each. Where
+    two responses' unrounded aggregates stay within one rounding step of each other over a stretch of the weight,
+    the engine's pick there turns on the rounding, and the point is still placed where the lines meet.
+  ■ The record stores the recommendation's line alone, not the chosen rule's or every weight's.
+
+## Element-set error in the miss (SPC-202)
+
+**Status: built. Each choice not named in the brief is Claude's design choice, not a ruling, awaiting the owner's
+ruling; they are listed at the end of this section.** Evaluation finding F-11 (High) found that the closest-approach
+payoff was an SGP4 point miss (computed cells) or a P5 over the burn's dispersions alone (sampled cells): element-set
+error, which the code's own model puts at 1 km at epoch plus 2 km a day in LEO and 2 km plus 1 km a day at GEO, never
+entered it, so bands read tighter than the inputs allow. Gates were not reassessed; their ratings stand until the
+evaluation is repeated.
+
+● **The model.** `spectre/astro/along_track.py`'s `_ERROR_MODEL_KM`, the threat sweep's rule of thumb, tuned, not
+  sourced: 1 km at epoch plus 2 km a day of age in LEO and MEO, 2 km plus 1 km a day at GEO and beyond (GEO and DEEP
+  as `regime_from_tle` reads the set). It is in docs/lookup-register.md. Each set's age is read from its epoch.
+● **Sampled cells.** Every sample also draws each object's element-set error along track, from a normal distribution
+  whose 1 sigma is the model's error at that set's age at the scenario epoch, red and blue each their own draw. The
+  draws are seeded per sample and side from the hypothesis's seed on a stream of their own (`ELSET_ERROR_STREAM`),
+  so an evaluation repeats exactly and the burn draws are untouched. The draw moves the object along its own orbit:
+  its RK45 arc is read that many seconds later or earlier, the offset over its speed at the window start, which is
+  the same orbit moved along itself, so the shared arcs are still integrated once, run a little past each end. The
+  band, P5, its convergence and the score all read the moved objects' misses. The cell names each side's 1 sigma and
+  age, and its basis names the model and its source.
+● **Computed cells.** The SGP4 miss stays the figure. Beside it, a band: the miss less and plus both sets' error at
+  the time of closest approach in quadrature, 1 sigma, the same figure the TCA's uncertainty has used since SPC-118,
+  never below 0 km. The score reads the lower edge: the operator reads the closer case to answer "can it reach one of
+  mine". Each computed cell shows "Element-set error: low to high km", says the band is 1 sigma, and gives what the
+  score reads and each set's age at the TCA. A cell on RK45 because our burn was sized carries the same band; our
+  burn is sized on the miss itself.
+● **The time of closest approach.** A computed TCA's uncertainty is both sets' whole error at the TCA, as since
+  SPC-118. A sampled TCA's is not: every sample has drawn both sets' error at the scenario epoch, so the samples' TCAs
+  spread by it already, and adding it again to each sample's TCA would count it twice. Its ± and the TCA histogram's
+  bin floor hold only what no sample draws, each set's error at the TCA less its error at the scenario epoch in
+  quadrature, both sets in quadrature, and the hover and the histogram's caption say so. In the game tree a sampled
+  node's TCA reads the same way.
+● **The game tree.** Each sample keeps its draws from turn to turn: red's in the state it carries, blue's as the time
+  along its orbit it is read at. A sampled turn after a computed one draws both errors at its start, moving red's one
+  state along its orbit for each sample. A computed node shows its miss with the band in its basis, and its sequence
+  scores the path's closest approach less the error at that node's closest approach, the latest along the path and so
+  no smaller than any before it. The node's basis says the sequence's score reads the path's closest approach less
+  that error, which is not always the node's own miss less it.
+● **Every sentence that said "element-set error is not in it"** now names the error included, its model with its
+  figures, its source and the ages read: the computed and sampled bases, the band's hover, each computed row's
+  Uncertainty sentence, from the row's first cell, the computed and sampled caveats, "Converged means" and the tree's
+  four notes. Where the error is drawn the ages are at the scenario epoch; where it is beside a computed miss they are
+  at that closest approach, and the result's computed caveat gives the ages at the scenario epoch and says each is
+  older by the time to the closest approach.
+● **The operating envelope.** The deep-space and GEO flags say that the unvalidated or unsourced error model now sets
+  every sample's draw, every computed band and the closest approach and score that read them, not only a set's age and
+  its TCA's uncertainty. A record of 0.28.0 to 0.31.0 keeps the flags it showed.
+● **Records of 0.28.0 to 0.31.0.** They are replayed under the rule they were evaluated by, as SPC-203 did for P:
+  stored inputs version 4 adds the scenario's miss rule; versions 1 to 3 read as the rule before it, no element-set
+  error, so the replay reproduces what the operator was shown, says so first, and the provenance hashes those records
+  as they were. Version 4 holds the new rule alone. No other stored field was needed: each set's text, epoch and age
+  were stored already. `tests/unit/_decision_records_0_31_0.json` holds two records 0.31.0 wrote, a sampled and
+  computed matrix and a two-turn tree, and each replays exactly.
+● **What moved.** Re-derived by evaluating each case under both rules, never pasted. The plane-change computed miss,
+  10.40 km, now scores on 8.94 km, inside the 10 km keep-out, so its closest-approach term is the full penalty. The
+  orbit raise burned 2 h before its window (convergence C7): P5 855.86 km known to within 11.34 km before, 854.86 km
+  within 12.08 km now. The Evasive sampled row: 10.7 to 13.4 km before, 9.7 to 15.1 km now. Our burn sized to 20 km
+  against the Evasive burn 0.25 h in: P5 9.45 km before and 19.94 km after, 16 of 100 samples under the target, before;
+  7.27 km and 17.87 km, 52 of 100 under it, now, since the burn is sized on the nominal, not the band. The reference
+  cases pass unchanged: each computed figure is still the SGP4 miss, and the series with one undispersed sample draws
+  nothing.
+● **Picks.** The rule can change a pick, and does where our burn is sized. Responses in a row need not share a band: a
+  response whose burn is sized has its own miss, TCA and so error, and a fixed subtraction does not move every cell's
+  logarithmic closest-approach term alike, nor keep a minimax pick. Checked by evaluating each under both rules: no
+  matrix pick and no tree turn-1 pick changed in the 8 record fixtures (0.28.0, 0.29.0 and 0.31.0), nor in C7, the
+  Evasive row, test 36 or coplanar_leo computed with Hold against Avoid sized to 20 km, nor the turn-1 picks and the
+  path selected in two trees from `tests/unit/_decision_tree_cases.py` under expected value and minimax. One that
+  changed, pinned in `tests/unit/test_decision_elset_error.py`: coplanar_leo computed, Hold against Avoid with our
+  burn sized to 15 km, the closest-approach weight 0.7 and the other four 0.075 each. Before, every rule picked Avoid,
+  0.694479 against Hold's 0.699953; now every rule picks Hold, 0.7 against Avoid's 0.704518. Hold's miss, 10.01 km, is
+  just outside the 10 km keep-out and its lower edge inside it, where the term is already the full penalty, so Hold
+  moves by under 0.0001. Avoid's burn puts the miss at 15.1 km and is scored at that less its own error, 1.74 km, so
+  only Avoid's score rises. The same happens at a 12 km target with the weight at 0.9. A burn sized short of the error
+  buys less than its target says; the caveat with a sized burn says so.
+● **Claude's design choices, awaiting the owner's ruling:**
+  ■ **Along track only.** The model is an along-track error, so no radial or cross-track part is drawn: any figure
+    for one would be unsourced, and along track is where element-set error grows fastest. The results say what is
+    still not in the band.
+  ■ **A normal distribution, 1 sigma the model's figure.** The sweep uses the model as a shift both ways; the TCA's
+    uncertainty reads it as 1 sigma, so the draw does too.
+  ■ **The age at the scenario epoch, fixed for the span.** The draw is an initial-state error; within the span the
+    moved orbit is flown as it is, so the error does not grow at the model's 2 km a day while the span runs, where a
+    computed band read at the closest approach does.
+  ■ **A time along the orbit.** Moving an object along its own orbit is reading its arc at another time, which keeps
+    the cost of a series where it was; our burns on blue keep their time on blue's moved arc, so each is made at the
+    same point of blue's orbit.
+  ■ **The lower edge for the score of a computed cell.** It is never below 0 km. A crossing at high speed turns
+    along-track error mostly into time, so the lower edge can overstate how much closer the pair comes; it errs
+    towards the closer case.
+  ■ **A 1-sigma edge beside a P5.** The brief sets the band as the miss less and plus the error; the computed cell
+    scores on that, 1 sigma closer, while a sampled cell scores on P5, about 1.645 sigma closer where the error
+    dominates its spread. Rows of one matrix can so be scored at different confidence levels: the same co-orbital pair
+    20 km apart with red two days old scores 14.9 km computed and P5 11.3 km sampled. Both the line and the basis say
+    the band is 1 sigma.
+  ■ **A sampled TCA holds only the error's growth.** Every sample draws the error at the scenario epoch, so its ± is
+    the growth from then to the TCA alone, rather than the whole error counted again.
+  ■ **Replay under the rule evaluated by**, not under this code's rule with the difference reported.
+  ■ **More samples may be needed.** A wider band converges more slowly, at about the same cost a series: 500 samples
+    took 3.5 s with the draws and 3.2 s without at LEO, 2.9 s and 3.0 s at GEO, measured here. A co-orbital GEO pair
+    15 km apart over 1 h, both sets 12 h old, 2.5 km each, converges at the default 500 samples, P5 8.42 km known to
+    within 0.94 km against 1.00 km. Both 24 h old, 3 km each, well inside GEO's 72 h limit, it does not: P5 7.10 km
+    known to within 1.13 km, so the row is refused as unconverged. At 1,000 samples it converges, P5 7.56 km within
+    0.64 km. A LEO pair 15 km apart over 0.5 h converges at 500 samples with both sets 19 h old, 2.58 km each, within
+    0.97 km, and not at 24 h, its limit, 3 km each, within 1.13 km. The panel takes up to 2,000 samples a row; the
+    default stays 500.
+
+## The page's script and the draft threat model (SPC-199)
+
+**Status: the policy is built; the threat model is a draft for the owner's security lead to review and sign. Each
+choice not named in the brief is Claude's design choice, not a ruling; they are listed at the end of this section.**
+Evaluation finding F-08 (Critical, gate G9) found no engine threat model and a Content Security Policy that allowed
+`'unsafe-inline'` and `'unsafe-eval'`, with the results page itself carrying 2 inline scripts. Gate G9 was rated Red;
+that rating stands until the security lead has signed the model and the evaluation is repeated.
+
+● **What the browser runs.** `script-src` is `'self'` alone. The Decision Engine panel's row builder, the results'
+  trajectory opener and the histogram of sampled times of closest approach are in `spectre/web/static/js/decision.js`,
+  with the rest of the console's script in the other files beside it. The rows Add Adversary Action and Add Friendly
+  Response build are a `<template>` in the panel, the same markup the script string held, with each row's number
+  written where `__ROW__` stands. The histogram's data stays in its `<script type="application/json">` blocks, which
+  the browser never runs. An injected inline script, handler attribute or `hx-on` is refused by the browser.
+  Injected markup is not: an element carrying `hx-get` or `hx-post` still sends a same-origin request with the CSRF
+  token it inherits, so output escaping remains the control against it (T9 in the threat model).
+● **What the operator sees.** Nothing changes: every control does what it did, and the browser tests in
+  `tests/browser/` drive each one under the policy.
+● **The draft threat model.** `docs/threat-model-decision-engine.md`, structured by the 7 ISN 2023/09 principles,
+  covers poisoned element sets, tampered weights, priors and vetoes, the integrity and non-repudiation of records and
+  stored inputs, the confidentiality of the friendly priorities they reveal, the UDL credential and injection in the
+  browser, each with what exists, what remains and its owner. It is unsigned and does not close G9 by itself.
+● **Claude's design choices, awaiting the owner's ruling.** Behaviour is reached through `data-action`,
+  `data-init` and the other attributes `spectre/web/static/js/core.js` lists, resolved against its own registries
+  and never against `window`. A fragment's start-up code runs on htmx's load event, once for each element. htmx runs
+  with `allowEval` and `allowScriptTags` off. Inline style is still allowed.
+
+## Ties shown, and scores with no colour bands (SPC-206, SPC-208)
+
+**Status: built.** Evaluation findings F-13 and F-18.
+
+● **A tie is a tie** (SPC-206, evaluation F-13). A tie went to the response entered first and was not shown, so two
+  responses equal under the rule were reported as one recommendation chosen by typing order (probe P-05). Now
+  responses whose values under a rule lie within `TIE_TOLERANCE` of the best tie: half a unit in the sixth decimal
+  place, to which the engine rounds every composite score, so a smaller difference is below the precision the scores
+  are kept to (reasoned, in the lookup register; Claude's choice, not a ruling). The headline reads "Tie:" and names
+  each tied response, with a sentence saying the rule does not choose between them and the choice is the operator's;
+  each tied response's inputs follow, the star marks each, every rule's pick names the tie, and rules that find the
+  same tie agree. Over a game tree a tied turn's line names each response and the plan follows each.
+  `tests/unit/test_decision_ties.py` reproduces P-05 from the evaluation's description, X and Y entered in either
+  order, and shows both.
+● **What a record holds.** `find_robust_response` still returns the response with the lowest score, as 0.37.0 did,
+  the first entered only among exactly equal scores, so the record's pick columns and their replay are unchanged; a
+  response tied with it may have been entered first, since an expected-value score is not rounded and a near-tie
+  within the tolerance can favour the later one. The tie itself is named in the order entered, on the matrix and
+  over a tree alike, so rules that find the same tie agree whichever of it each picks. A difference of exactly the
+  tolerance is a tie: each difference is rounded to 12 decimal places first, so floating-point error cannot decide
+  it, and a score that is not finite never ties. A game tree's recommendation lines, which the record keeps as shown,
+  name the tie. A tie on the one-turn matrix is not yet held in a column of its own (Claude's
+  choice, for the owner).
+● **No colour bands** (SPC-208, evaluation F-18; the lead's ruling). Composite scores were coloured green below 0.25,
+  amber below 0.50 and red above, with no source for the thresholds, so colour implied a safety judgement the score
+  had not earned. No sourced thresholds exist, so the bands are gone: every score is shown in the text colour, in the
+  matrix and on the ranking cards, its number to three places with its words, lower being better, and its basis.
+  A response marked not permitted is still greyed, which says it is no candidate, not how good its score is.
+  `tests/unit/test_decision_score_colours.py` pins it.
+
+## The lookup model's relations: training only (SPC-207)
+
+**Status: built.** Evaluation finding F-17 (Medium). The lead's ruling of 2026-11-13: register each relation with
+its basis, and label every result resting on an unsourced one training only, naming it; change no number.
+
+● **The relations.** Where nothing is computed or sampled the engine sets a figure by seven relations: the custody
+  rule (custody lost when red manoeuvres and our response neither manoeuvres nor retasks a sensor, for the row's
+  custody gap share of the horizon); a sensor retask's custody gap of 0.5 of its time to execute against a
+  manoeuvre; the closest approach by red's action type (200 km against a manoeuvre, 5,000 km against no action,
+  10,000 km against a sensor retask, 3,000 km against any other); our manoeuvre's multiplier of 1 plus 5 times its
+  cost on that miss; our posture change's of 1 plus 2 times its cost; our delta-V with no sized burn of cost times
+  50 m/s; and a closest approach at 0.4 of the horizon. Each has a row in `docs/lookup-register.md`, "The lookup
+  model's relations", with its words, constants, place in the code and basis. No source was found for any of them,
+  so each basis is "unsourced judgement"; none of the numbers changed.
+● **The label.** `ScenarioResult.lookup_relations` reads which relations a result rests on from the bases its own
+  figures carry, in every cell of the matrix and every node of a game tree, so no path that sets a lookup figure
+  can leave its relation unnamed. A result resting on any says first, at the top of the results and above anything
+  that names a response (the collect-first advice, the headline and every rule's pick), "Training only.", that it
+  rests on unsourced relations of the lookup model, so use it to train, not to decide, and names each in the
+  register's words. The words are built from the constants, so the label cannot say one number while the code uses
+  another. A result that cannot say which it rests on is shown as resting on every one; the page never shows a
+  result without the label it needs, and `tests/unit/test_lookup_relations.py` fails if any response is named
+  above it. The session log's "Modelled recommendation" line carries the label too. Custody taken at its worst case,
+  a burn at the epoch for a manoeuvre row with no burn time, is a bound chosen on purpose, not the custody rule, and
+  brings no label.
+● **The record.** The decision record keeps the label as the results showed it, in a new nullable column,
+  `training_only`, or "" for a result resting on none; `init_db` adds the column to an older database in place. The
+  records page shows it, marked in bold when it is a label, and a record from before reads "Training-only label: not
+  recorded (this record predates it)". `scripts/replay_decision.py` says the same before its comparison. The label
+  is no input and no pick, so a replay says it and does not compare it: the stored inputs are unchanged at version
+  6, and a record from before the label, simulated by nulling the column, replays exactly.
+● **Not in the label** (Claude's reading, for the owner): the score's weights and its 50,000 km far anchor, which are
+  value judgements; the element-set error model and the archetypes' spreads, which shape computed and sampled
+  figures; the collect-first times and decide-by's response time; and the update's custody likelihood, said
+  instead to be uncalibrated (SPC-210). Each but the last is listed in the register with its own source; the
+  update's likelihood holds no constant to list, and the register's relations section names it and SPC-210.
+  `tests/unit/test_lookup_relations.py`, `tests/unit/test_lookup_register.py` and
+  `tests/integration/test_decision_training_only_record.py` pin it.
+
+## The update's likelihood: uncalibrated, and the harness to calibrate it (SPC-210)
+
+**Status: harness built; no calibration data.** Evaluation finding F-22 (Medium).
+
+● **What is said.** The update after turn 1 rests on the custody rule as its likelihood: each row gives what it gives
+  for certain. Nothing has scored that rule against what happened. Wherever the update's probability is shown, in
+  the likelihood model's line and in the update's basis, the results say "the likelihood is uncalibrated, with no
+  calibration data yet: no held history of what red did has been scored against it (SPC-210)".
+  `tests/unit/test_update_uncalibrated.py` renders the update for every observation and fails if a share of the
+  weight is shown without those words.
+● **The harness.** `spectre/domain/likelihood_calibration.py` reads held histories and reports their Brier score
+  (the mean squared difference between each predicted probability in the file and its outcome, 0 at best, 1 at
+  worst), a reliability table in equal bins of predicted probability (each bin's count, mean predicted probability
+  and observed rate) and the sample count. It names the data file by the SHA-256 of its bytes, and the code by
+  SPECTRE's version string and the SHA-256 of the scoring module's bytes and of the command's; each hash covers that
+  one file only. `scripts/calibrate_likelihood.py HISTORIES.csv` runs it, with an optional number of bins from 1 to
+  1,000 (10 unless given; any other number is a usage error), and writes nothing.
+● **What the score measures.** The probabilities in the file, set against their outcomes. The harness never runs the
+  update, so a score is evidence about the update's custody likelihood only if those probabilities were produced by
+  it for real held outcomes, which the harness cannot check; the report says so.
+● **The input.** UTF-8 text, a byte order mark allowed, comma-separated, header `history,predicted,observed` matched
+  exactly, case included, one held history a line:
+  `history` an identifier unique in the file, such as the record or event it came from; `predicted` the probability
+  from 0 to 1 the update gave the outcome, such as the share of the weight on red having burnt in turn 1 after what
+  custody showed; `observed` 1 if the outcome came about and 0 if not, from a source other than the custody the
+  update read. Anything else is refused, naming the physical line the record starts on.
+● **No data yet.** No held history in the repository fits: the NOTSO cache holds reported events only, with no
+  probability the update gave and no window where red was seen not to burn; the manoeuvre evidence summarises burns
+  per object; no element-set or custody history is shipped. None was simulated or made up, and no Brier score is
+  reported as calibration evidence. The tests run the harness on small hand-made fixtures whose scores are worked
+  by hand; they test the code, not the likelihood. The owner supplies held histories in the format above.
+
+## P5's own half-width, the integrator's error and each set's regime (SPC-213, SPC-214, SPC-215)
+
+**Status: built.** Evaluation findings F-26, F-27 and F-29 (Medium). No stored figure changes, so a record from an
+earlier release replays exactly; the stored inputs stay at version 6.
+
+● **P5 labelled with its own half-width** (SPC-213, F-26). The sampled basis note read "P5 of n sampled misses,
+  known to within h km", where h was the widest of the P5, P50 and P95 bootstrap half-widths. With a long upper tail
+  that overstated how closely P5 is known many times over (probe P-11: 18 to 45 times). The note now gives P5 its own
+  half-width, `monte_carlo.percentile_half_widths_km`, from the same resamples, and says "Convergence is judged on
+  the widest of the P5, P50 and P95 half-widths", naming that figure. Convergence still reads the widest, so no
+  refusal and no figure moves. `tests/unit/test_p5_half_width.py` holds the label to P5's own half-width on a case
+  where it is under a hundredth of the widest.
+● **The integrator's own error, stated** (SPC-214, F-27). The lead ruled not to tighten RK45_RTOL 1e-8 and
+  RK45_ATOL 1e-10, since that would move stored figures and runtime, and to state the error instead.
+  `tests/unit/test_integrator_error.py` integrates three reference pairs (B* 1e-4) on both production paths and by
+  DOP853 at rtol 1e-12 and atol 1e-14, reading position and separation every 60 s. The largest error up to each
+  horizon:
+
+  | Horizon | Position, LEO | Position, GEO | Separation, any pair |
+  |-------|------------|------------|------------|
+  | 24 h | 0.092 km | 0.0029 km | 0.0118 km |
+  | 48 h | 0.386 km | 0.0043 km | 0.108 km |
+  | 72 h | 0.881 km | 0.0148 km | 0.379 km |
+
+  The LEO figures are the 550 km, 97.4 degree orbit's; the 500 km, 51.6 degree orbit gives 0.068, 0.285 and
+  0.653 km, which agrees with probe P-13's 0.285 and 0.652 km. P-13 reported up to 0.353 km of separation error at
+  72 h; this pair gives 0.379 km. `monte_carlo.INTEGRATOR_ERROR_KM` holds each figure rounded up, and the sampled
+  basis note states those for the shortest measured horizon at or past the scenario's, and that between two unlike
+  orbits the separation error can reach both objects' errors added. The horizon it reads is the longest span RK45
+  runs for the row, from the nominal burn, or the window's start when that is earlier, to the window's end: a 72 h
+  window with its burn 48 h before it runs 120 h. Past 72 h it says the error was measured to 72 h only.
+● **Each element set stated in its regime** (SPC-215, F-29). `along_track.orbit_regime` classifies a set by its
+  period and eccentricity: HEO/Molniya at an eccentricity of 0.25 or more; GEO for a period within 20.5 min of the
+  sidereal day, whatever the apsides; otherwise LEO or MEO by the apsides against the altitude bands in
+  `spectre/astro/constants.py`, and other deep-space for the rest at SGP4's deep-space period or over. A period or
+  eccentricity that is not a finite orbit's is refused, and the set's line says its regime is not readable. No
+  staleness limit or error rate could be sourced exactly for any regime, so each set keeps the figure it had, LEO's
+  or GEO's, chosen as before by `constants.classify_orbit_regime`, which is left as it was so that no figure moves:
+  it reads a geosynchronous set of e about 0.0095 or more as MEO, so that set is stated "LEO figure applied to GEO,
+  unsourced for this regime".
+● **Where it is stated.** Every staleness limit quoted on the decision page, the threat sweep and the Pattern of
+  Life page is followed by whose figure it is: the bound sets' lines ("Orbit current: 5.0 h old at evaluation, limit
+  72 h, the GEO figure, set for GEO."), each bound set's regime line, custody at evaluation and over the horizon, the
+  red card, the sweep's element-set ages and each stale target, the sweep's warning-change sentences, the burn
+  differential's out-of-date sentence and the POL page's custody. Every element-set error rate quoted names whose
+  figure it is, by set (the sweep's delta-V band, the Intercept Engine's band, the bound sets' lines) or as the model
+  in general, "1 km at epoch plus 2 km a day by the LEO figure and 2 km plus 1 km a day by the GEO figure", which
+  says which sets take which (`along_track.ERROR_MODEL_WORDS`). `tests/integration/test_limit_states_its_regime.py`
+  searches the three rendered pages for a limit quoted with no figure. Not covered: the burn watch's own figures and
+  the Threat Understanding's window, which apply the limit but quote no hours. `tests/unit/test_orbit_regime.py`
+  holds one case per regime and each classifier boundary. The SDP4 flag of SPC-200 stands.
+
+## Scores, inputs, seeds, constants and dates checked (SPC-221, SPC-222, SPC-224, SPC-225, SPC-226)
+
+**Status: built.** Evaluation findings F-32, F-33, F-35, F-36 and F-38 (Low). SPC-224 moves what a sampled row
+replays to, so the stored inputs go to version 7, which holds the convergence rule; versions 1 to 6, written by
+0.28.0 to 0.41.0, read as the one seed those releases judged convergence on, and replay exactly
+(`tests/unit/test_decision_replay_0_41_0.py`, four records 0.41.0 wrote).
+
+● **A score that is not finite is refused** (SPC-221, F-32). Probe P-14 injected a NaN lookup: the matrix printed
+  "nan" and the pick followed the row order, since NaN compares false with everything. Now `find_robust_response`,
+  `rule_values` and so every rule, minimax, expected value and minimin, and the ties beside them, refuse a matrix
+  holding a composite score that is not finite, NaN or infinite, under a response not permitted too; and the tree's
+  selectors refuse a sequence score that is not finite in the turns they pick over. Each raises
+  `NonFiniteScoreError`, which names the cell or the sequence for the log; the operator is shown a fixed sentence,
+  `NON_FINITE_SCORE`, inline or as the job's failure, and no figure. An infinite lookup closest approach is not a
+  score that is not finite: the closest-approach term saturates, so its score is finite.
+● **A missing row value or weight is refused** (SPC-222, F-33). A truncated form evaluated as if P 0.5, Conf 0.5,
+  Gap 0.7 or the default weights had been chosen; an action type naming no listed type fell back to a manoeuvre;
+  and a cleared weight, which reaches the route as absent, took its default. Each is now refused inline, naming the
+  row and the field ("Adversary action row 2 posts no probability (P).") or the weight, and a column longer than the
+  rows is refused too. The panel posts every field of every row, blanks included, and nothing else in SPECTRE posts
+  to the route, so its submissions are unchanged. Optional by design, and said so where each is declared: the
+  hypothesis section, our burn fields and the not-permitted fields, each absent as a whole meaning none; the hidden
+  sweep fields; the scenario's name; the selector, absent meaning the deployment's primary rule; and the tree's turn
+  depth and stated observation, absent meaning one turn and nothing stated.
+● **The seed shown, and convergence checked on two seeds** (SPC-224, F-35). The seed was fixed at 42 and never shown,
+  and at 50 samples whether a row converged was one draw: 15 of 20 seeds in one case, 1 of 6 in another (probe P-11).
+  Now every sampled row is drawn on its hypothesis's own seed, whose figures are shown, and again on the second seed,
+  the seed plus one (43 for 42), every sample afresh, and is converged only when both draws are. When the two
+  disagree the row is not converged and not sampled, and its cells say so, naming both seeds and both half-widths; a
+  row not converged on its own seed is refused as before and not drawn again. The seed is in each sampled cell's
+  basis note and in a line beside what converged means, which names the matrix and points to the tree, and in the
+  stored inputs, where every hypothesis has always carried it; version 7 stores the rule. The case the build found:
+  the 0.41.0 tree record's scenario over one turn at 59 samples converges on seed 42 (half-width 0.66 km) and not on
+  seed 43, so 0.41.0 sampled it and 0.42.0 refuses it. A game tree's first turn is the matrix's row and is checked on
+  both seeds; its later turns' sequence closest approaches are still judged on the one draw each turn makes, on a
+  seed derived from the row's, the turn and the branch, and a line beside the tree says so.
+● **The runtime cost of the second seed.** A row converged on its own seed is drawn again in full, so its sampling
+  time doubles; a row not converged is not drawn again. Measured on the build container (4 cores, idle, Python 3.13,
+  median of 3 runs each): plane_change Evasive at 500 samples over 1 h took 3.93 s on one seed and 7.75 s on two,
+  1.97 times; the 0.41.0 sampled record's scenario, coplanar_leo Evasive at 50 samples over 6 h beside its lookup
+  row, 3.44 s and 5.84 s, 1.70 times, the rest of the evaluation not drawn again. Each sampled row is charged twice
+  against the 12,000 sample-hour cap, so at 500 samples the longest horizon that fits falls from 23.7 h to 11.8 h,
+  and a game tree's first turn is charged twice against the tree's own cap.
+● **The WGS-72 to WGS-84 handover, measured and stated** (SPC-225, F-36). SGP4 runs on the WGS-72 constants its
+  element sets are fitted with; every RK45 arc starts from an SGP4 state and flies it with WGS-84's mu and radius
+  and the EGM-96 J2. `tests/unit/test_wgs_handover.py` flies each object of the three reference pairs from its SGP4
+  state with both sets of constants (B* 1e-4) and compares every 60 s. The largest difference up to each horizon:
+
+  | Horizon | Position, LEO | Position, GEO | Separation, any pair |
+  |-------|------------|------------|------------|
+  | 24 h | 1.167 km | 0.476 km | 0.058 km |
+  | 48 h | 2.336 km | 0.952 km | 0.117 km |
+  | 72 h | 3.516 km | 1.428 km | 0.176 km |
+
+  Both objects drift along track alike, about 1.2 km a day in LEO, so a pair's separation, which the closest
+  approach reads, moves at most 0.18 km by 72 h: the size of the integrator's own separation error (0.02 to
+  0.38 km) and under a fifth of the smallest element-set error each sample draws. It is judged not material, so the
+  constants are kept and the handover is stated in the sampled basis note, beside the RK45 computed line and in
+  `spectre/astro/constants.py`; `monte_carlo.WGS_HANDOVER_KM` holds each figure rounded up.
+● **An element set dated in the future is refused** (SPC-226, F-38). Probed at 602c963: a LEO and a GEO set dated
+  48 h ahead, each with good checksums, were accepted, aged 0.0 h, not stale, and bound as current. Now an epoch more
+  than 5 minutes after the time a set is checked, `elset_check.FUTURE_EPOCH_TOLERANCE`, an unsourced allowance for
+  clock skew in the lookup register, is refused by the acceptance check, by the time it is checked, on every path a
+  set enters by: the operator's paste box for a red track or a blue asset, the sweep's manual red element set and the
+  screen's manual asset, a training scenario's load, the UDL TLE panel's fetch and the HRR watchlist's sets, the UDL
+  current fetch the sweep, the screen and the background refresh use, the UDL history fetch, and the Pattern of Life
+  history parse, where it is counted and named with the other refused sets; and again at binding, at the scenario
+  epoch. The sentence names the epoch, how far ahead it is and that a set dated in the future would read as current.
+  Wherever an age is computed, `elset_age` marks such a set as dated in the future, never current: custody from the
+  history is lost and says so, the interaction graph gives it no window, the red card and the sweep say "FUTURE
+  EPOCH" and name it apart from the age range, and the sweep's delta-V band says so rather than 0 h. Within the
+  tolerance the age reads 0 h as before.
+
+## The force model measured against a reference (SPC-209)
+
+**Status: built.** Evaluation finding F-19 (Medium). The physics is not changed and no stored figure moves; the
+sampled basis note gains one clause, which no replay compares, so a record from an earlier release replays exactly
+and the stored inputs stay at version 7.
+
+● **The claim, as it stood.** The engine's RK45 flies two-body, J2 and exponential drag, and `monte_carlo.py` said
+  the spread of the burn dominates force-model error at 48 h, so a high-fidelity ephemeris is unnecessary. The
+  evaluation found RK45 and SDP4, which has lunisolar terms, 11 to 18 km apart at GEO over 48 to 72 h.
+● **The reference** (`tests/unit/_force_model_reference.py`), for measurement only: nothing in `spectre` imports it,
+  and it uses numpy and scipy alone. It adds to the engine's model J3 and J4 (EGM-96), the Moon (Montenbruck and
+  Gill, Satellite Orbits, 2000, section 3.3.2) and the Sun (Meeus, Astronomical Algorithms, 2nd ed., 1998, chapter
+  25) as point masses, and cannonball radiation pressure at Cr 1.3 in a cylindrical shadow with a smoothed edge;
+  drag is the engine's own. Every object of a run is flown in one call by DOP853 at rtol 1e-11.
+● **The reference checked first.** With the added forces off its equations are the engine's to 1e-13, and it flies
+  each object of the 6 pairs within 0.002 km of the engine's equations integrated at rtol 1e-12, and within the
+  engine's stated integrator error of the production RK45, over 72 h. Its J3 and J4 are the gradient of the zonal
+  potential. Its Sun reproduces Meeus's worked example 25.a and is within his stated 0.01 degree at the 2026
+  equinoxes and solstices (at most 0.0065); its Moon is within 0.0053 degree, 0.0022 degree and 51 km of Meeus's
+  example 47.a, which comes from a fuller lunar theory, and within 0.016 degree of conjunction and opposition at the
+  new and full moons of February and March 2026. No published accuracy for the lunar series could be confirmed in
+  this build, so 0.05 degree and 100 km are the bounds the test uses.
+● **What it flies** (SPC-209, F-19). `tests/unit/test_force_model_error.py` flies 6 pairs from their SGP4 states at
+  B* 1e-4, one to three per regime as `along_track.orbit_regime` states it: the 500 km co-planar and 550 km polar LEO
+  reference pairs and a 500 km co-planar pair whose closest approach comes about 26 h on; a co-planar MEO pair at
+  20,200 km and 55 degrees; the GEO drift-in pair, closest about 31 h on; and a Molniya pair (e 0.74, 63.4 degrees,
+  perigee 528 km). Blue's area-to-mass ratio is 0.02 m^2/kg. Red's is the same (alike), or 0.005 or none (unlike):
+  radiation pressure on two objects of one ratio largely cancels in their separation, and on two unlike objects does
+  not. The ratios are a judgement, far above the 5.8e-4 m^2/kg B* 1e-4 implies, so radiation pressure is not
+  understated. Red is given an in-track burn of none, 0.1, 1 or 10 m/s at the epoch: a collision-avoidance burn,
+  about half the evasive and station-keeping archetypes' 2 m/s, and the phasing archetype's. Every 60 s it reads how
+  far the reference moves each object and the pair's separation from where the engine's forces put them, the
+  integrator's own error kept out.
+● **What the forces move** (SPC-209, F-19), km, the largest up to each horizon: position, any object's with any burn
+  in any case; then the pair's separation, alike and, the worse of the two, unlike:
+
+| Pair | Horizon | Position | Alike: none | 0.1 m/s | 1 m/s | 10 m/s | Unlike: none | 0.1 m/s | 1 m/s | 10 m/s |
+|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|
+| LEO, 500 km | 24 h | 0.916 | 0.223 | 0.224 | 0.234 | 0.328 | 0.259 | 0.260 | 0.270 | 0.363 |
+| LEO, 500 km | 48 h | 1.81 | 0.582 | 0.587 | 0.626 | 0.894 | 0.652 | 0.657 | 0.695 | 0.955 |
+| LEO, 500 km | 72 h | 2.71 | 1.06 | 1.07 | 1.14 | 1.35 | 1.16 | 1.17 | 1.24 | 1.42 |
+| LEO, 500 km, late | 24 h | 1.97 | 1.22 | 1.21 | 1.22 | 1.32 | 1.24 | 1.24 | 1.25 | 1.35 |
+| LEO, 500 km, late | 48 h | 3.91 | 2.55 | 2.56 | 2.59 | 2.74 | 2.62 | 2.63 | 2.66 | 2.80 |
+| LEO, 500 km, late | 72 h | 5.86 | 3.99 | 3.99 | 4.05 | 3.72 | 4.09 | 4.10 | 4.15 | 3.79 |
+| LEO, 550 km polar | 24 h | 2.32 | 0.121 | 0.118 | 0.080 | 0.185 | 0.126 | 0.126 | 0.101 | 0.186 |
+| LEO, 550 km polar | 48 h | 4.66 | 0.241 | 0.226 | 0.105 | 0.645 | 0.253 | 0.246 | 0.147 | 0.649 |
+| LEO, 550 km polar | 72 h | 7.01 | 0.362 | 0.323 | 0.201 | 1.25 | 0.378 | 0.358 | 0.212 | 1.26 |
+| MEO | 24 h | 1.30 | 0.005 | 0.005 | 0.004 | 0.016 | 0.394 | 0.394 | 0.397 | 0.420 |
+| MEO | 48 h | 2.30 | 0.011 | 0.011 | 0.012 | 0.054 | 0.790 | 0.791 | 0.795 | 0.828 |
+| MEO | 72 h | 3.25 | 0.020 | 0.020 | 0.024 | 0.135 | 1.19 | 1.19 | 1.19 | 1.25 |
+| GEO | 24 h | 7.23 | 0.025 | 0.025 | 0.023 | 0.181 | 0.722 | 0.744 | 0.768 | 0.622 |
+| GEO | 48 h | 15.08 | 0.049 | 0.043 | 0.038 | 0.488 | 1.60 | 1.59 | 1.53 | 1.11 |
+| GEO | 72 h | 23.81 | 0.083 | 0.073 | 0.058 | 0.943 | 2.42 | 2.41 | 2.28 | 1.41 |
+| HEO/Molniya | 24 h | 2.79 | 0.006 | 0.006 | 0.016 | 0.135 | 0.207 | 0.208 | 0.213 | 0.308 |
+| HEO/Molniya | 48 h | 5.40 | 0.013 | 0.014 | 0.059 | 0.555 | 0.727 | 0.733 | 0.780 | 1.23 |
+| HEO/Molniya | 72 h | 7.89 | 0.020 | 0.021 | 0.091 | 0.838 | 1.64 | 1.65 | 1.73 | 2.33 |
+
+  At GEO the omitted forces, the Moon's above all, move each object 15 km by 48 h and 24 km by 72 h, as the
+  evaluation found. Two alike objects move together, so a close pair's separation moves under 0.1 km outside LEO
+  with no burn; between unlike objects it moves 1.19 km in MEO, 2.42 km at GEO and 1.64 km in HEO/Molniya by 72 h.
+  In LEO J3 and J4 do most of it, and the 500 km pairs' separations move most when the pair is thousands of km apart.
+● **Against the spread sampled** (SPC-209, F-19). The spread is half the width from P5 to P95 of the pair's
+  separation over 200 of the engine's own draws (seed 42), flown by the engine's forces, at the Intercept / Approach
+  archetype's spreads, 3 per cent of the delta-V, 1.5 degrees and 15 s, the tightest the engine holds, and B* 1e-5;
+  with no burn it is drag's spread alone, nothing above 800 km, so the forces exceed it in every pair. The share is
+  the separation change, the worse of alike and unlike, over the spread at the same instant, the largest at any
+  instant read every 10 min up to the horizon. The miss share is how far the forces move the nominal closest approach
+  up to the horizon, over half the width from P5 to P95 of the samples' own closest approaches, the misses a sampled
+  cell's P5 is read from. Spread in km at the horizon:
+
+| Pair | Horizon | Spread: 0.1 m/s | 1 m/s | 10 m/s | Share: 0.1 m/s | 1 m/s | 10 m/s | Miss: 0.1 m/s | 1 m/s | 10 m/s |
+|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|
+| LEO, 500 km | 24 h | 1.10 | 11.01 | 107.2 | 0.2350 | 0.0245 | 0.0033 | 0.1939 | 0.0057 | 0.0017 |
+| LEO, 500 km | 48 h | 2.20 | 21.79 | 188.2 | 0.3007 | 0.0321 | 0.0049 | 0.1939 | 0.0057 | 0.0017 |
+| LEO, 500 km | 72 h | 3.27 | 31.68 | 219.3 | 0.3616 | 0.0395 | 0.0064 | 0.1939 | 0.0057 | 0.0017 |
+| LEO, 500 km, late | 24 h | 1.10 | 11.03 | 109.6 | 1.35 | 0.1347 | 0.0148 | 1.13 | 0.0890 | 0.0162 |
+| LEO, 500 km, late | 48 h | 2.23 | 22.17 | 198.7 | 1.35 | 0.1347 | 0.0148 | 0.3957 | 0.0890 | 0.0162 |
+| LEO, 500 km, late | 72 h | 3.35 | 32.63 | 242.4 | 1.35 | 0.1347 | 0.0155 | 0.3957 | 0.0890 | 0.0162 |
+| LEO, 550 km polar | 24 h | 0.125 | 6.92 | 109.7 | 1.78 | 0.0737 | 0.0018 | 0.0506 | 0.0003 | 0.0002 |
+| LEO, 550 km polar | 48 h | 0.484 | 19.44 | 209.2 | 1.78 | 0.0737 | 0.0031 | 0.0506 | 0.0003 | 0.0002 |
+| LEO, 550 km polar | 72 h | 1.26 | 32.10 | 285.6 | 1.78 | 0.0737 | 0.0044 | 0.0506 | 0.0003 | 0.0002 |
+| MEO | 24 h | 1.12 | 11.21 | 114.1 | 0.3524 | 0.0354 | 0.0038 | 0.1228 | 0.0041 | 0.0000 |
+| MEO | 48 h | 2.24 | 22.41 | 227.1 | 0.3530 | 0.0354 | 0.0038 | 0.1228 | 0.0041 | 0.0000 |
+| MEO | 72 h | 3.36 | 33.61 | 338.2 | 0.3539 | 0.0355 | 0.0038 | 0.1228 | 0.0041 | 0.0000 |
+| GEO | 24 h | 1.08 | 11.15 | 114.5 | 0.6910 | 0.0689 | 0.0054 | 0.6910 | 0.0241 | 0.0010 |
+| GEO | 48 h | 2.19 | 22.27 | 228.6 | 4.83 | 0.0740 | 0.0063 | 0.5663 | 0.0450 | 0.0010 |
+| GEO | 72 h | 3.34 | 33.37 | 342.1 | 4.83 | 0.0740 | 0.0063 | 0.5663 | 0.0479 | 0.0010 |
+| HEO/Molniya | 24 h | 0.168 | 1.68 | 17.17 | 0.5075 | 0.0492 | 0.0048 | 0.0042 | 0.0039 | 0.0000 |
+| HEO/Molniya | 48 h | 0.334 | 3.35 | 34.22 | 0.7138 | 0.0695 | 0.0065 | 0.0042 | 0.0039 | 0.0000 |
+| HEO/Molniya | 72 h | 0.502 | 5.03 | 51.23 | 0.9053 | 0.0885 | 0.0081 | 0.0042 | 0.0039 | 0.0000 |
+
+● **Where the claim holds, and where it does not.** With no burn the forces exceed the sampled spread in every
+  regime. With a burn of 0.1 m/s they can exceed it in LEO (1.78 times, the polar pair) and at GEO (4.83 times, by
+  48 h), and reach 0.35 of it in MEO and 0.91 in HEO/Molniya. With 1 m/s they are over a tenth of it in LEO (0.135,
+  the late pair) and under a tenth elsewhere (at most 0.089, HEO/Molniya); with 10 m/s, under a fiftieth everywhere.
+  The closest approach a cell reads moves less against its own spread: under a tenth with 1 m/s or more in every
+  pair; with 0.1 m/s up to 0.69 at GEO, and 1.13 for the late LEO pair by 24 h, whose closest approach then falls at
+  the window's end. Against the element-set error each sample also draws, at least 1 km by the LEO figure and 2 km
+  by GEO's, the no-burn separation between alike objects is under a tenth outside LEO and at or over it in LEO by
+  72 h; between unlike objects at GEO it is over it (2.42 km). The spread grows with the burn and the archetype's
+  spreads, so the comparison here is at the tightest; a burn with no archetype is drawn at 1 m/s 1-sigma, wider still.
+  The omitted forces exceed the spread with no burn and with 0.1 m/s in LEO and at GEO, two of the four burn sizes,
+  and not over most of them in any regime, so the force model is stated, not changed: Claude's judgement, for the
+  owner to confirm.
+● **Where it is stated.** `monte_carlo.FORCE_MODEL_KM` holds, by horizon, the largest position change in LEO, MEO,
+  GEO and HEO/Molniya and the largest separation change of any pair and burn, alike and unlike;
+  `monte_carlo.FORCE_MODEL_SHARE` holds each regime's worst share for burns of 0.1, 1 and 10 m/s. The test holds
+  both, and these tables, to what is measured. Every sampled closest approach's basis note says, after the WGS-72
+  handover and for red's regime, for example in LEO: "force model, not in the spread: RK45 leaves out J3 and J4, the
+  Moon, the Sun and solar radiation pressure, which against a higher-fidelity reference moved each object of 6
+  reference pairs up to 7.01 km in LEO, 3.25 km in MEO, 23.81 km at GEO and 7.89 km in HEO/Molniya by 72 h, and a
+  pair's separation up to 4.05 km when both objects have the same area-to-mass ratio and up to 4.16 km when one has
+  0.02 m^2/kg and the other 0.005 or none; in LEO, set against the spread sampled at any instant up to 72 h, between
+  such unlike objects, they are larger than it with no burn, when it is drag's alone, and with a burn of 0.1 m/s
+  (1.8 times it), over a tenth of it with a burn of 1 m/s (0.14 times) and under a tenth with a burn of 10 m/s (0.016
+  times)", for the shortest horizon measured at or past the span RK45 runs. A regime not measured, or not read,
+  takes the worst measured for each burn and says so. The module's design note, the lookup register and the guide's
+  limitations say the same. The test takes about 50 s.
+
+## What remains out of scope
+
+● **The composite weights are uncited** (SPC-151). Until an analyst sources them the score stays a lookup and the
+  ranking a weighted heuristic. Since SPC-205 the results show how far one weight can move before the
+  recommendation changes; swing-weight elicitation remains SPC-151.
+● **Calibrating the update's likelihood** (SPC-210): the harness is built, but no held history exists in the
+  repository to run through it. Until the owner supplies some, the likelihood stays uncalibrated and says so.
+● **Sources for the lookup model's relations** (SPC-207): none was found, so every result resting on one is labelled
+  training only. A relation that gains a verified source can have its register row and label changed together.
+● **A persistent-intent model for red** (D11): the owner ruled on 2026-11-05 to keep P as entered each turn.
+● **Element-set error across track** is not drawn, and the along-track model is a rule of thumb, tuned, not sourced
+  (SPC-202). SPC-215 found no source for an error rate or staleness limit in any regime: each set states its regime
+  and whose figure it takes, and a source found later can replace a figure in its register row.
+● **The integrator's error is stated, not reduced** (SPC-214): the tolerances stay as they are, by the lead's ruling.
+● **J3 and J4, the Moon, the Sun and radiation pressure are stated, not modelled** (SPC-209): the engine still flies
+  two-body, J2 and drag. Whether to add the forces is the owner's call. The reference's Moon and Sun are low-precision
+  series and its shadow is smoothed; neither is in the product.
+● **A sensor's line of sight to red is not modelled.** Custody is about information, not geometry, and our response
+  is not applied to it.
+● **Doctrine wording** (SPC-177): no probability or yardstick word appears. The owner ruled on 2026-11-05 that
+  doctrine words stay off screen, and SPC-177 is closed.
+● **The verdict switch** stays off: the owner ruled on 2026-11-05 to keep it off (concept section 9, decision 3).
+● **Constraint libraries** (SPC-195): rules drawn from doctrine or rules of engagement that would mark responses not
+  permitted without the operator ticking each are the owner's to supply; until then each veto is the operator's.
+● **A term joining custody and closest approach** (SPC-219, evaluation F-20): none was sourced, so the score adds
+  them as separate terms and says so beside the matrix and the tree.
+● **Moves after the last turn** (SPC-220, evaluation F-21): the tree looks at most 3 turns ahead, and its last
+  turn's branches are valued as if no one moves after it, said beside the tree and in the guide's limitations.
+● **A transfer of more burns than turns in a game tree.** The engine gives each burn a turn of its own (SPC-187),
+  and the tree runs at most 3 turns, so a transfer making more than 3 burns within the span searched refuses the tree;
+  its matrix still carries every burn.
+
+## Summary
+
+| Phase | What it gives the operator | Status |
+|-------|----------------------------|--------|
+| 1 | The matrix, its ranking and three selector rules; bound to real objects | Built |
+| 2 | A sampled closest approach from a manoeuvre hypothesis, scored on P5 | Built |
+| 3 | Computed closest approach and time, custody, our burns sized, trajectory and histogram | Built |
+| 5 | A NOTSO suggestion for P and Conf, its interval, and its timeline | Built |
+| 4 | A game tree of up to three turns, its picks, the update after turn 1, and its view | Built |
+| SPC-195 | A response marked not permitted, shown with its reason and never picked | Built |
+| SPC-200, SPC-201 | The operating envelope written down and checked, and one acceptance check for every element set | Built |
+| SPC-203 | P summing to at most 1, the remainder weighed as no adversary action, each row's share shown | Built |
+| SPC-204 | Collect first only for a collection that can change the recommended response; the action line described as what it is | Built |
+| SPC-205 | The smallest change of one weight that changes the recommendation, beside it and on the record | Built |
+| SPC-202 | Element-set error drawn in every sample, and a band beside every computed miss whose lower edge the score reads | Built |
+| SPC-199 | The panel's and the results' script in first-party files under a policy with no inline script or eval; a draft threat model for the security lead | Built; threat model a draft |
+| SPC-188 | A game tree's own cost cap, measured under load, 21,000 sample-hours; records from before checked against the shared cap | Built; re-measure on the deployment target |
+| SPC-189 | The best branch under each response, marked in words apart from the plan | Built |
+| SPC-206 | A tie within a stated tolerance named as a tie, every tied response shown | Built |
+| SPC-208 | Composite scores with no colour bands | Built |
+| SPC-211 | Decide-by only on the operator's own response time; with none set it says it needs one | Built |
+| SPC-207 | The lookup model's relations registered, each an unsourced judgement; every result resting on one labelled training only, on screen and on the record | Built |
+| SPC-210 | The update's likelihood said to be uncalibrated wherever its probability is shown; a calibration harness with no data yet | Harness built; no calibration data |
+| SPC-213 | P5 labelled with its own half-width; the convergence figure named apart as the widest of three | Built |
+| SPC-214 | The production RK45's own error, measured against a tight reference, stated in the sampled basis note | Built; tolerances unchanged by ruling |
+| SPC-215 | Each element set stated in its regime, by period and eccentricity, and whose staleness limit and error rate it takes | Built; no regime-specific figure sourced |
+| SPC-219 | Custody lost and closest approach stated as separate terms of the score, with no term joining them, beside the matrix and the tree | Built; no interaction term sourced |
+| SPC-220 | The last turn's branches stated as valued as if no one moves after it, beside the tree | Built |
+| SPC-190 | The game tree drawn beside its branches: collapsible and zoomable by mouse and keyboard, static without script | Built |
+| SPC-221 | A composite score that is not finite refused before any rule or the tree picks on it, with a fixed sentence | Built |
+| SPC-222 | A missing row value, weight or action type refused, naming the row and field; nothing given a default | Built |
+| SPC-224 | The seed shown; each sampled row's convergence checked on two seeds, a disagreement not converged; stored inputs version 7 | Built; the tree's later turns still on one draw |
+| SPC-225 | The WGS-72 to WGS-84 handover measured, 0.18 km of separation at most by 72 h, and stated | Built; constants unchanged as not material |
+| SPC-226 | An element set dated more than 5 minutes ahead refused at ingest and binding, and shown as dated in the future | Built |

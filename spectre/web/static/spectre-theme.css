@@ -64,6 +64,13 @@
   --spectre-color-threat-red-dim:   #A32D2D;
   --spectre-color-threat-red-glow:  rgba(226, 75, 74, 0.15);
   --spectre-color-threat-red-bg:    rgba(226, 75, 74, 0.08);
+  /* TEXT on a .spectre-card-threat wash, the twin of nominal-green-text.
+     Here it is the red itself: 4.69:1 on its own 8% wash over console
+     black. Steel's #c0392b is 4.41:1 on its wash over #F3F4F6 and 4.39:1
+     over #f0f4f8, so the light blocks below restate it (SPC-035). The red
+     above is not darkened instead: it is the fill under .spectre-btn-threat's
+     white label. */
+  --spectre-color-threat-red-text:  #E24B4A;
 
   --spectre-color-caution-amber:    #EF9F27;
   --spectre-color-caution-amber-dim:#BA7517;
@@ -78,6 +85,11 @@
   --spectre-color-nominal-green:    #1D9E75;
   --spectre-color-nominal-green-dim:#0F6E56;
   --spectre-color-nominal-green-bg: rgba(29, 158, 117, 0.08);
+  /* TEXT on a .spectre-card-nominal wash, the twin of caution-amber-text.
+     Here it is the green itself: 5.35:1 on its own 8% wash over console
+     black. Steel's #1a7a3c is 4.41:1 on its wash over #F3F4F6 and 4.39:1
+     over #f0f4f8, so the light blocks below restate it (SPC-034). */
+  --spectre-color-nominal-green-text: #1D9E75;
 
   --spectre-color-intel-blue:       #378ADD;
   --spectre-color-intel-blue-dim:   #185FA5;
@@ -322,6 +334,13 @@
   --spectre-surface-panel:          #E5E7EB;
   /* 5.59:1 against #F3F4F6 and 6.11:1 against #FFFFFF, both clear of AA. */
   --spectre-color-caution-amber-text: #8A5600;
+  /* On the nominal card's wash over either Steel page surface: 5.83:1 over
+     #F3F4F6 and 5.80:1 over themes.css's #f0f4f8. */
+  --spectre-color-nominal-green-text: #166534;
+  /* On the threat card's wash over either Steel page surface: 5.24:1 over
+     #F3F4F6 and 5.22:1 over themes.css's #f0f4f8. The light critical band's
+     red, so an error and a CRITICAL verdict read as one colour. */
+  --spectre-color-threat-red-text:  #B91C1C;
   --spectre-surface-input:          #FFFFFF;
   --spectre-surface-input-hover:    #F9FAFB;
   --spectre-surface-input-focus:    #FFFFFF;
@@ -418,6 +437,8 @@
     --spectre-surface-panel:          #E5E7EB;
     /* 5.59:1 against #F3F4F6 and 6.11:1 against #FFFFFF, both clear of AA. */
     --spectre-color-caution-amber-text: #8A5600;
+    --spectre-color-nominal-green-text: #166534;
+    --spectre-color-threat-red-text:  #B91C1C;
     --spectre-surface-input:          #FFFFFF;
     --spectre-surface-input-hover:    #F9FAFB;
     --spectre-surface-input-focus:    #FFFFFF;
@@ -1065,6 +1086,54 @@ a:hover,
 .spectre-band-medium   { background: var(--spectre-status-medium-fill);   }
 .spectre-band-low      { background: var(--spectre-status-low-fill);      }
 .spectre-band-minimal  { background: var(--spectre-status-minimal-fill);  }
+
+/* The verdict badge outlined, not filled, when Understanding is LOW
+   (Threat Understanding, concept section 6.4): the content advisory. The
+   band word stays; the fill goes, so the verdict reads as not yet earned.
+   The text takes the band's panel text colour on the panel's own opaque
+   surface, not on the banner's band wash beneath it: on the wash, CRITICAL
+   measured 4.48:1 in the dark theme, and on --surface it is 4.72:1. */
+.spectre-band-badge.spectre-band-outline {
+  background: var(--surface);
+  color: var(--spectre-status-unknown);
+  border: 1px solid currentColor;
+  padding: calc(0.2rem - 1px) calc(0.5rem - 1px);
+}
+
+.spectre-band-outline.spectre-band-critical { color: var(--spectre-status-critical); }
+.spectre-band-outline.spectre-band-high     { color: var(--spectre-status-high);     }
+.spectre-band-outline.spectre-band-medium   { color: var(--spectre-status-medium);   }
+.spectre-band-outline.spectre-band-low      { color: var(--spectre-status-low);      }
+.spectre-band-outline.spectre-band-minimal  { color: var(--spectre-status-minimal);  }
+
+/* With the verdict switch on (SPC-175): why the badge reads its band, and
+   what the current rule reads, under the banner header. */
+.verdict-switch {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin: -0.25rem 0 0.5rem;
+}
+
+/* The analyst's adjudication of the Threat range and Understanding
+   (SPC-176): logged, never applied, so it sits quietly under the ledger. */
+.adjudication {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin: 0 0 0.5rem;
+  padding: 0.3rem 0.6rem;
+  border-left: 3px solid var(--border);
+}
+.adjudication-message { color: var(--text-muted); font-weight: 600; }
+.adjudication details > summary { cursor: pointer; color: var(--text-muted); }
+.adjudication-form fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--spectre-radius-sm);
+  margin: 0.3rem 0;
+  padding: 0.2rem 0.5rem;
+}
+.adjudication-form textarea { width: 100%; }
+.adjudication-note { font-size: 0.62rem; margin-top: 0.2rem; }
+.adjudication-recent { margin: 0.2rem 0 0 1.1rem; padding: 0; font-size: 0.64rem; }
 
 /* Pulsing dot for live status indicators */
 .spectre-status-dot {

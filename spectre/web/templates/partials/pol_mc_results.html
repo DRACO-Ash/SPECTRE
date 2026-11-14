@@ -97,7 +97,7 @@
 
       {# 99.7th percentile distance from the centroid: not a fitted 3-sigma (audit F-219) #}
       <div style="margin-top:0.4rem; font-size:0.62rem; color:var(--text-dim)">
-        Position cloud, 99.7 % of samples within: <strong style="color:var(--ops-gold)">{{ mc.position_3sigma_km | round | int }} km</strong> of its centre
+        Position cloud, 99.7 % of samples within: <strong style="color:var(--gold)">{{ mc.position_3sigma_km | round | int }} km</strong> of its centre
       </div>
     </div>
 
@@ -106,7 +106,7 @@
   <div style="margin-top:0.4rem; font-size:0.6rem; color:var(--text-dim); border-top:1px solid var(--border); padding-top:0.3rem">
     {% set a = mc.assumptions %}
     {% if a %}
-    <div style="color:var(--ops-gold)">
+    <div style="color:var(--gold)">
       Modelled, not measured: dispersions are the {{ a.archetype }} archetype's assumed sigmas
       (ΔV 1σ {{ "%.1f" | format(a.dv_1sigma_m_s) }} m/s, pointing 1σ {{ "%.1f" | format(a.pointing_1sigma_deg) }}°,
       timing 1σ {{ a.timing_1sigma_s | round | int }} s, B* 1σ {{ "%.0e" | format(a.bstar_1sigma) }}),

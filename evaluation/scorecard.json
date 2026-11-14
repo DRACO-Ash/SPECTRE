@@ -1,0 +1,215 @@
+{
+ "subject": "SPECTRE decision-analysis engine, commit ddba577829b6de0a924d76c82077931cd2ba69f8 (version 0.24.2)",
+ "framework": "evaluation/framework/decision-engine-evaluation-framework.md, sections 5.2 to 5.4",
+ "rule": "A level is awarded only when every element of its descriptor is evidenced; partial evidence takes the lower level.",
+ "gates": [
+  {
+   "id": "G1",
+   "rating": "Red",
+   "evidence": [
+    "02-gate-assessment.md G1",
+    "spectre/web/decision_job.py:240-248",
+    "spectre/web/models.py:51"
+   ],
+   "gap": "operator decision not recorded"
+  },
+  {
+   "id": "G2",
+   "rating": "Red",
+   "evidence": [
+    "02-gate-assessment.md G2",
+    "probe P-15",
+    "spectre/domain/decision.py:3939-3942"
+   ],
+   "gap": "no stored decision record to replay from"
+  },
+  {
+   "id": "G3",
+   "rating": "Red",
+   "evidence": [
+    "02-gate-assessment.md G3",
+    "spectre/domain/decision.py:3584-3628",
+    "spectre/web/routes/decision.py:581-586"
+   ],
+   "gap": "one rule shown; no disagreement flag; rule chosen after results"
+  },
+  {
+   "id": "G4",
+   "rating": "Red",
+   "evidence": [
+    "02-gate-assessment.md G4",
+    "probe P-06"
+   ],
+   "gap": "no veto mechanism"
+  },
+  {
+   "id": "G5",
+   "rating": "Red",
+   "evidence": [
+    "02-gate-assessment.md G5",
+    "spectre/domain/provenance.py:55-75"
+   ],
+   "gap": "no judgement tag; lookups without source, owner or date; substantially met for the basis tag, no dated plan"
+  },
+  {
+   "id": "G6",
+   "rating": "Green",
+   "evidence": [
+    "02-gate-assessment.md G6",
+    "probe P-18"
+   ],
+   "gap": "none for the gate; recommendation stability is an L3 matter"
+  },
+  {
+   "id": "G7",
+   "rating": "Red",
+   "evidence": [
+    "02-gate-assessment.md G7",
+    "probes P-12, P-13"
+   ],
+   "gap": "P-12 passes and P-13 quantifies the RK45 error, but neither is in the repository's suite; substantially met, no dated plan"
+  },
+  {
+   "id": "G8",
+   "rating": "Red",
+   "evidence": [
+    "02-gate-assessment.md G8",
+    "audit/GAPS.md:12"
+   ],
+   "gap": "no hazard analysis or safety-related determination visible"
+  },
+  {
+   "id": "G9",
+   "rating": "Red",
+   "evidence": [
+    "02-gate-assessment.md G9",
+    "spectre/web/app.py:298",
+    "audit/ARCHITECTURE.md:56-66"
+   ],
+   "gap": "no engine threat model or Secure by Design artefacts; UDL element sets never checksum-checked (P-14, F-25)"
+  },
+  {
+   "id": "G10",
+   "rating": "Red",
+   "evidence": [
+    "02-gate-assessment.md G10",
+    "probe P-14"
+   ],
+   "gap": "no stated operating design domain; deep-space and decayed objects pass silently (P-14); substantially met for detection, no dated plan"
+  }
+ ],
+ "lenses": [
+  {
+   "id": "L1",
+   "name": "Decision-model soundness",
+   "weight": 15,
+   "level": 2,
+   "justification": "Level 2 met: assumptions listed (docs/decision_engine_phases.md D1 to D15, docs/threat_confidence_concept.md section 9), COA and response types documented, weights recorded without method. Level 3 not met: no vetoes (G4), rules not shown side by side (G3), weights not swing-weighted, and the closest-approach scale makes the core criterion nearly inert (F-10).",
+   "evidence": [
+    "spectre/domain/decision.py:1465-1470",
+    "spectre/domain/decision.py:2044-2069",
+    "probes P-01, P-06, P-17",
+    "F-10, F-12, F-13, F-14, F-16",
+    "F-17"
+   ]
+  },
+  {
+   "id": "L2",
+   "name": "Input fidelity and provenance",
+   "weight": 12,
+   "level": 2,
+   "justification": "Level 2 met: provenance tags exist (computed, sampled, lookup) but are incomplete. Level 3 not met: judgement inputs untagged, SGP4 and production RK45 not verified in the repository, element-set error absent from the miss payoff. Probe P-12 shows SGP4 matches the published vectors, but from evaluation/ only; P-14 shows UDL element sets are never checksum-checked (F-25).",
+   "evidence": [
+    "spectre/domain/provenance.py:55-75",
+    "spectre/astro/monte_carlo.py:516-517",
+    "probes P-11 to P-14",
+    "F-05, F-06, F-11, F-25, F-26, F-27, F-29"
+   ]
+  },
+  {
+   "id": "L3",
+   "name": "Uncertainty propagation and presentation",
+   "weight": 13,
+   "level": 2,
+   "justification": "Level 2 met: intervals shown (sampled P5 to P95, TCA uncertainty, P intervals under expected value). Level 3 not met: element-set error not propagated to payoffs, no weight stability shown though a 0.089 change in one weight flips the pick in bound scenarios.",
+   "evidence": [
+    "spectre/domain/decision.py:1156",
+    "spectre/domain/decision.py:3712-3752",
+    "probes P-16, P-18",
+    "F-11, F-16"
+   ]
+  },
+  {
+   "id": "L4",
+   "name": "V&V and test evidence",
+   "weight": 15,
+   "level": 2,
+   "justification": "Level 2 met: a large developer suite (8,351 tests passing), reference cases (tests/unit/test_decision_reference_cases.py), coverage floors and a mutation run. Level 3 not met: no metamorphic or published-vector suite in the repository and no V&V documented to the Aqua Book; the developer suite is not independent V&V.",
+   "evidence": [
+    "evidence/baseline-tests.log",
+    ".github/workflows/ci.yml",
+    "docs/MUTATION-REPORT.md",
+    "F-06, F-22"
+   ]
+  },
+  {
+   "id": "L5",
+   "name": "Human-in-the-loop and explainability",
+   "weight": 15,
+   "level": 1,
+   "justification": "Level 1: one rule's answer is shown and no decision record is kept. Rationale text is extensive (every figure's basis, refusals in sentences), but level 2 also requires the operator's decision to be logged, and it is not.",
+   "evidence": [
+    "spectre/web/templates/partials/decision_results.html:76-160",
+    "spectre/web/decision_job.py:240-248",
+    "F-01, F-03, F-13, F-18"
+   ]
+  },
+  {
+   "id": "L6",
+   "name": "Safety management",
+   "weight": 10,
+   "level": 1,
+   "justification": "Level 1: no hazard analysis visible in the repository (provisional pending any artefact held elsewhere).",
+   "evidence": [
+    "02-gate-assessment.md G8",
+    "audit/GAPS.md:12",
+    "F-07"
+   ]
+  },
+  {
+   "id": "L7",
+   "name": "Security",
+   "weight": 8,
+   "level": 2,
+   "justification": "Level 2 met: an application threat-model draft exists as the audit's trust-boundary inventory with validation observed, and a security audit with a remediation log. Level 3 not met: ISN 2023/09 principles not applied as such, no integrity controls for decision records (none exist), Content Security Policy allows unsafe-inline and unsafe-eval.",
+   "evidence": [
+    "audit/ARCHITECTURE.md:56-66",
+    "audit/REMEDIATION-LOG.md",
+    "spectre/web/app.py:298",
+    "F-08"
+   ]
+  },
+  {
+   "id": "L8",
+   "name": "AI governance alignment",
+   "weight": 7,
+   "level": 1,
+   "justification": "Level 1: no AI scoping decision (JSP 936 in or out of scope) is recorded in the repository.",
+   "evidence": [
+    "search of docs/, audit/ and root documents for JSP 936: no match",
+    "F-24"
+   ]
+  },
+  {
+   "id": "L9",
+   "name": "Efficiency and timeliness",
+   "weight": 5,
+   "level": 2,
+   "justification": "Level 2 met: runtime measured and used to set the budget (measured rates recorded at spectre/domain/decision.py:2088-2101; wall time shown with each result). Level 3 not met: no decision window is stated, so it cannot be shown to be met.",
+   "evidence": [
+    "spectre/domain/decision.py:2088-2106",
+    "spectre/web/templates/partials/decision_results.html:83-84"
+   ]
+  }
+ ]
+}

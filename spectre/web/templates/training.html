@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block title %}SPECTRE — Training Mode{% endblock %}
 
+{% block scripts %}
+{# The training page's tabs and the fragments it swaps in, from a first-party file (SPC-199). #}
+<script src="/static/js/training.js" defer></script>
+{% endblock %}
+
 {% block nav_brand %}
 <div class="nav-brand-group">
   <img class="nav-logo" src="/static/spectre-theme/assets/logo-horizontal.svg" alt="SPECTRE" />
@@ -94,7 +99,7 @@
       ] %}
       {% for tab_id, tab_label in nav_items %}
       <button class="training-nav-btn {% if loop.first %}active{% endif %}"
-              data-tab="{{ tab_id }}" onclick="trainingTab(this.dataset.tab)"
+              data-tab="{{ tab_id }}" data-action="trainingTab"
               style="text-align:left; padding:0.45rem 0.6rem; font-size:0.7rem; font-weight:600;
                      background:{% if loop.first %}rgba(245,158,11,0.15){% else %}transparent{% endif %};
                      border:1px solid {% if loop.first %}rgba(245,158,11,0.4){% else %}transparent{% endif %};
@@ -194,7 +199,7 @@
                   hx-get="/training/scenario/{{ s.id }}"
                   hx-target="#scenario-detail"
                   hx-swap="innerHTML"
-                  onclick="trainingTab('scenarios'); document.getElementById('scenario-detail').scrollIntoView({behavior:'smooth'})">
+                  data-action="trainingTab" data-tab="scenarios" data-scroll-to="scenario-detail">
             View Challenge
           </button>
         </div>
@@ -231,7 +236,7 @@
                   hx-get="/training/tutorial/{{ t.id }}"
                   hx-target="#tutorial-detail"
                   hx-swap="innerHTML"
-                  onclick="document.getElementById('tutorial-detail').scrollIntoView({behavior:'smooth'})">
+                  data-action="scrollTo" data-scroll-to="tutorial-detail">
             {% if t.id in progress.tutorials_completed %}Review{% else %}Start{% endif %}
           </button>
         </div>
@@ -268,41 +273,5 @@
 .training-nav-btn:hover { background: rgba(245,158,11,0.08) !important; color: #f59e0b !important; border-color: rgba(245,158,11,0.2) !important; }
 </style>
 
-<script>
-function trainingTab(id) {
-  var isConsole = id === 'console';
-  var main = document.getElementById('training-main');
-
-  document.querySelectorAll('.training-panel').forEach(function(p) {
-    p.style.display = 'none';
-  });
-  var panel = document.getElementById('tpanel-' + id);
-  if (panel) panel.style.display = isConsole ? 'block' : 'block';
-
-  // Console tab: make main a positioned container so the panel fills it absolutely
-  if (isConsole) {
-    main.style.overflow = 'hidden';
-    main.style.padding  = '0';
-    main.style.position = 'relative';
-    // Lazy-load iframe: only set src once
-    var frame = document.getElementById('training-console-frame');
-    if (frame && !frame.dataset.loaded) {
-      frame.src = '/';
-      frame.dataset.loaded = '1';
-    }
-  } else {
-    main.style.overflow = 'auto';
-    main.style.padding  = '0.75rem';
-    main.style.position = '';
-  }
-
-  document.querySelectorAll('.training-nav-btn').forEach(function(btn) {
-    var active = btn.id === 'tnav-' + id;
-    btn.style.background    = active ? 'rgba(245,158,11,0.15)' : 'transparent';
-    btn.style.borderColor   = active ? 'rgba(245,158,11,0.4)'  : 'transparent';
-    btn.style.color         = active ? '#f59e0b'               : 'var(--text-dim)';
-  });
-}
-</script>
 
 {% endblock %}

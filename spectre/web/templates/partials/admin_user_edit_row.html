@@ -1,6 +1,6 @@
 <tr id="user-row-{{ u.id }}"
-    style="border-bottom:1px solid var(--spectre-color-border);
-           background:var(--spectre-color-surface-2)">
+    style="border-bottom:1px solid var(--spectre-border-default);
+           background:var(--spectre-surface-input)">
   <td style="padding:var(--spectre-space-3) var(--spectre-space-4)">
     <span style="font-weight:500">{{ u.username }}</span>
     {% if u.id == current_user.id %}
@@ -22,7 +22,7 @@
       </div>
       <div style="flex:1; min-width:160px">
         <label class="spectre-label" for="edit-pw-{{ u.id }}">
-          New Password <span style="color:var(--spectre-color-text-muted)">(leave blank to keep)</span>
+          New Password <span style="color:var(--spectre-text-secondary)">(leave blank to keep)</span>
         </label>
         <input class="spectre-input" id="edit-pw-{{ u.id }}" name="new_password"
                type="password" autocomplete="new-password" placeholder="New password (optional)"
@@ -30,12 +30,12 @@
       </div>
       <div style="display:flex; gap:var(--spectre-space-2)">
         <button type="submit" class="spectre-btn spectre-btn-primary"
-                style="font-size:var(--spectre-size-xsmall)"
+                style="font-size:var(--spectre-size-caption)"
                 title="Save changes">
           Save
         </button>
         <button type="button" class="spectre-btn spectre-btn-ghost"
-                style="font-size:var(--spectre-size-xsmall)"
+                style="font-size:var(--spectre-size-caption)"
                 hx-get="/admin/users/{{ u.id }}/cancel"
                 hx-target="#user-row-{{ u.id }}"
                 hx-swap="outerHTML"

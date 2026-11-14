@@ -1,5 +1,11 @@
 {% if sv %}
 <p class="field-success">&#10003; State vector loaded: <strong>{{ sv.name }}</strong> &mdash; epoch {{ sv.epoch }} ({{ sv.ref_frame }})</p>
+{% if sv.data_mode is defined and sv.data_mode %}
+<p class="field-meta">
+  <span class="{{ 'badge-ok' if sv.data_mode == 'REAL' else 'badge-warn' }}">Data Mode: {{ sv.data_mode }}</span>
+  {% if data_mode_override is defined and data_mode_override %}<em class="hint">(this fetch only; session mode unchanged)</em>{% endif %}
+</p>
+{% endif %}
 <table class="sv-table">
   <thead>
     <tr><th>Axis</th><th>Position (km)</th><th>Velocity (km/s)</th></tr>

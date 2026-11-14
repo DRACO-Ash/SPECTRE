@@ -8,7 +8,10 @@ The SPECTRE intercept engine is implemented entirely in pure Python across `spec
 
 ## Method Categories
 
-The batch runs each of the 23 solvers once and ranks the results.
+The batch runs all 23 methods and ranks the results in three groups: red approaches, avoidance and defence, and
+assessments. Each red approach is searched for its cheapest plan that reaches the target, flown to measure its
+closest approach and banded for realism against the NOTSO record (see "Targeting, flight and realism" below); the
+other methods are solved once with the panel's values.
 
 ### Classical Transfers
 
@@ -40,6 +43,9 @@ The batch runs each of the 23 solvers once and ranks the results.
 
 ### Defensive
 
+Shown as "Avoidance and defence" in the batch: blue's options and burns that move away, never ranked as red threats
+(SPC-234).
+
 | Method | Description |
 |--------|-------------|
 | **COLA** | Collision avoidance — minimum ΔV to achieve a target miss distance |
@@ -48,7 +54,8 @@ The batch runs each of the 23 solvers once and ranks the results.
 
 ### Assessment
 
-These return a 0-100 score, not a miss distance.
+These return a 0-100 score, not a miss distance. In the batch, J2 drift joins them: it reports the RAAN gap natural
+precession closes, in degrees, often over years, and is not a red approach (SPC-234).
 
 | Method | Description |
 |--------|-------------|
@@ -80,6 +87,11 @@ and a result requested under either name says which solver it ran
 | `spectre/astro/cw_geometry.py` | Hill-frame / Clohessy-Wiltshire equations |
 | `spectre/astro/propagator.py` | SGP4 propagation; `TLEOrbit.propagate()` |
 | `spectre/astro/events.py` | Orbital event detection (apogee, perigee, nodes) |
+| `spectre/astro/flight.py` | Flies a plan's burns and measures its closest approach, through `maneuvers.flown_approach` (SPC-234) |
+| `spectre/astro/targeting.py` | Searches burn point, time of flight, revolutions and hops for the cheapest plan that arrives (SPC-234) |
+| `spectre/domain/manoeuvre_evidence.py` | The on-station delta-V record from NOTSOs, shipped and merged with the NOTSO cache (SPC-234) |
+| `spectre/domain/realism.py` | Realism bands: Seen before, Possible, Unrealistic, each with its reason (SPC-234) |
+| `spectre/data/manoeuvre_evidence.json` | The shipped record: catalogue numbers, satellite names, dates and delta-V figures only |
 | `spectre/web/routes/maneuver.py` | Route dispatcher — maps HTTP form fields → solver calls → HTML partial |
 
 ---
@@ -97,7 +109,7 @@ Delta-V is in m/s throughout.
 | `burns` | `list[BurnResult]` | Per-burn breakdown (see below) |
 | `total_delta_v_m_s` | `float` | Sum of the burn magnitudes (m/s) |
 | `arrival_epoch` | `datetime` | UTC time the interceptor reaches its final position |
-| `intercept_range_km` | `float` | Miss distance at arrival (km), and nothing else |
+| `intercept_range_km` | `float` | Miss distance (km). In the batch, a red approach's flown closest approach; NaN when the flown search could not run, shown as "not computed" and never read as arriving (SPC-238) |
 | `notes` | `str` | Provenance line: the solver, or for a heuristic assessment that it is an uncalibrated score |
 | `option_id` | `str` | Unique result identifier (`INT_…`) |
 | `score` | `float \| None` | An assessment's 0 to 100 score, the envelope's feasible count, or a drift method's angular gap; `None` for a trajectory |
@@ -123,10 +135,14 @@ Each `BurnResult`:
 All under `/plan/maneuver`, behind login.
 
 `POST /plan/maneuver/apply-all-intercepts`: what the Intercept Engine form posts.
-Runs each of the 23 solvers once on the same inputs (red and blue satellite,
-manoeuvre start, coast, time of flight, target distance, ΔV budget, revolutions,
-hops, drift days, data mode), ranks the results, replaces the trade-space history
-with them and returns `partials/all_intercepts_result.html`.
+Runs all 23 methods on the same inputs (red and blue satellite, manoeuvre start,
+coast, time of flight, approach distance, ΔV budget, revolutions, hops, drift
+days, data mode and targeting mode), ranks the results, replaces the trade-space
+history with them and returns `partials/all_intercepts_result.html`. The counts
+and the targeting mode are read through the `_shaping_form` dependency, because
+the route is at the Code Quality gate's 13-parameter limit. A form that sends no
+targeting mode searches; `targeting_mode=typed` solves each method once with the
+typed values, as before. The ΔV budget defaults to 171.8 m/s.
 
 `POST /plan/maneuver/apply-intercept`: one method by name, for scripted use. It
 appends its result to the history (the latest 200 are kept) and returns
@@ -134,12 +150,110 @@ appends its result to the history (the latest 200 are kept) and returns
 
 `GET /plan/maneuver/trade-space-data`: the history as JSON points (ΔV in m/s,
 transfer time in minutes, `miss_km` or, for an assessment method, `score`),
-fetched when the operator renders the trade-space chart.
+fetched when the operator renders the trade-space chart. A miss that was not
+computed is `null`, never NaN, which no JSON parser reads (SPC-238).
 
 `POST /plan/maneuver/clear-history`: empties the history.
 
 `GET /plan/maneuver/orbital-events`: apogee, perigee and node times for the
 selected satellites.
+
+---
+
+## Targeting, flight and realism (SPC-234)
+
+Ported from the charming-dirac branch (d3447e2, "realistic intercepts from the NOTSO record") by the owner's ruling
+of 2026-11-12. The batch used to solve each method once with the typed coast, time of flight, revolutions and hops,
+report several solvers' requested standoff as their miss, rank blue's defensive burns as red threats and let
+minimum-time spend the whole budget.
+
+**Flight.** Every red approach but the V-bar and H-bar hops is flown: red is propagated by SGP4 to its first burn,
+each burn is applied in turn, two-body between burns, and the separation from the target (SGP4) is searched to
+arrival by `spectre.astro.closest_approach`, 96 samples a revolution, each minimum refined to a second. A plan that
+arrives the moment it fires, such as a plane change, is flown for one revolution. This is one path with 0.33.0's:
+plane change, phasing and the R-bar hop fly their own burn through the same `maneuvers.flown_approach`, and inside
+the batch each solver runs under `miss_not_read`, so a kept plan is flown once. The V-bar and H-bar hops are flown
+too since the V0.40 review: they kept 0.33.0's figure in the sequence's own linear model, because their solvers listed
+only the first and last burn.
+
+**The V-bar hop's side (SPC-237).** In the linear model an outward radial impulse drifts the chaser backwards along
+V-bar, so the hop's entry burn fired outward whatever side the target was on, and for a target ahead it moved red
+away. Flown through `spectre.astro.flight.fly` on the GEO pair 736 km apart (0.39.0), the target ahead was never
+approached (736.0 km closest, 735.7 km with no burn, 1,004.6 km apart at arrival), while a target behind closed to
+467.1 km. Both burns are now signed by the target's side, inward for a target ahead and outward for one behind, and
+the correction fires the same way in the local frame as the entry, so it stops the radial drift (it used to double
+it). Flown again, three hops close a target ahead to 498.7 km and one behind to 467.1 km; one hop closes them to
+11.5 km and 13.4 km. The hop's figure takes the side it travels to: the miss reads the gap along V-bar from the
+signed advance, where it used to take `abs()` of the gap and so read a hop the wrong way as closing it.
+
+**Every hop's burns (V0.40 review).** The hop solvers listed a sequence's first and last burn only, while the cost
+counted every hop: on the GEO pair, three V-bar hops read 6.42 km, arriving, at 26.84 m/s, though the two burns
+recorded totalled 8.95 m/s and flew to 498.7 km (target ahead) or 467.1 km (behind). Now the V-bar hop lists n + 1
+burns for n hops: an entry, each hop's stop merged with the next hop's entry, which fall at one instant the same way
+and so are one burn of twice the size, and a last stop. The H-bar hop lists its n normal burns, half an orbit apart
+and alternating, the last pointing to the target's side. Each burn is computed at red's own flown state then, and
+the burns add up to the cost. Each solution's miss is the flown one, and each hop row is flown through
+`spectre.astro.flight.fly` and judged on that. Flown, three V-bar hops close the GEO pair to 23.3 km (target ahead)
+and 23.9 km (behind), against the linear model's 6.4 km, so they arrive within the 50 km default. In LEO the flight
+basis decides the figure: red flies two-body and the target SGP4, and over 1.5 orbits the two part by tens of km,
+so on the ISS and a copy 50 km along track: with the target behind, red closes to 44.1 km and counts as arriving
+within 50 km, against the linear model's 0.2 km; with the target ahead the row reads "Already within", since with no
+burn at all the two close to 4.2 km. The H-bar hop, against these co-planar pairs, covers
+no along-track gap and reads "No approach". Each
+flown miss is shown with SPC-202's 1-sigma element-set error band beside it: both sets' along-track error at the
+closest approach, by `spectre/astro/along_track.py`'s model, in quadrature. When the search cannot run (no finite
+separation, or past `closest_approach`'s 100,000 samples, as an R-bar time of about 70 days in LEO needs), the miss
+is NaN: the method still solves, the page says "not computed", and the row is never read as arriving (SPC-238).
+
+**Search.** For each red approach the engine tries, from each burn point (now, and the red satellite's next apogee,
+perigee, ascending and descending node within one revolution), the choices below, solves them all, then flies them
+cheapest first and keeps the cheapest that comes within the approach distance; once one arrives nothing dearer is
+flown. When none arrives, the one that comes closest is kept and labelled "No approach". Nothing is dropped for not
+arriving (owner ruling, 2026-11-12).
+
+| Method | Burn point | Time of flight | Revolutions | Hops |
+|--------|-----------|----------------|-------------|------|
+| Lambert, R-bar hop, CW drift | ● | ● | | |
+| Phasing | ● | | ● | |
+| V-bar hop, H-bar hop | ● | | | ● |
+| Hohmann, bi-elliptic, plane change, NMC, GEO drift, minimum-time | ● | | | |
+
+When searching, minimum-time is given a realistic budget instead of the panel's maximum: 36.8 m/s, or the red
+satellite's own busiest 14 days on station when that is more. A minimum-time plan always spends its whole budget, so
+at the panel's maximum its ΔV measured the panel, not the satellite.
+
+**Realism.** Each red approach is banded against what satellites have spent on station in 14 days, as JCO NOTSOs
+state it (959 on-station burns by 129 satellites, 28 April 2022 to 27 March 2026, merged at run time with the NOTSO
+cache): Seen before (within this satellite's own busiest 14 days), Possible (within 171.8 m/s, the most any
+satellite spent) or Unrealistic. The NOTSO cache can raise a satellite's own figures, but never the 171.8 m/s
+ceiling, which sets Possible against Unrealistic for every satellite: that comes from the shipped, reviewed record only
+(lead's ruling in review of SPC-234, confirmed by the owner on 2026-11-12). The panel's sentence about the record describes the shipped record. A malformed
+cache record is skipped on its own; catalogue numbers are compared without leading zeros ("05678" is 5678); the
+merge is recomputed only when the cache has changed. A plan is not an arrival when the target is already within the
+radius with no burn over the same window (flown as a baseline): such rows read "Already within" and never count.
+Arrival allows the larger of 1 m and a millionth of the radius, as a flown miss lands micrometres either side of an
+aim point. A red approach counts towards the worst case and the "Most likely course of action"
+headline only if it arrives and is not Unrealistic. The record is a floor on what satellites have done, not a ceiling
+on what they could do: an Unrealistic row stays listed, dimmed, with its reason.
+
+**Constants.** None reaches the Decision Engine, so none is in `docs/lookup-register.md`, whose test covers the
+Decision Engine's own modules only.
+
+| Figure | Value | Where | Source | Owner | Set |
+|--------|-------|-------|--------|-------|-----|
+| Fleet maximum, busiest 14 days on station | 171.8 m/s (COSMOS 2589) | `manoeuvre_evidence.json` `fleet.largest_window_m_s`; `maneuver.ENGINE_DEFAULT_BUDGET_M_S` | JCO TACREP_NOTSO export, 3,124 messages, built by `scripts/build-manoeuvre-evidence.py` in d3447e2 | Owner ruling 2026-11-12: the engine's Max ΔV default | 2026-10-31 (d3447e2); default 2026-11-12 (SPC-234) |
+| Nine in ten satellites stay within | 36.8 m/s (36.77) | `fleet.typical_window_m_s` | as above, 0.9 quantile | Claude's choice (d3447e2), unassigned | 2026-10-31 (d3447e2) |
+| Window | 14 days | `manoeuvre_evidence.WINDOW_DAYS` | none: tuned, not sourced | Claude's choice (d3447e2), unassigned | 2026-10-31 (d3447e2) |
+| Approach radius | 50 km, or the panel's "Approach within" | `realism.CLOSE_APPROACH_KM` | none: an assumption for the analyst to confirm | Claude's choice (d3447e2), unassigned | 2026-10-31 (d3447e2) |
+| Time-of-flight grid | 0.25, 0.5, 0.75, 1, 1.5, 2, 3 red revolutions | `targeting.TOF_FRACTIONS` | none: tuned, not sourced | Claude's choice (d3447e2), unassigned | 2026-10-31 (d3447e2) |
+| Revolutions grid | 1 to 6 | `targeting.REVOLUTIONS` | none: tuned, not sourced | Claude's choice (d3447e2), unassigned | 2026-10-31 (d3447e2) |
+| Hops grid | 1 to 5 | `targeting.HOPS` | none: tuned, not sourced | Claude's choice (d3447e2), unassigned | 2026-10-31 (d3447e2) |
+| Launch-phase floor | 20 m/s | `manoeuvre_evidence._LAUNCH_PHASE_FLOOR_M_S` | none: tuned, not sourced | Claude's choice (d3447e2), unassigned | 2026-10-31 (d3447e2) |
+
+Measured on the GEO test pair 1 degree apart and a LEO pair 2 degrees apart, from 1 March 2026: the batch took
+0.030 s (GEO) and 0.056 s (LEO) before; typed, 0.047 s and 0.179 s; searched, 0.484 s and 0.951 s, with the no-burn
+baseline flown only for a plan that arrives. It runs off the
+web server's main thread, as before. On the GEO pair the searched Lambert costs 10.8 m/s against 72.6 m/s typed.
 
 ---
 
