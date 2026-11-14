@@ -1984,7 +1984,7 @@
   "group": "eval-gate",
   "minutes": 900,
   "task": "F-07: no hazard analysis or safety-related determination; the audit left the operational status of the engine as \"a…",
-  "note": "Evaluation finding F-07 (Critical, G8, L6), evaluation/EVALUATION.md. Remediation: hazard identification, a hazard log and a safety-related determination under Def Stan 00-056, owned by the safety lead. Closing evidence: the hazard log and the signed determination. Hazard log and safety-related determination: the safety lead's work, outside the code.",
+  "note": "Evaluation finding F-07 (Critical, G8, L6), evaluation/EVALUATION.md. Remediation: hazard identification, a hazard log and a safety-related determination under Def Stan 00-056, owned by the safety lead. Closing evidence: the hazard log and the signed determination. Hazard log and safety-related determination: the safety lead's work, outside the code. 2026-11-14: the owner reports this done on the briefing page; the document has not reached the repository, so nothing links to it yet.",
   "files": [],
   "needs_owner": true,
   "human_minutes": 240
@@ -2211,7 +2211,7 @@
   "group": "eval-accred",
   "minutes": 120,
   "task": "F-24: no record of the JSP 936 in-scope decision or an ethical risk assessment.",
-  "note": "Evaluation finding F-24 (Medium, L8), evaluation/EVALUATION.md. Remediation: record the in-scope decision and complete the ethical risk assessment (framework recommendation 1). Closing evidence: the recorded decision and assessment. The JSP 936 scoping decision and ethical risk assessment are the owner's to record.",
+  "note": "Evaluation finding F-24 (Medium, L8), evaluation/EVALUATION.md. Remediation: record the in-scope decision and complete the ethical risk assessment (framework recommendation 1). Closing evidence: the recorded decision and assessment. The JSP 936 scoping decision and ethical risk assessment are the owner's to record. 2026-11-14: the owner reports this done on the briefing page; the document has not reached the repository, so nothing links to it yet.",
   "files": [],
   "needs_owner": true,
   "human_minutes": 240
@@ -2596,7 +2596,7 @@
   "needs_owner": true,
   "human_minutes": 30,
   "task": "Run scripts/verify-container.sh on a machine with Docker; the Grype stage must end PASS, not SKIPPED",
-  "note": "0.33.0 moved the base image to Python 3.12.16 (digest 935c3c5b...) and added the Grype stage. Neither the image build nor the scan could run here: no Docker daemon.",
+  "note": "0.33.0 moved the base image to Python 3.12.16 (digest 935c3c5b...) and added the Grype stage. Neither the image build nor the scan could run here: no Docker daemon. 2026-11-14: the owner cannot run Docker on the machine to hand. Option: a CI job that runs scripts/verify-container.sh, GitHub's runners having Docker.",
   "files": [
    "Dockerfile",
    "Dockerfile.docker-only",
@@ -2663,7 +2663,7 @@
   "needs_owner": true,
   "human_minutes": 30,
   "task": "Live UDL checks for the archive-first fetch: what /elset/current answers with no source, archive query time for a busy GEO object, and each provider's ephemType",
-  "note": "0.34.0 rests on charming-dirac's field observation that /elset/current with no source answers for 18th SPCS alone; HEAD's old comment said one set per provider. Also unknown: how long the 72-hour /elset query takes for a busy GEO object with 10 refreshes in parallel, and which providers file SGP4-XP (an XP set as the newest refuses the fetch, by design). Needs the owner's UDL account; scripts/udl_probe.py (SPC-033) is the place to add the checks. 2026-11-13, owner's probe on 41866 (GOES-16): /elset/current with no source returned one 18th SPCS set (check 1 confirmed for this object). The 72 h /elset archive held EXO (ephemType 2 on every set, every 15 to 30 min), NorthStar (0), KBR (0) and 18th SPCS (0, posted about 5 to 6 h after epoch); no ephemType 4 (check 3 answered for this object). Query time not yet reported (check 2 open). Finding: EXO's type 2 sets are refused, and being often a millisecond newer than KBR and NorthStar they block the fetch; see SPC-243.",
+  "note": "0.34.0 rests on charming-dirac's field observation that /elset/current with no source answers for 18th SPCS alone; HEAD's old comment said one set per provider. Also unknown: how long the 72-hour /elset query takes for a busy GEO object with 10 refreshes in parallel, and which providers file SGP4-XP (an XP set as the newest refuses the fetch, by design). Needs the owner's UDL account; scripts/udl_probe.py (SPC-033) is the place to add the checks. 2026-11-13, owner's probe on 41866 (GOES-16): /elset/current with no source returned one 18th SPCS set (check 1 confirmed for this object). The 72 h /elset archive held EXO (ephemType 2 on every set, every 15 to 30 min), NorthStar (0), KBR (0) and 18th SPCS (0, posted about 5 to 6 h after epoch); no ephemType 4 (check 3 answered for this object). Query time not yet reported (check 2 open). Finding: EXO's type 2 sets are refused, and being often a millisecond newer than KBR and NorthStar they block the fetch; see SPC-243. 2026-11-14: the owner marked it done; the archive query time (check 2) was not reported.",
   "files": [
    "spectre/web/routes/udl.py"
   ]

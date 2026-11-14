@@ -123,6 +123,22 @@ python3 .claude/skills/backlog-brain/scripts/brain.py plan --config .board/confi
 | 2026-11-13 | Placeholder designators ignored (0.41.0) | Agreed: fully synthetic sets only; UDL test, exercise and simulated sets keep theirs |
 | 2026-11-13 | Synthetic objects with no launch date (0.41.0) | Agreed: screened like any undated object |
 | 2026-11-13 | The 60-object cap note's count (0.41.0) | Agreed: includes payloads the screen never reached |
+| 2026-11-13 | What each box in the tree drawing shows (0.41.0) | Agreed as built |
+| 2026-11-13 | No asset-screen section in the operator guide (0.41.0) | Agreed: out of scope for that release |
+| 2026-11-13 | Second seed and what disagreement means (0.42.0) | Agreed: converged only when both seeds agree |
+| 2026-11-13 | The second draw counts against the cost cap (0.42.0) | Agreed: each sampled row charged twice |
+| 2026-11-13 | Later game-tree turns use one draw (0.42.0) | Agreed: stated beside the tree |
+| 2026-11-13 | Missing row values and weights refused (0.42.0) | Agreed: no silent defaults |
+| 2026-11-13 | Future-dated element set tolerance (0.42.0) | Agreed: 5 minutes |
+| 2026-11-13 | WGS-72 to WGS-84 handover (0.42.0) | Agreed: measured, stated, physics unchanged |
+| 2026-11-13 | State the force-model gap rather than change the physics (0.43.0) | Agreed |
+| 2026-11-13 | Alike and unlike area-to-mass ratios in the force-model measure (0.43.0) | Agreed |
+| 2026-11-13 | TCA histogram as a captioned figure with the table carrying the counts (0.43.0) | Agreed |
+| 2026-11-14 | Stop wait of 8 s, assuming a platform grace of at least 10 s (0.44.0) | Agreed |
+| 2026-11-14 | Wait only for decision jobs sampling or writing a record (0.44.0) | Agreed |
+| 2026-11-14 | Hazard analysis and safety-related determination (SPC-198, F-07) | Owner reports done; the documents are not yet linked from the repository |
+| 2026-11-14 | JSP 936 scope decision and ethical risk assessment (SPC-212, F-24) | Owner reports done; the record is not yet linked from the repository |
+| 2026-11-14 | Container check with Docker (SPC-236) | Owner cannot run it on the machine to hand; to discuss |
 
 ## Decision Engine plan
 
