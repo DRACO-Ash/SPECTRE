@@ -9,6 +9,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Development and CI dependencies, as Dependabot proposed in pull requests 25 to 34: actions/checkout 4.4.0 to 7.0.1; CodeQL init and analyze 4.38.3 to 4.39.3, together; mypy 2.3.1 to 2.4.1 (with its dependencies ast-serialize 0.13.1 and librt 0.16.0); pytest 9.1.1 to 9.2.0; pytest-asyncio 1.4.0 to 1.4.1; types-pyyaml 6.0.12.20260906; pip-tools 7.6.2. The lock files were recompiled with `scripts/lock.sh`'s own command, so no other pin moved. One browser test compared a mapping of lists with `pytest.approx`, which pytest 9.2 refuses; it now compares each list on its own.
+
 ## [0.44.0] - 2026-11-13
 
 **A decision record being written when the server stops now stands.**

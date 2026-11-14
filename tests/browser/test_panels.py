@@ -170,6 +170,14 @@ def _numbers(text: str) -> list[float]:
     return [float(n) for n in re.findall(r"-?\d+(?:\.\d+)?", text)]
 
 
+
+def _assert_close_each(got: dict[str, list[float]], want: dict[str, list[float]]) -> None:
+    """Every key drawn, each one's numbers within approx of the server's. pytest 9.2 refuses approx over a mapping of
+    lists, so each list is compared on its own."""
+    assert got.keys() == want.keys()
+    for key, numbers in want.items():
+        assert got[key] == pytest.approx(numbers), key
+
 class TestTheTreeDiagram:
     """SPC-190: the drawn tree collapses and zooms, by mouse and by keyboard, under the policy."""
 
@@ -255,8 +263,8 @@ class TestTheTreeDiagram:
             "Array.from(document.querySelectorAll('#decision-tree-diagram g.tree-dbox'))"
             ".map(b => [b.dataset.key, b.getAttribute('transform')])",
         )
-        assert {key: _numbers(at) for key, at in boxes} == pytest.approx(served)
-        assert {child: _numbers(d) for child, d, _ in page.evaluate(_EDGES)} == pytest.approx(lines)
+        _assert_close_each({key: _numbers(at) for key, at in boxes}, served)
+        _assert_close_each({child: _numbers(d) for child, d, _ in page.evaluate(_EDGES)}, lines)
         _assert_clean(console)
 
     def test_it_zooms_in_and_out_and_resets(self, console: Console, tree_results: str) -> None:
