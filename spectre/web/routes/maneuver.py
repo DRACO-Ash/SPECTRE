@@ -877,7 +877,7 @@ async def apply_intercept(
         })
 
     # Re-fetch TLEs if a per-panel data mode override was requested.
-    red_tle, blue_tle, effective_dm = await _resolve_provenance(
+    red_tle, blue_tle, effective_dm, elset_notes = await _resolve_provenance(
         red_tle, blue_tle, form.intercept_data_mode, state,
     )
 
@@ -958,6 +958,7 @@ async def apply_intercept(
         "intel": intel,
         "pair": pair,
         "intercept_data_mode": effective_dm,
+        "elset_notes": elset_notes,
     })
 
 
@@ -1438,7 +1439,7 @@ async def apply_all_intercepts(
         })
 
     # Re-fetch TLEs if a per-panel data mode override was requested.
-    red_tle, blue_tle, effective_dm = await _resolve_provenance(
+    red_tle, blue_tle, effective_dm, elset_notes = await _resolve_provenance(
         red_tle, blue_tle, intercept_data_mode, state,
     )
 
@@ -1511,6 +1512,7 @@ async def apply_all_intercepts(
         "blue_name": blue_sat.strip(),
         "intercept_history": state.intercept_history,
         "intercept_data_mode": effective_dm,
+        "elset_notes": elset_notes,
         "most_likely": _most_likely(items),
         "searched": shaping.search,
         "evidence": evidence.fleet,
@@ -1572,11 +1574,13 @@ async def clear_history(
 
 class _Fetched(NamedTuple):
     """An element set and the UDL dataMode it is known to have, and the sentence refusing what UDL answered when the
-    acceptance check refused it and the set held was kept (SPC-201)."""
+    acceptance check refused it and the set held was kept (SPC-201), or the one naming each newer set refused before
+    the set fetched was taken (SPC-243), which is shown beside the badge, not in it."""
 
     tle: str
     mode: str
     refused: str = ""
+    passed_over: str = ""
 
 
 def _held_mode(state: object, tle: str) -> str:
@@ -1622,7 +1626,9 @@ async def _refetch_tles(
         )
         if isinstance(result, RefusedElset):
             return _Fetched(tle, _held_mode(state, tle), result.sentence(f"SATNO {satno}", outcome=HELD_KEPT))
-        return _Fetched(result.tle, result.data_mode) if result else _Fetched(tle, _held_mode(state, tle))
+        if not result:
+            return _Fetched(tle, _held_mode(state, tle))
+        return _Fetched(result.tle, result.data_mode, passed_over=result.passed_over_note(f"SATNO {satno}"))
 
     new_red, new_blue = await asyncio.gather(_try_fetch(red_tle), _try_fetch(blue_tle))
     return new_red, new_blue
@@ -1637,9 +1643,19 @@ def _with_refusals(label: str, *fetched: _Fetched) -> str:
     return " ".join([f"{label}.", *refusals]) if refusals else label
 
 
+class _Provenance(NamedTuple):
+    """The element sets to fly, the badge's value, and the notes shown beside it: each sentence naming newer sets
+    refused before a set fetched was taken (SPC-243). A live set keeps the badge at its mode, so REAL stays green."""
+
+    red_tle: str
+    blue_tle: str
+    label: str
+    notes: tuple[str, ...] = ()
+
+
 async def _resolve_provenance(
     red_tle: str, blue_tle: str, requested: str, state: object,
-) -> tuple[str, str, str]:
+) -> _Provenance:
     """The element sets to fly and the badge naming their actual provenance.
 
     The badge used to show the requested mode, defaulting to REAL, even when
@@ -1656,7 +1672,7 @@ async def _resolve_provenance(
         # mistaken for a fresh fetch in the mode asked for.
         label = (f"refused data mode {mode[:20]!r}: it must be REAL, SIMULATED, EXERCISE or TEST; "
                  f"flown with the held sets ({label})")
-    return red.tle, blue.tle, label
+    return _Provenance(red.tle, blue.tle, label, tuple(f.passed_over for f in (red, blue) if f.passed_over))
 
 
 # ── Intercept solver dispatch ────────────────────────────────────────────────

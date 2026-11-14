@@ -29,7 +29,7 @@ async def test_an_unknown_mode_is_refused_and_never_sent(monkeypatch: pytest.Mon
         sent.append(data_mode)
 
     monkeypatch.setattr("spectre.web.routes.udl.fetch_tle_for_satno", fetch)
-    red, blue, label = await maneuver._resolve_provenance(_RED_GEO, _BLUE_GEO, "live", _state())
+    red, blue, label, _ = await maneuver._resolve_provenance(_RED_GEO, _BLUE_GEO, "live", _state())
     assert sent == []
     assert (red, blue) == (_RED_GEO, _BLUE_GEO)
     assert label.startswith("refused data mode 'LIVE': it must be REAL, SIMULATED, EXERCISE or TEST; flown with the held sets")
@@ -43,6 +43,6 @@ async def test_a_known_mode_is_still_fetched(monkeypatch: pytest.MonkeyPatch) ->
         return FetchedElset(_RED_GEO, data_mode, "18th SPCS")
 
     monkeypatch.setattr("spectre.web.routes.udl.fetch_tle_for_satno", fetch)
-    _, _, label = await maneuver._resolve_provenance(_RED_GEO, _BLUE_GEO, "exercise", _state())
+    _, _, label, _ = await maneuver._resolve_provenance(_RED_GEO, _BLUE_GEO, "exercise", _state())
     assert sent == ["EXERCISE", "EXERCISE"]
     assert label == "EXERCISE"

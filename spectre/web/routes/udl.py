@@ -14,22 +14,23 @@ import time
 from collections.abc import Coroutine
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
-from math import inf
 from typing import Annotated, Any, NamedTuple
 
 import httpx
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
 
-from spectre.astro.elset_check import check_elset, tle_epoch
+from spectre.astro.elset_check import ElsetCheck, check_elset, tle_epoch
 from spectre.config.settings import UDL_BASE_URL
 from spectre.web.auth import require_login
 from spectre.web.deps import render
 from spectre.web.elsets import (
     ElsetHistory,
+    PassedOver,
     RefusedElset,
     log_refusal,
     log_skipped_by_type,
+    passed_over_sentence,
     refresh_held_elsets,
     refused,
 )
@@ -250,11 +251,20 @@ async def _newest_records(
 
 
 class FetchedElset(NamedTuple):
-    """One element set fetched from UDL, with its data mode and the provider that filed it."""
+    """One element set fetched from UDL, with its data mode, the provider that filed it and each newer set the
+    acceptance check refused before it was taken, newest first (SPC-243); none when it is the newest."""
 
     tle: str
     data_mode: str
     source: str
+    passed_over: tuple[PassedOver, ...] = ()
+
+    def passed_over_note(self, name: str) -> str:
+        """The sentence naming each newer set refused for the object *name* and why, and this set as the one used;
+        "" when it is the newest. Never any set's text."""
+        if not self.passed_over:
+            return ""
+        return passed_over_sentence(name, self.passed_over, self.source, _parse_tle_epoch(self.tle.split("\n")[0]))
 
 
 async def fetch_tle_for_satno(
@@ -270,11 +280,20 @@ async def fetch_tle_for_satno(
     last three days is asked first, then the current catalogue (see
     ``_newest_records``).
 
-    The newest set must pass the acceptance check (SPC-201), and be for
-    *satno*: when it does not, a RefusedElset comes back in its place, its
-    failures logged without the set's text, and the caller stores nothing and
-    says why. An older set, from the same provider or another, is not taken
-    instead: the newest is what UDL holds now.
+    The set taken must pass the acceptance check (SPC-201) and be for
+    *satno*. The complete records are checked newest first, and the newest
+    the check accepts is taken (SPC-243): a newer set the check refuses, such
+    as an ephemeris type 2 set filed a millisecond after another provider's
+    accepted one, does not block an older one, from the same provider or
+    another. Each newer set
+    refused comes back on the set's ``passed_over``, its provider, epoch and
+    failures, for the caller to name, and is logged without its text. Among
+    sets tied at one epoch the order is provider, then set text, so the order
+    UDL listed them in decides nothing, and a refused set tied with the one
+    taken is not newer and not named. At most ``_MAX_SETS_CHECKED`` sets are
+    checked. Only when none checked passes does a RefusedElset come back,
+    naming the newest set's failures, and the caller stores nothing and says
+    why. Staleness is judged by each caller on the set taken.
     """
     try:
         async with httpx.AsyncClient() as client:
@@ -284,35 +303,94 @@ async def fetch_tle_for_satno(
         return None
 
     # UDL answers in no order, and the archive holds several providers' sets,
-    # so the newest complete record is chosen rather than the first.
+    # so the complete records are ordered newest first rather than taken as listed.
     complete = _complete_records(records)
     if not complete:
         return None
+    walked = _newest_accepted(_newest_first(complete), satno)
+    if walked.record is None:
+        refusal = RefusedElset(satno, walked.newest, walked.checked, walked.unchecked)
+        log_refusal(refusal.sentence(f"SATNO {satno}, as UDL answered it,"))
+        return refusal
+    data_mode_tag = str(walked.record.get("dataMode") or data_mode or "REAL").strip().upper()
+    return FetchedElset(walked.tle, data_mode_tag, _provider_of(walked.record), walked.passed_over)
 
-    # Records tied at the newest epoch are none of them older, so the first the check accepts is taken; the order
-    # UDL listed them in must not decide whether the fetch is refused. Only when every one is refused is it.
-    newest = _tied_at_newest(complete, _select_latest_elset(complete))
-    # An SGP4-XP set or an uncorrelated track is refused by the record's own fields, and named in the log by type.
-    checked = [(rec, f"{_elset_line(rec, 1)}\n{_elset_line(rec, 2)}") for rec in newest]
-    # A set dated in the future is refused too, by the time it arrives (SPC-226).
+
+#: The most element sets one fetch checks, newest first, before it stops (SPC-243). The 72-hour archive of a busy
+#: GEO object can hold one provider's sets every 15 to 30 minutes, up to 288 of them, beside the others'; 500 covers
+#: that with room, and a refused set costs about 25 microseconds to check, so the bound is about 12 ms. Past it the
+#: older sets are not checked: the fetch is refused, naming the newest set's failures as before, and the log says how
+#: many were left unchecked. Unsourced judgement, Claude's choice.
+_MAX_SETS_CHECKED = 500
+
+#: Sorts a record whose epoch cannot be read after every dated one: the check refuses it in any case.
+_UNDATED = datetime.min.replace(tzinfo=UTC)
+
+
+class _Walk(NamedTuple):
+    """What checking records newest first found: the record taken and its set, or None and "" when none passed, the
+    newer sets refused before it, and the newest set's check, which names the failures when none passed."""
+
+    record: Any
+    tle: str
+    passed_over: tuple[PassedOver, ...]
+    newest: ElsetCheck
+    #: How many sets were checked, and how many older ones past ``_MAX_SETS_CHECKED`` were not.
+    checked: int = 0
+    unchecked: int = 0
+
+
+def _provider_of(record: Any) -> str:
+    return str(record.get("source") or "").strip()
+
+
+def _newest_first(records: list[Any]) -> list[Any]:
+    """*records* newest line 1 epoch first; among those tied at an epoch, provider then set text, a stable order."""
+    by_provider = sorted(records, key=lambda r: (_provider_of(r), _elset_line(r, 1), _elset_line(r, 2)))
+    return sorted(by_provider, key=lambda r: _parse_tle_epoch(_elset_line(r, 1)) or _UNDATED, reverse=True)
+
+
+def _newest_accepted(ordered: list[Any], satno: int) -> _Walk:
+    """Check the complete records in *ordered*, newest first and not empty, and stop at the first the check accepts.
+
+    Each record goes to the check with its set, so an SGP4-XP set or an uncorrelated track is refused by the record's
+    own fields; a set dated in the future is refused by the time the walk began (SPC-226). The sets refused are
+    logged by type and provider, and, when an older set is taken, the sentence naming those newer than it, all without
+    any set's text.
+    """
     checked_at = datetime.now(UTC)
-    checks = [check_elset(tle, satno, record=rec, now=checked_at) for rec, tle in checked]
-    refused = [(tle, rec) for (rec, tle), check in zip(checked, checks, strict=True) if not check.accepted]
-    if refused:
-        log_skipped_by_type(f"SATNO {satno}", refused)
-    for (rec, tle), check in zip(checked, checks, strict=True):
+    refused_sets: list[tuple[str, Any]] = []
+    passed: list[PassedOver] = []
+    checks: list[ElsetCheck] = []
+    taken: tuple[Any, str] | None = None
+    for rec in ordered[:_MAX_SETS_CHECKED]:
+        tle = f"{_elset_line(rec, 1)}\n{_elset_line(rec, 2)}"
+        check = check_elset(tle, satno, record=rec, now=checked_at)
+        checks.append(check)
         if check.accepted:
-            data_mode_tag = str(rec.get("dataMode") or data_mode or "REAL").strip().upper()
-            return FetchedElset(tle, data_mode_tag, str(rec.get("source") or "").strip())
-    log_refusal(checks[0].refusal(f"SATNO {satno}, as UDL answered it,"))
-    return RefusedElset(satno, checks[0])
-
-
-def _tied_at_newest(records: list[Any], chosen: Any) -> list[Any]:
-    """*chosen* and every other record whose line 1 epoch equals it, in a stable order: provider, then set text."""
-    epoch = _parse_tle_epoch(_elset_line(chosen, 1))
-    tied = [r for r in records if r is chosen or (epoch is not None and _parse_tle_epoch(_elset_line(r, 1)) == epoch)]
-    return sorted(tied, key=lambda r: (str(r.get("source") or ""), _elset_line(r, 1), _elset_line(r, 2)))
+            taken = (rec, tle)
+            break
+        refused_sets.append((tle, rec))
+        epoch = _parse_tle_epoch(_elset_line(rec, 1))
+        if epoch is not None:
+            passed.append(PassedOver(_provider_of(rec), epoch, check.failures))
+    subject = f"SATNO {satno}"
+    log_skipped_by_type(subject, refused_sets)
+    if taken is None:
+        unchecked = len(ordered) - len(checks)
+        if unchecked:
+            logger.warning(
+                "%s: the newest %d of %d element sets were all refused; the %d older were not checked",
+                subject, len(checks), len(ordered), unchecked,
+            )
+        return _Walk(None, "", (), checks[0], len(checks), unchecked)
+    rec, tle = taken
+    used_epoch = _parse_tle_epoch(_elset_line(rec, 1))
+    # A refused set tied with the one taken is not newer, so it is not passed over (the tie rule is unchanged).
+    newer = tuple(p for p in passed if used_epoch is None or p.epoch > used_epoch)
+    if newer:
+        logger.warning("%s", log_safe(passed_over_sentence(subject, newer, _provider_of(rec), used_epoch), limit=2000))
+    return _Walk(rec, tle, newer, checks[0])
 
 
 #: Background tasks started at UDL login. The loop holds only weak references
@@ -654,14 +732,23 @@ def _tle_precheck_error(state: SessionState, mode: str, data_mode: str | None) -
     return None
 
 
+#: How many element sets dated before the scenario start epoch mode asks UDL for. No sort is sent: none is used
+#: anywhere against UDL here, so none is assumed, and UDL may answer with any of the sets before the start, not the
+#: closest. Ten was too few once a provider files every 15 minutes and its sets are refused (SPC-243): 100 covers
+#: a day of one such provider beside the others. Unsourced judgement, Claude's choice.
+_EPOCH_MAX_RESULTS = 100
+
+
 def _epoch_request_params(state: SessionState, satno: int, data_mode: str) -> dict[str, Any]:
-    """The /elset query for epoch mode: up to ten elsets at or before scenario start.
+    """The /elset query for epoch mode: up to ``_EPOCH_MAX_RESULTS`` elsets before scenario start, in no stated order.
 
     dataMode is sent only when it is not REAL. The operator's source override
-    does not apply: the epoch search reaches back past any one provider.
+    does not apply: the epoch search reaches back past any one provider. When
+    every set UDL answers with is refused, the panel says so and fills nothing,
+    though an older set past those returned might have passed.
     """
     epoch_filter = state.scenario_start.strftime("%Y-%m-%dT%H:%M:%S.000000Z")  # type: ignore[union-attr]
-    params: dict[str, Any] = {"satNo": satno, "epoch": f"<{epoch_filter}", "maxResults": 10}
+    params: dict[str, Any] = {"satNo": satno, "epoch": f"<{epoch_filter}", "maxResults": _EPOCH_MAX_RESULTS}
     if data_mode != "REAL":
         params["dataMode"] = data_mode
     return params
@@ -748,20 +835,19 @@ def _select_elset_by_epoch(records: list[Any], scenario_start: datetime) -> Any 
     """Return the record whose TLE epoch is closest to, and not after, *scenario_start*.
 
     An elset published after the scenario starts answers a question the
-    operator did not ask, so those are skipped rather than ranked. Returns
-    None when no candidate survives that filter.
+    operator did not ask, so those are skipped rather than ranked. A record
+    missing a line cannot be used, so a complete one is preferred whenever any
+    is dated in range: a closest record without its lines must not stop the
+    panel taking an older complete one (V0.45 review). Returns None when no
+    candidate survives that filter.
     """
-    best_rec = None
-    best_delta = inf
-    for candidate in records:
-        ep = _parse_tle_epoch(_elset_line(candidate, 1))
-        if ep is None or ep > scenario_start:
-            continue
-        delta = (scenario_start - ep).total_seconds()
-        if delta < best_delta:
-            best_delta = delta
-            best_rec = candidate
-    return best_rec
+    dated = [
+        (r, ep) for r in records if (ep := _parse_tle_epoch(_elset_line(r, 1))) is not None and ep <= scenario_start
+    ]
+    candidates = [pair for pair in dated if _elset_line(pair[0], 2)] or dated
+    if not candidates:
+        return None
+    return max(candidates, key=lambda pair: pair[1])[0]
 
 
 def _select_latest_elset(records: list[Any]) -> Any:
@@ -779,11 +865,27 @@ def _select_latest_elset(records: list[Any]) -> Any:
         if ep is not None and (best_epoch is None or ep > best_epoch):
             best_epoch = ep
             best_rec = candidate
-    logger.info(
-        "Latest mode selected record with epoch=%s",
-        best_epoch.isoformat() if best_epoch else "None",
-    )
     return best_rec
+
+
+def _panel_take(records: list[Any], state: Any, satno: int, mode: str, label: str) -> tuple[_Walk, str | None]:
+    """The TLE panel's set: the newest complete record the check accepts, in latest mode from every record, in
+    epoch mode from those dated at or before the scenario start (SPC-243), with the sentence refusing the newest
+    of them, logged, when none passes. The caller has made sure one such complete record exists."""
+    ordered = _newest_first(_complete_records(records))
+    if mode == "epoch":
+        start = state.scenario_start
+        ordered = [r for r in ordered if (epoch := _parse_tle_epoch(_elset_line(r, 1))) is not None and epoch <= start]
+    walked = _newest_accepted(ordered, satno)
+    if walked.record is not None:
+        # The set taken, not the newest record, which may be one refused.
+        taken = _parse_tle_epoch(_elset_line(walked.record, 1))
+        logger.info("%s mode selected record with epoch=%s", "Epoch" if mode == "epoch" else "Latest",
+                    taken.isoformat() if taken else "None")
+        return walked, None
+    refusal = RefusedElset(satno, walked.newest, walked.checked, walked.unchecked).sentence(label)
+    log_refusal(refusal)
+    return walked, refusal
 
 
 def _extract_tle_fields(rec: Any, name_override: str, satno: int) -> tuple[str, str, str]:
@@ -930,17 +1032,23 @@ async def fetch_tle(
             {**_empty, "error": f"UDL returned an elset for SATNO {satno} with no element lines."},
         )
 
-    # The set fills the form only once it passes the acceptance check, as the set for the number asked (SPC-201).
-    refusal = refused(f"{name} ({satno})", tle, satno=satno, record=rec)
+    # The set fills the form only once it passes the acceptance check, as the set for the number asked (SPC-201):
+    # the newest that does, each newer one refused named beside it (SPC-243).
+    walked, refusal = _panel_take(records, state, satno, mode, f"{name} ({satno})")
     if refusal is not None:
         return render(request, _TLE_FIELDS_TEMPLATE, {**_empty, "error": refusal})
+    rec, tle, line1 = walked.record, walked.tle, _elset_line(walked.record, 1)
+    # Named from the record taken: the newest record may be one the check refused (V0.45 review).
+    name = _extract_tle_fields(rec, name_override, satno)[0]
+    passed_over = FetchedElset(tle, "", _provider_of(rec), walked.passed_over).passed_over_note(f"{name} ({satno})")
 
-    # TLE epoch metadata for the partial
+    # TLE epoch metadata for the partial: the set taken, never a newer one refused.
     tle_epoch_str, tle_age_days = _tle_epoch_metadata(line1, state.scenario_start)
 
     state.append_log(
         f"[UDL] Fetched TLE for SATNO {satno} ({name}) mode={mode}"
         + (f" epoch={tle_epoch_str}" if tle_epoch_str else "")
+        + (f". {passed_over}" if passed_over else "")
     )
     logger.info(
         "TLE fetched for SATNO %s (%s) mode=%s by operator %s",
@@ -960,8 +1068,10 @@ async def fetch_tle(
             # session mode is the wrong fallback once a request names its own.
             "elset_mode": str(rec.get("dataMode") or dm).strip().upper(),
             # The provider that filed it, so the add records where the set came from.
-            "elset_source": str(rec.get("source") or "").strip(),
+            "elset_source": _provider_of(rec),
             "data_mode_override": bool(data_mode.strip()),
+            # Each newer set the check refused before this one was taken, in a sentence (SPC-243); "" when none.
+            "passed_over": passed_over,
             "error": None,
             "fields_side": _empty["fields_side"],
         },

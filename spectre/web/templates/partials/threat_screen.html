@@ -17,6 +17,11 @@
   {% if not_screened is defined and not_screened %}
   <p class="field-meta" role="note">{{ not_screened }}</p>
   {% endif %}
+  {#- Each live set taken over newer ones the check refused (SPC-243): a plain note, never the provenance banner,
+      which calls its sets illustrative. -#}
+  {% for note in (passed_over_notes if passed_over_notes is defined else []) %}
+  <p class="field-meta elset-passed-over" role="note"><span class="badge-warn">Newer set refused</span> {{ note }}</p>
+  {% endfor %}
 
   {% include "partials/_provenance_banner.html" %}
 

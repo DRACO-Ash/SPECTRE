@@ -626,7 +626,7 @@ class TestTheOtherUdlCallers:
 
         UdlStub(by_number).install(monkeypatch)
         state = SessionState(udl_username="u", udl_password="p")
-        red, blue, label = asyncio.run(_resolve_provenance(_GOOD, PLANE_CHANGE.blue_tle, "EXERCISE", state))
+        red, blue, label, _ = asyncio.run(_resolve_provenance(_GOOD, PLANE_CHANGE.blue_tle, "EXERCISE", state))
         assert (red, blue) == (_GOOD, PLANE_CHANGE.blue_tle)
         assert label == (
             f"red UNVERIFIED, blue EXERCISE. The element set for SATNO {_SATNO} was refused: {_CORRUPT_FAILS}. It "

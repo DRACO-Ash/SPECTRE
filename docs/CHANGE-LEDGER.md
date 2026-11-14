@@ -1407,3 +1407,14 @@ A decision record being written when the server stops now stands.
 | Code Quality | **EVIDENCED** | Changes to `decision_job.py` (`jobs_ended`, the stop bound) and `app.py` (the shutdown step awaits it); `docs/architecture.md` states the stop assumption | `scripts/sonar_rules.py c318760`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against c318760 and against master: all PASS. Full suite on Python 3.12, figures in the commit; the PostgreSQL decision subset passes. An independent review confirmed the cause by intervention; its findings are fixed and 21 of 23 mutants die, the other two explained. | Then a rule names the line; fix it in the next release. |
 | SCA | **EVIDENCED** | `opentelemetry-api` 1.45.1 to 1.45.2 (CVE-2026-126360), carried from c318760 | `pip-audit` on `requirements.txt`: 1 vulnerability before, none after. | Then pip-audit names the package; recompile its pin with `scripts/lock.sh`'s command and `--upgrade-package`. |
 | Other gates | **HYGIENE** | Shutdown takes up to 8 s longer when a job is sampling or writing a record | No Dockerfile or image change. | n/a. |
+
+## 0.45.0
+
+A refused newer element set no longer blocks the UDL fetch; the Dependabot updates carried.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | Changes to `routes/udl.py` (newest-accepted walk, cap, panel), `elsets.py`, `planning_state.py`, `routes/operator.py`, `routes/threat.py`, `routes/maneuver.py`, `burn_watch.py` and their templates | `scripts/sonar_rules.py 0c87ec5`: 0 blocking, 0 advisory. `scripts/check-quality.sh` against 0c87ec5 and master: all PASS. Full suite on Python 3.12, figures in the commit. An independent review found no blocking defect; its findings are fixed and 17 of 18 mutants die, the other equivalent. | Then a rule names the line; fix it in the next release. |
+| DAST | **HYGIENE** | A new note naming a passed-over set, its provider, epoch and why, on the panel, list cards, screen, intercept panels, refresh and burn watch notes | Provider and object names come from UDL and are autoescaped, tested with a hostile name; no set text reaches a page or log. | Then a page reflects a field unescaped; the report names the page. |
+| SCA | **EVIDENCED** | Dependabot updates (Actions, mypy, pytest, pytest-asyncio, types-pyyaml, pip-tools) recompiled with `scripts/lock.sh`'s command | `pip-audit` on both lock files: no known vulnerabilities. | Then pip-audit names the package; recompile its pin with `--upgrade-package`. |
+| Other gates | **HYGIENE** | Epoch-mode UDL query asks for up to 100 sets, not 10 | No Dockerfile or image change. | n/a. |

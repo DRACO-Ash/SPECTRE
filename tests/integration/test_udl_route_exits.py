@@ -176,7 +176,7 @@ class TestTleFetch:
         page = op.get("/udl/tle", satno=25544, mode="epoch", data_mode="EXERCISE")
         assert udl.paths[-1].endswith("/elset")
         assert udl.params() == {
-            "satNo": "25544", "epoch": "<2026-01-26T00:00:00.000000Z", "maxResults": "10", "dataMode": "EXERCISE",
+            "satNo": "25544", "epoch": "<2026-01-26T00:00:00.000000Z", "maxResults": "100", "dataMode": "EXERCISE",
         }
         assert "26025.79842163" in page, "the set before the scenario start was not the one chosen"
         assert "26027.00000000" not in page

@@ -17,6 +17,10 @@
   Sets entered by hand are never overwritten.
   {#- Each set the acceptance check refused, named in a sentence: the held set was kept (SPC-201). -#}
   {% for sentence in refresh.refused %}<span class="elset-refused" style="display:block">{{ sentence }}</span>{% endfor %}
+  {#- Each set updated from an older one because every newer set was refused, naming those (SPC-243). -#}
+  {% for sentence in refresh.passed_over %}
+  <span class="elset-passed-over" style="display:block">{{ sentence }}</span>
+  {%- endfor %}
 </div>
 {% if announce and refresh.updated %}
 <span hidden data-init="reread-red-card"></span>

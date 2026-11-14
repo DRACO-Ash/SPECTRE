@@ -413,7 +413,8 @@ async def _prefetch_group_tle(
 
     A set the acceptance check refuses is not stored: the sentence saying so,
     naming the object, comes back in place of False (SPC-201). A history set
-    it refuses is left out of the clustering and said in the run log.
+    it refuses is left out of the clustering and said in the run log, as is
+    each newer set refused before the set stored was taken (SPC-243).
 
     The credential check is kept even though the caller has already made it.
     Session state is shared, and dropping a guard because it looks redundant
@@ -437,6 +438,10 @@ async def _prefetch_group_tle(
             return result.sentence(_hrr_label(state, satno_str))
         state.hrr_tle_cache[satno_str] = result.tle  # type: ignore[attr-defined]
         state.hrr_tle_data_mode[satno_str] = result.data_mode  # type: ignore[attr-defined]
+        # A newer set the check refused before this one was taken is said in the run log (SPC-243).
+        passed_over = result.passed_over_note(_hrr_label(state, satno_str))
+        if passed_over:
+            state.append_log(f"[UDL] {passed_over}")  # type: ignore[attr-defined]
         # Also fetch multi-provider history for clustering.
         history = await fetch_tle_history_for_satno(
             int(satno_str), state.udl_username, state.udl_password,  # type: ignore[attr-defined]
@@ -1223,12 +1228,13 @@ def _judge_actors(
 
 class _Walk(NamedTuple):
     """What walking the payloads to the cap found: those kept, those cut by age, each failed fetch's note by number,
-    and how many were not reached."""
+    how many were not reached, and each live set taken over newer refused ones, its sentence by number (SPC-243)."""
 
     kept: list[ThreatActor]
     aged: list[tuple[ThreatActor, Exclusion]]
     refreshed: dict[str, str]
     unreached: int
+    passed_over: dict[str, str] = {}
 
 
 async def _walk_to_cap(
@@ -1239,15 +1245,18 @@ async def _walk_to_cap(
     kept: list[ThreatActor] = []
     aged: list[tuple[ThreatActor, Exclusion]] = []
     refreshed: dict[str, str] = {}
+    passed_over: dict[str, str] = {}
     pending = list(able)
     while pending and len(kept) < _MAX_SCREEN_ACTORS:
         room = _MAX_SCREEN_ACTORS - len(kept)
         batch, pending = pending[:room], pending[room:]
-        refreshed.update(await _refresh_outcomes(state, batch))
+        outcomes = await _refresh_outcomes(state, batch)
+        refreshed.update(outcomes.failed)
+        passed_over.update(outcomes.passed_over)
         batch_kept, batch_aged = _judge_actors(state, batch, this_year, catalogue, read_sets=True)
         kept += batch_kept
         aged += batch_aged
-    return _Walk(kept, aged, refreshed, len(pending))
+    return _Walk(kept, aged, refreshed, len(pending), passed_over)
 
 
 def _exclusion_note(excluded: list[tuple[str, Exclusion]]) -> str:
@@ -1489,6 +1498,10 @@ async def _fetch_missing_target_tles(
             elif _result:
                 state.hrr_tle_cache[t.target_satno] = _result.tle  # type: ignore[attr-defined]
                 state.hrr_tle_data_mode[t.target_satno] = _result.data_mode  # type: ignore[attr-defined]
+                # A newer set the check refused before this one was taken is named with the sweep's notes (SPC-243).
+                passed_over = _result.passed_over_note(f"{t.target_name} ({t.target_satno})")
+                if passed_over:
+                    errors.append(passed_over)
             else:
                 errors.append(f"TLE fetch failed for {t.target_name} ({t.target_satno})")
 
@@ -3099,20 +3112,31 @@ async def _refresh_actor_tles(state: object, actors: list[ThreatActor]) -> list[
     per actor whose fetch failed: it is then screened on the set already
     held, and the operator is told so (F-135), as the sweep does.
     """
-    return list((await _refresh_outcomes(state, actors)).values())
+    return list((await _refresh_outcomes(state, actors)).failed.values())
 
 
-async def _refresh_outcomes(state: object, actors: list[ThreatActor]) -> dict[str, str]:
-    """_refresh_actor_tles's notes keyed by the actor's catalogue number, so a caller can keep those it screens."""
+class _Refreshed(NamedTuple):
+    """What fetching the actors' live sets found, each keyed by the actor's catalogue number so a caller can keep
+    those it screens: *failed*, the note for each actor whose live set was not fetched, screened on the set held;
+    *passed_over*, the sentence for each actor whose live set was taken over newer ones the check refused (SPC-243).
+    The second is a live set, so it must never join the first, which the provenance banner shows as illustrative."""
+
+    failed: dict[str, str] = {}
+    passed_over: dict[str, str] = {}
+
+
+async def _refresh_outcomes(state: object, actors: list[ThreatActor]) -> _Refreshed:
+    """_refresh_actor_tles's outcomes: the failed fetches' notes and the passed-over sentences, apart."""
     missing = [a for a in actors if _needs_live_tle(state, a.actor_satno)]
     if not missing or not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
-        return {}
+        return _Refreshed()
 
     from spectre.web.routes.udl import fetch_tle_for_satno
 
     sem = asyncio.Semaphore(10)
     user: str = state.udl_username  # type: ignore[attr-defined]
     password: str = state.udl_password  # type: ignore[attr-defined]
+    passed_over: dict[str, str] = {}
 
     async def _fetch_one(actor: ThreatActor) -> bool | str:
         async with sem:
@@ -3127,13 +3151,18 @@ async def _refresh_outcomes(state: object, actors: list[ThreatActor]) -> dict[st
                 return False
             state.hrr_tle_cache[actor.actor_satno] = got.tle  # type: ignore[attr-defined]
             state.hrr_tle_data_mode[actor.actor_satno] = got.data_mode  # type: ignore[attr-defined]
+            # A newer set the check refused before this one was taken is named, apart from the failures (SPC-243).
+            note = got.passed_over_note(f"{actor.actor_name} ({actor.actor_satno})")
+            if note:
+                passed_over[actor.actor_satno] = note
             return True
 
     outcomes = await asyncio.gather(*[_fetch_one(a) for a in missing], return_exceptions=True)
-    return {
+    failed = {
         a.actor_satno: _refresh_note(a, outcome)
         for a, outcome in zip(missing, outcomes, strict=True) if outcome is not True
     }
+    return _Refreshed(failed, passed_over)
 
 
 
@@ -3215,8 +3244,12 @@ class _Candidates(NamedTuple):
     error: str = ""
     #: The sentence naming the objects left out as not able to act, and why; "" when none was.
     not_screened: str = ""
-    #: One note per actor screened whose live element set was not fetched (F-135).
+    #: One note per actor screened whose live element set was not fetched (F-135): shown in the provenance banner,
+    #: as the actor is screened on the set held. Never a passed-over sentence, which is a live set's.
     refresh_notes: list[str] = []
+    #: One sentence per actor screened whose live set was taken over newer ones the check refused (SPC-243): a plain
+    #: note, never in the provenance banner.
+    passed_over_notes: list[str] = []
 
 
 async def _select_candidates(state: object, asset_regime: str, this_year: int) -> _Candidates:
@@ -3279,6 +3312,7 @@ async def _select_candidates(state: object, asset_regime: str, this_year: int) -
     return _Candidates(
         actors=actors, red_population=red_population, notes=notes, not_screened=not_screened,
         refresh_notes=[walk.refreshed[a.actor_satno] for a in actors if a.actor_satno in walk.refreshed],
+        passed_over_notes=[walk.passed_over[a.actor_satno] for a in actors if a.actor_satno in walk.passed_over],
     )
 
 
@@ -3503,6 +3537,7 @@ async def threat_screen(
         "profiles_by_actor": profiles_by_actor,
         "errors": errors,
         "not_screened": candidates.not_screened,
+        "passed_over_notes": candidates.passed_over_notes,
         "error": None,
         "band_colours": _BAND_COLOURS,
         "actor_modes": actor_modes,

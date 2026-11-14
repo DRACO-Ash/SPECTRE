@@ -39,8 +39,10 @@ class ElsetRefresh:
     *updated*, *failed* name each object ("red SY-12 02"); *current* counts
     the ones UDL had nothing newer for; *refused* holds the sentence for each
     object whose newest set the acceptance check refused, the held set kept
-    (SPC-201). *announced* is set once the page has been told the refresh
-    finished, so it is told once.
+    (SPC-201). *passed_over* holds the sentence for each object updated from
+    an older set because each newer one was refused, naming those (SPC-243).
+    *announced* is set once the page has been told the refresh finished, so
+    it is told once.
     """
 
     started_at: datetime
@@ -50,6 +52,7 @@ class ElsetRefresh:
     current: int = 0
     failed: list[str] = field(default_factory=list)
     refused: list[str] = field(default_factory=list)
+    passed_over: list[str] = field(default_factory=list)
     announced: bool = False
 
 

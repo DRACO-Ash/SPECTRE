@@ -72,6 +72,9 @@ class BurnWatch:
     newest_epoch: datetime | None = None
     #: A fixed sentence when the last check failed, never exception text.
     problem: str = ""
+    #: The sentence naming newer sets the acceptance check refused before the set the last check read was taken
+    #: (SPC-243); empty when that set was the newest UDL holds.
+    note: str = ""
     #: Why the watch stopped, empty while it runs.
     stopped: str = ""
     task: asyncio.Task[None] | None = field(default=None, repr=False)
@@ -104,7 +107,8 @@ def still_wanted(state: SessionState, key: SessionKey, watch: BurnWatch) -> str:
 
 
 async def _probe(state: SessionState, watch: BurnWatch) -> datetime | None:
-    """The epoch of the newest element set UDL holds for the object; raises when it cannot say."""
+    """The epoch of the newest element set UDL holds for the object that the acceptance check accepts, newer ones
+    it refused named in the watch's note (SPC-243); raises when it cannot say."""
     from spectre.web.elsets import RefusedElset, _epoch_of
     from spectre.web.routes.udl import fetch_tle_for_satno
 
@@ -120,6 +124,7 @@ async def _probe(state: SessionState, watch: BurnWatch) -> datetime | None:
     if isinstance(newest, RefusedElset):
         # A set the acceptance check refuses says nothing trustworthy, its epoch included (SPC-201).
         raise _StatedError(newest.sentence(f"{watch.red_name} ({watch.red_satno})", outcome=_EPOCH_NOT_READ))
+    watch.note = newest.passed_over_note(f"{watch.red_name} ({watch.red_satno})")
     return _epoch_of(newest.tle)
 
 

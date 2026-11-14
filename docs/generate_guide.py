@@ -509,8 +509,20 @@ def _section_03_getting_started(doc: Document) -> None:
         "and NorthStar). A latest fetch, whether from the TLE panel, a quick-add, a sweep or the refresh at "
         "connect, asks UDL's element set archive over the last 72 hours first and takes the newest set any "
         "provider filed; only when the archive holds none in that window does it ask UDL's current catalogue. "
-        "If that newest set is refused, for example because it is an SGP4-XP set, nothing is stored and you are "
-        "told; an older set is never taken in its place."
+        "If that newest set is refused, for example because it is an SGP4-XP set or filed with ephemeris type 2, "
+        "the sets are checked newest first and the newest that passes is taken; only when none passes is nothing "
+        "stored, and you are told why."
+    )
+    _add_body(doc,
+        "When a newer set was refused and an older one taken, you are told so in one sentence, for example: "
+        "'A newer element set for GOES-16 (41866), from PROVIDER-A with epoch 2026-11-13 12:28:48.002 UTC, was "
+        "refused: its ephemeris type is 2, not 0, the SGP4 type every propagator here assumes. The set used is "
+        "PROVIDER-B's, epoch 2026-11-13 12:28:48.000 UTC, 0.002 s older.' It appears in the TLE panel, beside a "
+        "quick-add, among the sweep's notes, as a note on the screen's result, beside an intercept result's Data "
+        "Mode badge, which stays REAL, in the burn watch's note, in the refresh note at connect and in the run log. "
+        "Epochs are given to the millisecond, since providers' sets for one orbit can be that close. The age shown "
+        "for the object is always the age of the set used, never of the newer one refused. Up to 500 sets are "
+        "checked; past that the fetch is refused, and the refusal says the older sets were not checked."
     )
     _add_body(doc,
         "When you connect, SPECTRE lists the providers that filed for the ISS over the last day, and adds every "
@@ -1429,7 +1441,8 @@ def _section_13_decision_engine(doc: Document) -> None:
         "though the checksum cannot see it; every orbital element inside its range; an ephemeris type of 0, SGP4, "
         "since SGP4 would propagate an SGP4-XP set (type 4) to a wrong orbit without an error; not an uncorrelated "
         "track (UCT) from UDL; and an orbit SGP4 can start from. When the newest set UDL answers with is refused for "
-        "its type, no older set is taken in its place, and you are told. A set that "
+        "its type, the newest set that passes is taken instead, and you are told which newer set was refused and "
+        "why. A set that "
         "fails is not stored and never replaces a set already held; you are told which object and what failed, "
         "on the page or, where the path has no page of its own, in the run log, and the log records the same "
         "without the set's text. A scenario checks its sets again when you bind it."

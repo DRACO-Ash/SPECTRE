@@ -16,7 +16,7 @@ from spectre.web.auth import optional_login, require_login
 from spectre.web.deps import get_templates, render
 from spectre.web.elsets import RefusedElset, provenance, provider, refused
 from spectre.web.models import User
-from spectre.web.planning_state import get_session_state
+from spectre.web.planning_state import SessionState, get_session_state
 from spectre.web.routes.udl import FetchedElset
 
 logger = logging.getLogger(__name__)
@@ -114,6 +114,15 @@ def _fetch_error(got: FetchedElset | RefusedElset | None, name: str, satno: int)
     return None
 
 
+def _passed_over_note(state: SessionState, got: FetchedElset, name: str, satno: int) -> str:
+    """The sentence naming each newer set the check refused before the set added was taken, put in the run log too;
+    "" when the set added is the newest (SPC-243)."""
+    note = got.passed_over_note(f"{name} ({satno})")
+    if note:
+        state.append_log(f"[UDL] {note}")
+    return note
+
+
 @router.post("/assets/blue", response_class=HTMLResponse)
 async def add_blue_asset(
     request: Request,
@@ -196,8 +205,9 @@ async def quick_add_blue_asset(
     asset = BlueAsset(name=clean_name, tle=_result.tle, data_mode=_result.data_mode, elset_source=_result.source)
     state.blue_assets.append(asset)
     state.append_log(f"[BLUE] Quick-added from HRR: {asset.stk_name} (SATNO {satno})")
+    note = _passed_over_note(state, _result, clean_name, satno)
 
-    ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": None}
+    ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": None, "note": note}
     resp_html = _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
 
     oob_badge = ""
@@ -256,8 +266,9 @@ async def quick_add_red_track(
     track = RedTrack(name=clean_name, tle=_result.tle, data_mode=_result.data_mode, elset_source=_result.source)
     state.red_tracks.append(track)
     state.append_log(f"[RED] Quick-added from HRR: {track.stk_name} (SATNO {satno})")
+    note = _passed_over_note(state, _result, clean_name, satno)
 
-    ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": None}
+    ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": None, "note": note}
     resp_html = _list_response(request, _RED_LIST_TEMPLATE, ctx)
 
     oob_badge = ""

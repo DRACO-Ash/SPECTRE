@@ -18,6 +18,10 @@
   {% endif %}
 </p>
 {% endif %}
+{% if passed_over is defined and passed_over %}
+{#- Each newer set the acceptance check refused before this one was taken (SPC-243). -#}
+<p class="field-meta elset-passed-over"><span class="badge-warn">Newer set refused</span> {{ passed_over }}</p>
+{% endif %}
 {% if error %}
 <p class="field-error">{{ error }}</p>
 {% endif %}

@@ -63,6 +63,7 @@ class TestTheHistoryWindow:
 _ARCHIVE = "/udl/elset"
 _CURRENT = "/udl/elset/current"
 _XP_TYPE = 4
+_XP_FAILS = "it is an SGP4-XP set (ephemeris type 4), which SGP4 would propagate to a wrong orbit without an error"
 
 
 def _by_path(archive: Any, current: Any) -> Any:
@@ -108,15 +109,18 @@ class TestTheNewestSet:
         assert result == udl.FetchedElset(f"{_L1}\n{_L2}", "REAL", "18th SPCS")
         assert stub.params() == {"satNo": "25544", "source": "18th SPCS"}, "the current catalogue takes no epoch"
 
-    async def test_a_refused_newest_set_is_not_replaced_by_an_older_one_or_the_current_catalogue(
+    async def test_a_refused_newest_set_gives_way_to_the_older_one_in_the_archive_not_the_current_catalogue(
         self, stub: UdlStub,
     ) -> None:
-        """HEAD's rule (SPC-201) holds over the wider archive: the newest set is what UDL holds now."""
-        newest_xp = {"line1": _L1_NEWER, "line2": _L2, "ephemType": _XP_TYPE, "source": "EXO"}
-        stub.answer = _by_path(reply([{"line1": _L1, "line2": _L2, "source": "18th SPCS"}, newest_xp]),
-                               reply({"line1": _L1, "line2": _L2, "source": "18th SPCS"}))
+        """The newest set the check accepts is taken, and the newer one it refused is named (SPC-243). Until 0.45.0
+        a refused newest set refused the fetch; the current catalogue is still not asked."""
+        newest_xp = {"line1": _L1_NEWER, "line2": _L2, "ephemType": _XP_TYPE, "source": "PROVIDER-A"}
+        stub.answer = _by_path(reply([{"line1": _L1, "line2": _L2, "source": "PROVIDER-B"}, newest_xp]),
+                               reply({"line1": _L1_NEWER, "line2": _L2, "source": "PROVIDER-C"}))
         result = await udl.fetch_tle_for_satno(25544, "op", "pw")
-        assert isinstance(result, RefusedElset)
+        assert isinstance(result, udl.FetchedElset)
+        assert (result.tle, result.source) == (f"{_L1}\n{_L2}", "PROVIDER-B")
+        assert [(p.source, p.failures) for p in result.passed_over] == [("PROVIDER-A", (_XP_FAILS,))]
         assert stub.paths == [_ARCHIVE]
 
     @pytest.mark.parametrize("xp_first", [True, False], ids=["xp-first", "sgp4-first"])

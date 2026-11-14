@@ -1,6 +1,10 @@
 {% if error %}
 <div class="error-msg" role="alert">{{ error }}</div>
 {% endif %}
+{% if note is defined and note %}
+{#- A newer element set the acceptance check refused before the set added was taken (SPC-243). -#}
+<p class="field-meta elset-passed-over"><span class="badge-warn">Newer set refused</span> {{ note }}</p>
+{% endif %}
 {% if blue_assets %}
 <ul class="asset-list">
   {% for asset in blue_assets %}

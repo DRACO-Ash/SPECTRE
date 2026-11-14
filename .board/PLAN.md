@@ -1,10 +1,5 @@
 pace 1.00 from settings (nothing measured yet)
 
-V0.45: 1 items, 180 priced min, gates browser, container, lint, quality, sast, tests
-  forecast 3h00 to 3h00 (middle 3h00), people's time 0 min, evidence: settings (nothing measured yet)
-    SPC-243       180m  priority high; anchors the release
-  lane 1 (180m): SPC-243
-
 waiting: SPC-080 - needs an owner answer
 
 waiting: SPC-033 - needs an owner answer
@@ -26,6 +21,8 @@ waiting: SPC-235 - needs an owner answer
 waiting: SPC-236 - needs an owner answer
 
 waiting: SPC-240 - needs an owner answer
+
+waiting: SPC-244 - needs an owner answer
 
 off path: SPC-072 - research: no release gate
 

@@ -3,8 +3,9 @@
 The acceptance check (spectre.astro.elset_check) refuses both; these drive the paths through it. A UDL fetch hands
 the check the record the set came in, so a type 4 set is refused by its ephemType even where line 1 says 0, and a
 UCT by its flag. The history fetch leaves both out and the log says what it skipped, by type and provider, without
-the set's text. When the newest set a fetch answers with is refused for this, the page says so in a sentence, and
-an older set is not taken in its place. The PoL history from UDL leaves both out as well.
+the set's text. When the only set a fetch answers with is refused for this, the page says so in a sentence; when an
+older set passes, it is taken and the newer one refused is named (SPC-243). The PoL history from UDL leaves both out
+as well.
 """
 
 from __future__ import annotations
@@ -84,17 +85,27 @@ class TestTheNewestSet:
         assert "skipped by type" in caplog.text and "from EXO" in caplog.text
         _no_set_text(caplog.text)
 
-    def test_an_older_sgp4_set_is_not_taken_in_its_place(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The newest is what UDL holds now (SPC-201); the refusal says why nothing was stored."""
-        from spectre.web.elsets import RefusedElset
-        from spectre.web.routes.udl import fetch_tle_for_satno
+    def test_an_older_sgp4_set_is_taken_in_its_place_and_the_refused_one_named(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Until 0.45.0 the refused newest set refused the fetch (SPC-201); the newest set the check accepts is now
+        taken, and the newer one refused is named with its provider and why (SPC-243)."""
+        from spectre.web.routes.udl import FetchedElset, fetch_tle_for_satno
 
         line1, line2 = _GOOD.splitlines()
         assert line1[18:32] == "26290.50000000"
         body = f"{line1[:18]}26289.50000000{line1[32:68]}"
         older = f"{body}{_checksum(body)}\n{line2}"
-        UdlStub(reply([_record(older, source="18th SPCS"), _record(_XP_TEXT, source="EXO")])).install(monkeypatch)
-        assert isinstance(asyncio.run(fetch_tle_for_satno(_SATNO, "u", "p")), RefusedElset)
+        UdlStub(reply([_record(older, source="PROVIDER-B"), _record(_XP_TEXT, source="PROVIDER-A")])).install(
+            monkeypatch,
+        )
+        got = asyncio.run(fetch_tle_for_satno(_SATNO, "u", "p"))
+        assert isinstance(got, FetchedElset)
+        assert (got.tle, got.source) == (older, "PROVIDER-B")
+        assert got.passed_over_note("SY-12 (90002)") == (
+            "A newer element set for SY-12 (90002), from PROVIDER-A with epoch 2026-10-17 12:00:00.000 UTC, was "
+            f"refused: {_XP_FAILS}. The set used is PROVIDER-B's, epoch 2026-10-16 12:00:00.000 UTC, 1.0 d older."
+        )
 
     def test_quick_add_says_so_on_the_page(self, operator: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         UdlStub(reply([_record(_GOOD, ephemType=4, source="EXO")])).install(monkeypatch)

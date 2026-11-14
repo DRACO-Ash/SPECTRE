@@ -196,10 +196,13 @@ than any new calculation.
 **What changed.** A latest fetch asks UDL's element set archive over the last
 72 hours first, across every provider or the one chosen in TLE Source, and
 takes the newest set; the current catalogue (`/elset/current`) answers only
-when the archive holds no complete set in that window. If the newest set is
-refused, an SGP4-XP set or an uncorrelated track among them, nothing is stored
-and the operator is told; an older set is not taken in its place. Each held
-red track and blue asset records the provider that filed its set.
+when the archive holds no complete set in that window. Until 0.45.0, if the
+newest set was refused, an SGP4-XP set or an uncorrelated track among them,
+nothing was stored and the operator was told; an older set was not taken in
+its place. From 0.45.0 (SPC-243) the newest set that passes is taken, each
+newer set refused is named with its provider, epoch and why, and nothing is
+stored only when no set passes. Each held red track and blue asset records the
+provider that filed its set.
 
 FACT (the owner's UDL element set epoch chart, 28 October 2026): the element
 set providers on UDL are 18th SPCS, ExoAnalytic (EXO), KBR, KRTL, LeoLabs and

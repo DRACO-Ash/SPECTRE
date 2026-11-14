@@ -9,6 +9,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-11-14
+
+**A refused newer element set no longer blocks the UDL fetch, and every place a set is shown says which newer one was passed over and why.**
+
+### Fixed
+- The UDL fetch checks the sets UDL holds newest first and takes the newest the acceptance check passes. Before, it took only the set or sets tied at the newest epoch and was refused when those failed: one commercial provider files every set with ephemeris type 2, which the check refuses, and its sets are often a millisecond newer than other providers' accepted ones, so the fetch for GOES-16 was refused whenever its set was newest. Each newer set passed over is named, with its provider, its epoch to the millisecond and why, as a note beside the set used: in the TLE panel, red and blue quick-add, the sweep, the threat screen (never in its "not from live tracking" banner), the intercept panels (the Data Mode badge stays REAL), the connect refresh note, the burn watch and the run log. The name, epoch, age, data mode and source shown are the set used. The fetch is refused only when no set passes, up to the newest 500 checked, and says so when older sets were left unchecked. The panel's epoch mode now asks UDL for up to 100 sets and walks past a closest record with no lines. Type 2 stays refused: whether it is plain SGP4 is unconfirmed (SPC-243).
+
 ### Changed
 - Development and CI dependencies, as Dependabot proposed in pull requests 25 to 34: actions/checkout 4.4.0 to 7.0.1; CodeQL init and analyze 4.38.3 to 4.39.3, together; mypy 2.3.1 to 2.4.1 (with its dependencies ast-serialize 0.13.1 and librt 0.16.0); pytest 9.1.1 to 9.2.0; pytest-asyncio 1.4.0 to 1.4.1; types-pyyaml 6.0.12.20260906; pip-tools 7.6.2. The lock files were recompiled with `scripts/lock.sh`'s own command, so no other pin moved. One browser test compared a mapping of lists with `pytest.approx`, which pytest 9.2 refuses; it now compares each list on its own.
 

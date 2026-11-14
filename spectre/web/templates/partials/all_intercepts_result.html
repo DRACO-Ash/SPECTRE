@@ -15,6 +15,10 @@
   {% if intercept_data_mode %}
   {# The element sets' provenance, not the mode requested (F-133). #}
   <span class="{{ 'badge-ok' if intercept_data_mode == 'REAL' else 'badge-warn' }}" style="font-size:0.68rem">Data Mode: {{ intercept_data_mode }}</span>
+  {#- Beside the badge, not in it: a newer set refused before a live one was taken (SPC-243). -#}
+  {% for note in (elset_notes if elset_notes is defined else []) %}
+  <p class="field-meta elset-passed-over"><span class="badge-warn">Newer set refused</span> {{ note }}</p>
+  {% endfor %}
   {% endif %}
   {% if best %}
   <span class="intercept-detail" style="color:{{ best.intel.threat_color }}; font-weight:700">

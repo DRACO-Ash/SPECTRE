@@ -38,6 +38,8 @@
   Only {{ bw.red_name }} is watched; burns on other objects show when you sweep them.
   This watch ends {% if ends %}at {{ ends.strftime('%H:%M UTC') }}, when this sign-in expires,{% else %}when this sign-in expires{% endif %} or if UDL disconnects.
   {% if bw.problem %}<div style="color:var(--spectre-status-high)">{{ bw.problem }}</div>{% endif %}
+  {#- A newer set refused before the set the watch read was taken (SPC-243): a note, not a problem. -#}
+  {% if bw.note is defined and bw.note %}<div class="elset-passed-over">{{ bw.note }}</div>{% endif %}
   {% endif %}
 </div>
 </div>

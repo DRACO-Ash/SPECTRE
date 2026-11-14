@@ -23,7 +23,7 @@ import logging
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from spectre.astro.along_track import RegimeBasis, regime_basis
@@ -88,6 +88,76 @@ def log_skipped_by_type(subject: str, sets: Iterable[tuple[str, Mapping[str, obj
         logger.info("%s: element sets skipped by type: %s", log_safe(subject), log_safe(named, limit=500))
 
 
+@dataclass(frozen=True)
+class PassedOver:
+    """A set newer than the one a fetch took, which the acceptance check refused (SPC-243): the provider that filed
+    it, its epoch and each failure in words. Never the set's text, so it can be logged and shown as it is."""
+
+    source: str
+    epoch: datetime
+    failures: tuple[str, ...]
+
+
+_SECONDS_PER_MINUTE = 60.0
+
+
+def _epoch_words(epoch: datetime) -> str:
+    """An epoch to the millisecond, rounded: "2026-11-13 12:28:48.002 UTC". Providers' sets for one orbit can be a
+    millisecond apart, so a coarser epoch would show a refused set and the set used at the same time."""
+    rounded = epoch + timedelta(microseconds=500)
+    return f"{rounded:%Y-%m-%d %H:%M:%S}.{rounded.microsecond // 1000:03d} UTC"
+
+
+def _gap_words(seconds: float) -> str:
+    """How much older the set used is: seconds to the millisecond under a minute, minutes under an hour, then hours
+    or days as the ages read."""
+    if seconds < _SECONDS_PER_MINUTE:
+        return f"{seconds:.3f} s"
+    if seconds < _SECONDS_PER_HOUR:
+        return f"{seconds / _SECONDS_PER_MINUTE:.1f} min"
+    return hours_or_days(seconds / _SECONDS_PER_HOUR)
+
+
+def _from(source: str) -> str:
+    return f"from {source}" if source else "from an unnamed provider"
+
+
+def _epochs(sets: Sequence[PassedOver]) -> str:
+    """The sets' epochs in words: "epoch X" for one, "epochs X to Y", oldest first, for several."""
+    if len(sets) == 1:
+        return f"epoch {_epoch_words(sets[0].epoch)}"
+    return f"epochs {_epoch_words(sets[-1].epoch)} to {_epoch_words(sets[0].epoch)}"
+
+
+def passed_over_sentence(
+    name: str, passed: Sequence[PassedOver], used_source: str, used_epoch: datetime | None,
+) -> str:
+    """The sentence naming each newer set refused before the set used for the object *name* was taken (SPC-243):
+    its provider, its epoch and why, then whose set was used and how much older it is. Sets from one provider
+    refused for the same reasons are named together. Never any set's text. *passed* is newest first and not empty.
+    """
+    groups: dict[tuple[str, tuple[str, ...]], list[PassedOver]] = {}
+    for item in passed:
+        groups.setdefault((item.source, item.failures), []).append(item)
+    if len(groups) == 1:
+        sets = passed
+        counted = "A newer element set" if len(sets) == 1 else f"{len(sets)} newer element sets"
+        verb = "was" if len(sets) == 1 else "were"
+        lead = (f"{counted} for {name}, {_from(sets[0].source)} with {_epochs(sets)}, {verb} refused: "
+                f"{'; '.join(sets[0].failures)}.")
+    else:
+        lead = " ".join([f"{len(passed)} newer element sets for {name} were refused.", *(
+            f"{len(sets)} {_from(source)} with {_epochs(sets)}: {'; '.join(failures)}."
+            for (source, failures), sets in groups.items()
+        )])
+    whose = f"{used_source}'s" if used_source else "an unnamed provider's"
+    if used_epoch is None:
+        return f"{lead} The set used is {whose}."
+    gap = _gap_words((passed[0].epoch - used_epoch).total_seconds())
+    than = "" if len(passed) == 1 else " than the newest refused"
+    return f"{lead} The set used is {whose}, epoch {_epoch_words(used_epoch)}, {gap} older{than}."
+
+
 # PLR0913: the set and where it entered, all but the name and the set named at the call.
 def refused(  # noqa: PLR0913
     name: str, tle: str, *, outcome: str = NOT_STORED, satno: int | None = None,
@@ -110,14 +180,21 @@ class RefusedElset:
     """An element set UDL answered with that the acceptance check refused: nothing was stored (SPC-201).
 
     fetch_tle_for_satno returns it in place of the set, so each caller can name the object as its operator knows
-    it and say what became of any set already held.
+    it and say what became of any set already held. *check* is the newest set's. When the fetch stopped at its cap,
+    *checked* sets were checked and *unchecked* older ones were not, and the sentence says so (SPC-243).
     """
 
     satno: int
     check: ElsetCheck
+    checked: int = 0
+    unchecked: int = 0
 
     def sentence(self, name: str, *, outcome: str = NOT_STORED) -> str:
-        return self.check.refusal(name, outcome=outcome)
+        sentence = self.check.refusal(name, outcome=outcome)
+        if not self.unchecked:
+            return sentence
+        older = "1 older one was" if self.unchecked == 1 else f"{self.unchecked} older ones were"
+        return f"{sentence} Only the newest {self.checked} element sets were checked; {older} not."
 
 
 class ElsetHistory(list[str]):
@@ -294,10 +371,11 @@ def _write_back(state: SessionState, item: _Held, got: FetchedElset) -> None:
 
 
 async def _refresh_one(
-    state: SessionState, item: _Held, credentials: tuple[str, str], sem: asyncio.Semaphore,
+    state: SessionState, item: _Held, credentials: tuple[str, str], sem: asyncio.Semaphore, refresh: ElsetRefresh,
 ) -> str:
     """Fetch the newest set for *item* and keep it if it is newer: 'updated', 'current' or 'failed', or the sentence
-    refusing what UDL answered, when the held set is kept (SPC-201)."""
+    refusing what UDL answered, when the held set is kept (SPC-201). A set kept that was taken over newer ones the
+    check refused has the sentence naming those added to *refresh* (SPC-243)."""
     from spectre.web.routes.udl import fetch_tle_for_satno, remember_sources
 
     # A UDL set is refreshed in its own mode: one fetched as EXERCISE while the
@@ -317,6 +395,9 @@ async def _refresh_one(
     remember_sources(state, [got.source])
     if item.mode == _SYNTHETIC or _is_newer(got.tle, item.tle):
         _write_back(state, item, got)
+        note = got.passed_over_note(item.label)
+        if note:
+            refresh.passed_over.append(note)
         return "updated"
     return "current"
 
@@ -334,7 +415,7 @@ async def refresh_held_elsets(state: SessionState, username: str, password: str)
     held = _held_sets(state)
     sem = asyncio.Semaphore(_REFRESH_CONCURRENCY)
     outcomes = await asyncio.gather(
-        *(_refresh_one(state, item, (username, password), sem) for item in held),
+        *(_refresh_one(state, item, (username, password), sem, refresh) for item in held),
         return_exceptions=True,
     )
     for item, outcome in zip(held, outcomes, strict=True):
