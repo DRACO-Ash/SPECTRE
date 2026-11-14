@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated
 
 import bcrypt
 from fastapi import Cookie, Depends, HTTPException, Request, status
 from itsdangerous import BadSignature, URLSafeTimedSerializer
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from spectre.config.settings import get_settings
@@ -46,6 +47,51 @@ MAX_PASSWORD_BYTES = 72
 # from SPECTRE_ADMIN_USER (audit F-261).
 USERNAME_PATTERN = re.compile(r"[A-Za-z0-9._@-]{1,64}")
 PASSWORD_TOO_LONG = f"Password must be {MAX_PASSWORD_BYTES} bytes or fewer (fewer characters if it is not plain ASCII)."
+
+
+# ── Username matching ─────────────────────────────────────────────────────────
+
+# Letter case does not tell two accounts apart (SPC-020). An operator who
+# signed in as "Ash" and then "ash" was refused, and an admin could create
+# "ash" beside "Ash", two people under what reads as one name in the audit
+# log. The stored spelling is kept for display; only matching ignores case.
+# USERNAME_PATTERN is ASCII, so str.lower() here and SQL lower() agree.
+
+
+def username_key(name: str) -> str:
+    """The form in which two usernames are compared, and the login limiter's key."""
+    return name.lower()
+
+
+def account_named(users: Sequence[User], name: str) -> User | None:
+    """The account *name* refers to among *users*, or ``None``.
+
+    The exact spelling wins. Otherwise a single account whose name differs
+    only in case. A database from before SPC-020 may hold two such accounts,
+    and then a third spelling matches neither: guessing between two people
+    is worse than refusing.
+    """
+    exact = [u for u in users if u.username == name]
+    if exact:
+        return exact[0]
+    same = [u for u in users if username_key(u.username) == username_key(name)]
+    return same[0] if len(same) == 1 else None
+
+
+async def _namesakes(db: AsyncSession, name: str) -> Sequence[User]:
+    """Every account whose name matches *name* ignoring case."""
+    result = await db.execute(select(User).where(func.lower(User.username) == username_key(name)))
+    return result.scalars().all()
+
+
+async def find_user_by_name(db: AsyncSession, name: str) -> User | None:
+    """The account a typed *name* signs in to, by :func:`account_named`."""
+    return account_named(await _namesakes(db, name), name)
+
+
+async def username_taken(db: AsyncSession, name: str) -> bool:
+    """Whether any account already holds *name* in any letter case."""
+    return bool(await _namesakes(db, name))
 
 
 def password_too_long(plaintext: str) -> bool:

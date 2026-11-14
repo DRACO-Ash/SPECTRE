@@ -1,0 +1,115 @@
+{# The game tree (SPC-142), included by decision_results.html. Context: tree (web.tree_view.TreeView), built by the
+   route; every figure arrives written, in its unit, with its basis kind and rule, so nothing here does a sum.
+   Server-rendered as nested details and summary elements: D3 is not vendored, and none is needed. Each node says its
+   basis kind in words and its place on the plan in words, so nothing rests on colour alone; long words wrap, so it
+   reads at phone width. No handler attribute and no script: the drawn tree above the branches (SPC-190) is inline
+   SVG that static/js/tree_diagram.js makes collapsible and zoomable, in a frame of its own that scrolls. A branch whose own response is marked not permitted
+   (SPC-195) is greyed, with "Not permitted:" and its reason in words beside its heading, and every branch below it
+   is greyed, saying it follows that response; no plan mark falls on any of them. A branch whose red move is the
+   remainder of P (SPC-203) says beside its heading that the move is the engine's remainder, not the operator's row.
+   The best branch under a response the rule does not pick says so beside its heading in words of its own, in italic
+   with no star, so it never reads as the plan (SPC-189, design D14). #}
+<section class="decision-tree" aria-labelledby="decision-tree-heading"
+         style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:0.75rem 0.9rem; margin-bottom:0.5rem; overflow-wrap:anywhere">
+  <h3 id="decision-tree-heading" style="font-size:0.68rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin:0 0 0.4rem">{{ tree.heading }}</h3>
+
+  {# What the tree's figures assume: the last turn's branches valued as if no one moves after it (SPC-220) and the
+     score's terms added with nothing joining them (SPC-219). Only for a tree built. #}
+  {% for line in tree.assumptions %}
+  <p class="tree-assumption" role="note" style="font-size:0.6rem; color:var(--text-dim); margin:0 0 0.2rem">{{ line }}</p>
+  {% endfor %}
+
+  {% if tree.deepest is not none %}
+  <p class="tree-deepest" role="note" style="font-size:0.64rem; font-weight:700; color:var(--gold); margin:0 0 0.3rem">{{ tree.deepest }}</p>
+  {% endif %}
+  <div class="tree-lines" style="font-size:0.6rem; color:var(--text-dim)">
+    {% for line in tree.lines %}<p style="margin:0.1rem 0">{{ line }}</p>{% endfor %}
+  </div>
+
+  {% if tree.recommendation %}
+  <div class="tree-recommendation" role="note" style="margin-top:0.4rem">
+    <h4 style="font-size:0.64rem; font-weight:700; color:var(--ops-blue); margin:0 0 0.2rem">Recommendation per turn, {{ tree.rule }}</h4>
+    {% for line in tree.recommendation %}<p style="font-size:0.62rem; color:var(--text-primary); margin:0.1rem 0">{{ line }}</p>{% endfor %}
+  </div>
+  {% endif %}
+
+  {% if tree.update %}
+  <div class="tree-update" role="note" style="margin-top:0.4rem">
+    <h4 style="font-size:0.64rem; font-weight:700; color:var(--ops-blue); margin:0 0 0.2rem">{{ tree.update_heading }}</h4>
+    {% for line in tree.update %}<p style="font-size:0.6rem; color:var(--text-dim); margin:0.1rem 0">{{ line }}</p>{% endfor %}
+    {% if tree.update_basis is not none %}
+    <p class="tree-update-basis" style="font-size:0.6rem; color:var(--text-dim); margin:0.1rem 0">Basis of the update <span class="figure-basis" data-basis="{{ tree.update_basis.kind }}">({{ tree.update_basis.kind }}):</span> {{ tree.update_basis.note }}</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# The tree drawn (SPC-190): every box written here from tree.diagram, its figures the branch's own as the list
+     below writes them. Each box's visible lines are its words for a screen reader too, so no title repeats them. Without script it shows in full and its controls stay hidden; static/js/tree_diagram.js
+     shows them, collapses branches and zooms. The list below is its text alternative. #}
+  {% if tree.diagram is defined and tree.diagram is not none %}
+  {% set d = tree.diagram %}
+  <figure class="tree-diagram" data-init="tree-diagram" style="margin:0.4rem 0">
+    <figcaption id="decision-tree-diagram-caption" style="font-size:0.6rem; color:var(--text-dim); margin:0 0 0.2rem">The tree drawn, turn 1 on the left. Each box shows its branch's sequence score and closest approach along it, as the branches below list them; the branches below are the same tree in words.</figcaption>
+    <div class="tree-zoom-controls" style="display:flex; flex-wrap:wrap; gap:0.3rem; margin:0 0 0.2rem">
+      <button type="button" class="tree-zoom" data-zoom="in" aria-controls="decision-tree-diagram" hidden>Zoom in</button>
+      <button type="button" class="tree-zoom" data-zoom="out" aria-controls="decision-tree-diagram" hidden>Zoom out</button>
+      <button type="button" class="tree-zoom" data-zoom="reset" aria-controls="decision-tree-diagram" hidden>Reset zoom</button>
+    </div>
+    <div class="tree-diagram-frame" style="overflow:auto; max-height:70vh; max-width:100%; border:1px solid var(--border); border-radius:4px">
+      <svg id="decision-tree-diagram" xmlns="http://www.w3.org/2000/svg" width="{{ "%g" | format(d.width) }}" height="{{ "%g" | format(d.height) }}" viewBox="0 0 {{ "%g" | format(d.width) }} {{ "%g" | format(d.height) }}"
+           role="group" aria-labelledby="decision-tree-diagram-caption" data-width="{{ d.width }}" data-height="{{ d.height }}" data-margin="{{ d.margin }}" data-box-w="{{ d.box_w }}" data-box-h="{{ d.box_h }}" data-col-pitch="{{ d.col_pitch }}" data-row-pitch="{{ d.row_pitch }}" data-scale="1"
+           font-family="monospace" font-size="10" style="display:block">
+        {% for box in d.boxes %}{% if box.edge %}
+        <path class="tree-dedge" data-child="{{ box.key }}" d="{{ box.edge }}" fill="none" style="stroke:var(--text-dim); stroke-width:1"/>
+        {% endif %}{% endfor %}
+        {% for box in d.boxes %}
+        <g class="tree-dbox" data-key="{{ box.key }}" data-parent="{{ box.parent }}" data-mark="{{ box.mark_kind }}" transform="translate({{ "%g" | format(box.x) }} {{ "%g" | format(box.y) }})">
+          <rect width="{{ d.box_w }}" height="{{ d.box_h }}" rx="4" style="fill:var(--panel-bg); stroke:{{ 'var(--ops-blue)' if box.mark_kind == 'plan' else 'var(--border)' }}; stroke-width:{{ 2 if box.mark_kind == 'plan' else 1 }}"{% if box.mark_kind == 'not-permitted' %} stroke-dasharray="4 3"{% endif %}/>
+          {% for line in box.lines %}
+          <text class="tree-d{{ line.kind }}" x="{{ d.pad }}" y="{{ line.y }}"{% if line.kind == 'title' %} font-weight="700"{% endif %}{% if line.kind == 'remainder' or (line.kind == 'mark' and box.mark_kind != 'plan') %} font-style="italic"{% endif %} style="fill:{{ 'var(--text-dim)' if box.mark_kind == 'not-permitted' or line.kind in ('figure', 'remainder') else ('var(--ops-blue)' if line.kind == 'mark' else 'var(--text-primary)') }}">{{ line.text }}</text>
+          {% endfor %}
+          {% if box.toggle %}
+          <g class="tree-dtoggle" display="none" aria-label="{{ box.collapse_label }}" data-collapse-label="{{ box.collapse_label }}" data-expand-label="{{ box.expand_label }}" transform="{{ d.toggle_at }}" style="cursor:pointer">
+            <circle r="7" style="fill:var(--panel-bg); stroke:var(--ops-blue); stroke-width:1.5"/>
+            <path d="M-4 0 H4" style="stroke:var(--ops-blue); stroke-width:1.5"/>
+            <path class="tree-dplus" d="M0 -4 V4" display="none" style="stroke:var(--ops-blue); stroke-width:1.5"/>
+          </g>
+          {% endif %}
+        </g>
+        {% endfor %}
+      </svg>
+    </div>
+  </figure>
+  {% endif %}
+
+  {% if tree.nodes %}
+  <p style="font-size:0.6rem; color:var(--text-dim); margin:0.4rem 0 0.2rem">Open a branch to see its figures, what each rests on, and the branches after it. Lower scores are better.</p>
+  <ul class="tree-nodes" style="list-style:none; margin:0; padding:0">
+    {% for node in tree.nodes recursive %}
+    <li style="margin:0.15rem 0 0.15rem {{ '0' if node.turn == 1 else '0.6rem' }}">
+      <details class="tree-node" data-turn="{{ node.turn }}" data-permitted="{{ 'no' if node.not_permitted else 'yes' }}" data-key="{{ node.key }}" style="border-left:2px {{ 'dashed' if node.not_permitted else 'solid' }} var(--border); padding-left:0.4rem">
+        <summary style="cursor:pointer; font-size:0.62rem; color:{{ 'var(--text-dim)' if node.not_permitted else 'var(--text-primary)' }}">
+          <strong>{{ node.heading }}</strong>{% if node.remainder is defined and node.remainder %} <span class="tree-remainder" style="font-style:italic; color:var(--text-dim)">{{ node.remainder }}</span>{% endif %}{% if node.not_permitted %} <span class="not-permitted" style="font-style:italic; color:var(--text-dim)">{{ node.not_permitted }}</span>{% endif %}{% if node.on_plan %} <span class="tree-plan" style="color:var(--ops-blue); font-weight:700">&#9733; {{ node.plan }}</span>{% endif %}{% if node.continuation is defined and node.continuation %} <span class="tree-continuation" style="font-style:italic; color:var(--ops-blue)">{{ node.continuation }}</span>{% endif %}:
+          <span style="color:var(--text-dim)">{{ node.summary }}</span>
+        </summary>
+        <p class="tree-path" style="font-size:0.6rem; color:var(--text-dim); margin:0.15rem 0">{{ node.path }}</p>
+        <ul class="tree-figures" style="font-size:0.6rem; color:var(--text-dim); margin:0.1rem 0 0.2rem 0.9rem; padding:0">
+          {% for f in node.figures %}
+          <li class="tree-figure" data-basis="{{ f.kind }}">{{ f.label }}: {{ f.value }} <span class="figure-basis" data-basis="{{ f.kind }}">({{ f.kind }})</span></li>
+          {% endfor %}
+        </ul>
+        <details class="tree-bases" style="font-size:0.58rem; color:var(--text-dim); margin:0 0 0.2rem 0.9rem">
+          <summary style="cursor:pointer">What these figures rest on</summary>
+          <ul style="margin:0.1rem 0 0 0.9rem; padding:0">
+            {% for f in node.figures %}<li>{{ f.label }} ({{ f.kind }}): {{ f.note }}</li>{% endfor %}
+          </ul>
+        </details>
+        {% if node.children %}
+        <ul class="tree-children" style="list-style:none; margin:0; padding:0">{{ loop(node.children) }}</ul>
+        {% endif %}
+      </details>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>

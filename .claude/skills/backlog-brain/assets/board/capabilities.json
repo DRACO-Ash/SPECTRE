@@ -1,0 +1,7 @@
+{
+ "assets": {},
+ "comments": {},
+ "db": {"rules": [{"path": "", "read": "view", "write": "owner"}]},
+ "sample": {},
+ "user": {}
+}

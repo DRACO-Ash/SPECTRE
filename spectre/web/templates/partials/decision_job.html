@@ -1,0 +1,24 @@
+{# A sampled Decision Engine evaluation running as a session job (SPC-113), rendered into #decision-results.
+   Context: job (DecisionJob or none), message (its sentence), polling (whether to poll again), progress
+   (SamplingProgress or none) and cancellable, optional: whether Cancel still stops it, which it does not while the
+   decision record is written (SPC-192). Only a job underway polls; the results that replace it do not, so the
+   polling ends there. #}
+<div class="decision-job" aria-live="polite" aria-atomic="true"
+     style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:0.6rem 0.9rem"
+     {% if polling and job is not none %}hx-get="/plan/decision/job?job_id={{ job.job_id | urlencode }}" hx-trigger="every 2s"
+     hx-target="#decision-results" hx-swap="innerHTML"{% endif %}>
+  <p class="decision-job-message" style="font-size:0.65rem; color:var(--text-primary); margin:0">{{ message }}</p>
+  {% if progress is not none %}
+  <label style="display:block; font-size:0.6rem; color:var(--text-dim); margin-top:0.35rem">
+    {% if progress.stage is defined and progress.stage == "sizing" %}Trials flown sizing our burn{% else %}Samples done for this hypothesis{% endif %}
+    <progress max="{{ progress.total }}" value="{{ progress.done }}" style="width:100%">{{ progress.done }} of {{ progress.total }}</progress>
+  </label>
+  {% endif %}
+  {% if (cancellable if cancellable is defined else polling) and job is not none %}
+  <form hx-post="/plan/decision/job/cancel" hx-target="#decision-results" hx-swap="innerHTML"
+        style="margin-top:0.35rem">
+    <input type="hidden" name="job_id" value="{{ job.job_id }}">
+    <button type="submit" class="btn-secondary">Cancel</button>
+  </form>
+  {% endif %}
+</div>

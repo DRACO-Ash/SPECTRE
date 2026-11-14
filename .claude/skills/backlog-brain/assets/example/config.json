@@ -1,0 +1,14 @@
+{
+ "schema": 1,
+ "project": {"name": "Vendor Fishing", "ref_prefix": "VH-"},
+ "releases": {"naming": "V{major}.{minor}", "start": "V2.7", "floor_min": 720, "cap_min": 840, "overhead_min": 375, "pace": 0.33, "gate_savings": true, "fill_to_floor": true},
+ "gates": [
+  {"key": "eng", "label": "engineering-reviewer", "minutes": 25, "triggers": ["src/*", "scripts/*", "test/*"]},
+  {"key": "sec", "label": "security-reviewer", "minutes": 25, "triggers": ["src/*", "public/*"]},
+  {"key": "design", "label": "design-critic", "minutes": 20, "triggers": ["public/*"]}
+ ],
+ "people": [{"id": "owner", "name": "Owner", "hours_per_week": 20}],
+ "agents": {"max_concurrent": 2},
+ "working": {"hours_per_day": 8, "days_per_week": 5},
+ "risk_paths": ["public/app-v3.js"]
+}

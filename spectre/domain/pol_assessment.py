@@ -83,8 +83,10 @@ __all__ = [
 # Constants, each with its source
 # ─────────────────────────────────────────────────────────────────────────────
 
-#: Standard gravity, m/s². Used with Isp to get exhaust velocity.
-_G0_M_S2: float = 9.80665
+#: Standard gravity, m/s², CGPM 1901. Used with Isp to get exhaust velocity, here
+#: and in Threat Understanding's tank walk, which must read spent where this does.
+STANDARD_GRAVITY_M_S2: float = 9.80665
+_G0_M_S2: float = STANDARD_GRAVITY_M_S2
 
 #: Assumed specific impulse by regime, seconds (Table 1).
 #:

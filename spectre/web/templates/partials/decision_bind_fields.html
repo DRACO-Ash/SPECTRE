@@ -1,0 +1,47 @@
+{# Decision Engine: bind the scenario to a held red track and blue asset (SPC-100).
+   Rendered inside the panel and re-fetched into #decision-bind by GET /plan/decision/bind.
+   Context, every name optional: red_tracks, blue_assets (held objects), selected_red,
+   selected_blue (a stk_name still held on its side, else ""), binding_note.
+   It never emits the wrapper's own id, so swapping it in does not re-trigger itself. #}
+{% set reds = red_tracks if red_tracks is defined else [] %}
+{% set blues = blue_assets if blue_assets is defined else [] %}
+{% set chosen_red = selected_red if selected_red is defined else "" %}
+{% set chosen_blue = selected_blue if selected_blue is defined else "" %}
+{% set note = binding_note if binding_note is defined else "" %}
+<fieldset style="border:1px solid var(--border); border-radius:4px; padding:0.35rem 0.5rem; margin:0 0 0.5rem 0">
+  <legend style="font-size:0.65rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+                 letter-spacing:0.05em; padding:0 0.25rem">Bind to real objects (optional)</legend>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem">
+    <div>
+      <label style="font-size:0.65rem; color:var(--gold)">
+        Red track
+        <select name="red_sat" id="dec-red-sat" style="width:100%; font-size:0.65rem; margin-top:0.15rem">
+          <option value=""{% if not chosen_red %} selected{% endif %}>Not bound</option>
+          {% for obj in reds %}
+          <option value="{{ obj.stk_name }}"{% if obj.stk_name == chosen_red %} selected{% endif %}>{{ obj.name }} ({{ obj.stk_name }}) · {{ obj.data_mode }}{% if obj.training %} · training{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% if not reds %}
+      <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.15rem">No red track is held. Add one under Red Tracks to bind it here.</div>
+      {% endif %}
+    </div>
+    <div>
+      <label style="font-size:0.65rem; color:var(--ops-blue)">
+        Blue asset
+        <select name="blue_sat" id="dec-blue-sat" style="width:100%; font-size:0.65rem; margin-top:0.15rem">
+          <option value=""{% if not chosen_blue %} selected{% endif %}>Not bound</option>
+          {% for obj in blues %}
+          <option value="{{ obj.stk_name }}"{% if obj.stk_name == chosen_blue %} selected{% endif %}>{{ obj.name }} ({{ obj.stk_name }}) · {{ obj.data_mode }}{% if obj.training %} · training{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% if not blues %}
+      <div style="font-size:0.6rem; color:var(--text-dim); margin-top:0.15rem">No blue asset is held. Add one under Blue Assets to bind it here.</div>
+      {% endif %}
+    </div>
+  </div>
+  {% if note %}
+  <p role="note" style="font-size:0.6rem; color:var(--text-dim); margin:0.3rem 0 0 0">{{ note }}</p>
+  {% endif %}
+</fieldset>

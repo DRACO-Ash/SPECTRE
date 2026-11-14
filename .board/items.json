@@ -1,0 +1,2736 @@
+[
+ {
+  "ref": "SPC-001",
+  "priority": "high",
+  "order": 1,
+  "group": "warning",
+  "minutes": 240,
+  "task": "Fetch element-set history for each sweep target so capability evidence has an input",
+  "note": "Feeds operator outputs 1 and 2 (ranking 2026-10-28). Capability evidence is the assessed record alone because the sweep fetches no history. Source: docs/BUILD-STATE-AND-ROADMAP.md Phase 1 item 3.",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "spectre/web/elsets.py",
+   "spectre/web/routes/udl.py"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.7.0",
+  "actualNote": "not measured: built interleaved with the other V0.7 items in one agent session, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-002",
+  "priority": "high",
+  "order": 5,
+  "group": "warning",
+  "minutes": 240,
+  "deps": [
+   "SPC-001"
+  ],
+  "task": "Feed propellant budget, anomaly score and observed manoeuvre count into the composite verdict",
+  "note": "Supports output 2: an arrival only counts as credible if the object can fly it. spectre/domain/threat_assessment.py reports propellant, anomaly and manoeuvre count as unavailable today.",
+  "files": [
+   "spectre/domain/threat_assessment.py",
+   "spectre/web/routes/threat.py",
+   "spectre/web/templates/partials/threat_sweep.html"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.8.0",
+  "actualNote": "not measured: built interleaved with the other V0.8 items in one agent session, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-003",
+  "priority": "high",
+  "order": 4,
+  "group": "warning",
+  "minutes": 180,
+  "deps": [
+   "SPC-009"
+  ],
+  "task": "Show the is-this-normal verdict on the sweep in place of the solver-name intent label",
+  "note": "Red-team finding 4. intent_label_for in spectre/web/burn_view.py maps method to prose; SPC-009 supplies the verdict.",
+  "files": [
+   "spectre/web/burn_view.py",
+   "spectre/web/routes/threat.py",
+   "spectre/astro/pattern_of_life.py"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.8.0",
+  "actualNote": "not measured: built interleaved with the other V0.8 items in one agent session, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-004",
+  "priority": "med",
+  "order": 20,
+  "group": "warning",
+  "minutes": 120,
+  "task": "Name the phase angle on the sweep and qualify apsis labels in near-circular regimes",
+  "note": "Red-team finding 3 and ask 3 (docs/RED-TEAM-THREAT-SWEEP.md). Not on the sweep template today.",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "spectre/web/templates/partials/threat_sweep.html",
+   "spectre/web/templates/partials/threat_sweep_row.html"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.8.0",
+  "actualNote": "not measured: built interleaved with the other V0.8 items in one agent session, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-005",
+  "priority": "med",
+  "order": 21,
+  "group": "warning",
+  "minutes": 180,
+  "task": "Report sweep delta-V with a band derived from element-set age",
+  "note": "Red-team finding 6. Element-set age and the STALE flag landed in 0.6.3, so the input exists.",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "spectre/web/templates/partials/threat_sweep_row.html",
+   "spectre/web/format_units.py"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.10.0",
+  "actualNote": "not measured: built alongside the other V0.10 items, partly by parallel agents"
+ },
+ {
+  "ref": "SPC-006",
+  "priority": "high",
+  "order": 6,
+  "group": "trigger",
+  "minutes": 360,
+  "deps": [
+   "SPC-002",
+   "SPC-018"
+  ],
+  "task": "Manoeuvre trigger: re-run the sweep for an object when a manoeuvre is detected",
+  "note": "Operator ranking 2026-10-28, output 2 of 4 (joint second). Re-runs the sweep for an object when a manoeuvre is detected: UDL manoeuvre endpoint, NOTSO arrival or own element-set differencing.",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "spectre/astro/notso.py",
+   "spectre/astro/pattern_of_life.py",
+   "spectre/web/planning_state.py"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.9.0",
+  "actualNote": "not measured: built alongside the other V0.9 items, partly by parallel agents, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-007",
+  "priority": "high",
+  "order": 7,
+  "group": "trigger",
+  "minutes": 300,
+  "deps": [
+   "SPC-006"
+  ],
+  "task": "Show the differential after a burn: warning time before and after, and assets newly in reach",
+  "note": "Operator ranking 2026-10-28, output 2. The differential, not the state: warning time before and after the burn, and assets newly in reach, with the is-this-normal verdict beside it.",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "spectre/web/templates/partials/threat_sweep.html"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.9.0",
+  "actualNote": "not measured: built alongside the other V0.9 items, partly by parallel agents, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-008",
+  "priority": "high",
+  "order": 8,
+  "group": "warning",
+  "minutes": 240,
+  "task": "Decision clock: a decide-by time on every assessment from fastest credible approach minus response latency",
+  "note": "Operator ranking 2026-10-28, output 3 (joint second). Decide-by is the fastest credible arrival minus our response latency. Response latency per blue asset is an operator setting; the default needs a ruling before release.",
+  "files": [
+   "spectre/domain/threat_assessment.py",
+   "spectre/web/routes/threat.py",
+   "spectre/web/templates/partials/threat_sweep.html"
+  ],
+  "deps": [
+   "SPC-007"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.10.0",
+  "actualNote": "not measured: built alongside the other V0.10 items, partly by parallel agents"
+ },
+ {
+  "ref": "SPC-010",
+  "priority": "low",
+  "order": 16,
+  "group": "coverage",
+  "minutes": 240,
+  "track": "tooling",
+  "task": "Lift test coverage on the threat route",
+  "note": "Measured 85.0% on 2026-10-28 (the roadmap's 29% is stale). Target the uncovered refusal and fallback branches only.",
+  "files": [
+   "tests/integration/test_threat_sweep_routes.py",
+   "tests/integration/test_threat_screen_route.py"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.24.1",
+  "actualNote": "not measured: built by workflow agents (build, mutation review, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-011",
+  "priority": "high",
+  "order": 11,
+  "group": "coverage",
+  "minutes": 240,
+  "track": "tooling",
+  "task": "UDL route integration tests with mocked httpx: login, TLE, state vector, NOTSO",
+  "note": "Old TODO P2-D. Measured 66.5% on 2026-10-28, second lowest module. The live data path. Built: 85.5 to 99.8 per cent; found a refused state vector fetch giving no advice or log detail.",
+  "files": [
+   "tests/integration/test_udl_routes.py"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.23.0",
+  "actualNote": "not measured: built by workflow agents (build, mutation review, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-012",
+  "priority": "high",
+  "order": 12,
+  "group": "coverage",
+  "minutes": 240,
+  "track": "tooling",
+  "task": "Lift test coverage on the pattern-of-life route",
+  "note": "Measured 59.9% on 2026-10-28, the lowest module in spectre/. Built: 69.7 to 100 per cent; found the Pattern of Life chart returning a 500 whenever an analysis was loaded.",
+  "files": [
+   "tests/integration/test_pol_routes.py"
+  ],
+  "distinctFrom": "SPC-010",
+  "state": "built",
+  "est": 240,
+  "version": "0.23.0",
+  "actualNote": "not measured: built by workflow agents (build, mutation review, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-013",
+  "priority": "med",
+  "order": 13,
+  "group": "coverage",
+  "minutes": 180,
+  "track": "tooling",
+  "task": "Property-based tests for Lambert, propagator and manoeuvre invariants",
+  "note": "Old SEC-05. hypothesis is locked but used in one test file only.",
+  "files": [
+   "tests/unit/test_astro_properties.py"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.24.1",
+  "actualNote": "not measured: built by workflow agents (build, mutation review, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-014",
+  "priority": "high",
+  "order": 9,
+  "group": "coverage",
+  "minutes": 30,
+  "track": "tooling",
+  "task": "Raise the coverage ratchet from 74 to 90",
+  "note": "Measured 92.05% total on 2026-10-28 against fail_under 74: the floor no longer guards anything. 90 leaves headroom for SQLite and PostgreSQL differences.",
+  "files": [
+   "pyproject.toml"
+  ],
+  "state": "built",
+  "est": 30,
+  "version": "0.23.0",
+  "actualNote": "not measured: built by workflow agents (build, mutation review, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-020",
+  "priority": "high",
+  "order": 2,
+  "group": "identity",
+  "minutes": 180,
+  "task": "Match usernames case-insensitively at login, creation and lookup, with a collision check on migration",
+  "note": "RETROSPECTIVE.md. auth.py, login.py and database.py compare User.username with ==.",
+  "files": [
+   "spectre/web/auth.py",
+   "spectre/web/routes/login.py",
+   "spectre/web/routes/admin.py",
+   "spectre/web/database.py"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.7.0",
+  "actualNote": "not measured: built interleaved with the other V0.7 items in one agent session, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-030",
+  "priority": "med",
+  "order": 30,
+  "group": "udl",
+  "minutes": 180,
+  "task": "Per-panel UDL datatype override (REAL, SIMULATED, EXERCISE, TEST)",
+  "note": "Old TODO P1-B. A session-level data mode exists; this adds the per-request choice.",
+  "files": [
+   "spectre/web/routes/udl.py",
+   "spectre/web/templates/partials/data_mode_status.html"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.10.0",
+  "actualNote": "not measured: built alongside the other V0.10 items, partly by parallel agents"
+ },
+ {
+  "ref": "SPC-031",
+  "priority": "low",
+  "order": 31,
+  "group": "udl",
+  "minutes": 300,
+  "task": "UDL conjunction lookup (observation endpoints split to SPC-032)",
+  "note": "Old TODO P2-B, docs/phased_plan.md Phase 3.2. Built in 0.11.0 as a probe: GET /udl/conjunction, with the UDL path and field names inferred from UDL's published API and not checked against live UDL (SPC-033).",
+  "files": [
+   "spectre/web/routes/udl.py",
+   "spectre/web/udl_conjunction.py"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.11.0",
+  "actualNote": "not measured: built by workflow agents interleaved with other V0.11 work and across a container restart, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-060",
+  "priority": "low",
+  "order": 60,
+  "group": "quality",
+  "minutes": 90,
+  "task": "Give udl.py fetch_tle headroom: it sits at the complexity limit of 15, so the next branch added puts it over",
+  "note": "Measured 15 on 2026-11-03, not the 67 docs/CODE-QUALITY-GATE.md recorded before 0.5.24. Not over the limit; low urgency. Re-measure after SPC-019 and SPC-030 land, which edit udl.py.",
+  "files": [
+   "spectre/web/routes/udl.py"
+  ],
+  "state": "built",
+  "est": 90,
+  "version": "0.10.0",
+  "actualNote": "not measured: built alongside the other V0.10 items, partly by parallel agents"
+ },
+ {
+  "ref": "SPC-061",
+  "priority": "low",
+  "order": 61,
+  "group": "quality",
+  "minutes": 240,
+  "task": "Reduce complexity in maneuver.py _run_intercept (38) and apply_all_intercepts (27)",
+  "files": [
+   "spectre/web/routes/maneuver.py"
+  ],
+  "state": "closed",
+  "supersededBy": "Already done by e3f207f (release 0.5.24): measured on 2026-11-03, _run_intercept scores 2 and apply_all_intercepts 10, both under 15. The 38 and 27 were seeded from the history table in docs/CODE-QUALITY-GATE.md, not measured."
+ },
+ {
+  "ref": "SPC-070",
+  "priority": "med",
+  "order": 70,
+  "group": "assurance",
+  "minutes": 180,
+  "track": "tooling",
+  "task": "Run the test suite against PostgreSQL in CI as well as SQLite",
+  "note": "audit/GAPS.md section 2: the asyncpg path, sslmode and pool recycling are reviewed in code only.",
+  "files": [
+   ".github/workflows/ci.yml",
+   "tests/conftest.py"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.24.2",
+  "actualNote": "not measured: built by workflow agents across two container restarts, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-071",
+  "priority": "med",
+  "order": 71,
+  "group": "assurance",
+  "minutes": 240,
+  "track": "tooling",
+  "task": "Full mutation run on spectre/astro and the web security core",
+  "note": "audit/GAPS.md section 3: the audit sample was 22 mutants across 5 modules. Built in 0.24.2 for the security core with solo-verified kills; the astro run was not re-verified with the solo check (docs/MUTATION-REPORT.md says so).",
+  "files": [
+   "scripts/mutation-run.py"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.24.2",
+  "actualNote": "not measured: built by workflow agents across two container restarts, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-072",
+  "priority": "low",
+  "order": 72,
+  "group": "assurance",
+  "minutes": 120,
+  "kind": "research",
+  "task": "Settle the four unproven audit candidates (F-S07-04, F-S07-09, F-S04-14, F-S09-23)",
+  "note": "Named settling checks in audit/REFUTATION.md appendix. F-S07-09 may be overtaken by the 0.6.3 newest-elset fix: check first."
+ },
+ {
+  "ref": "SPC-073",
+  "priority": "low",
+  "order": 73,
+  "group": "assurance",
+  "minutes": 240,
+  "track": "tooling",
+  "task": "Concurrency and load test of the planning-state store and the executor",
+  "note": "audit/GAPS.md section 2: thread-safety findings rest on code reading.",
+  "files": [
+   "tests/load/test_concurrency.py"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.24.2",
+  "actualNote": "not measured: built by workflow agents across two container restarts, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-074",
+  "priority": "low",
+  "order": 74,
+  "group": "assurance",
+  "minutes": 120,
+  "track": "tooling",
+  "task": "Committed red cases for the template and contract guards",
+  "note": "IMPROVEMENT-PLAN.md item 2 as it applies inside SPECTRE; RETROSPECTIVE.md lists the guards with no committed failing case.",
+  "files": [
+   "tests/unit/test_deployment_contract.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.24.1",
+  "actualNote": "not measured: built by workflow agents (build, mutation review, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-080",
+  "priority": "med",
+  "order": 80,
+  "group": "phase3",
+  "minutes": 0,
+  "needs_owner": true,
+  "human_minutes": 240,
+  "task": "One afternoon with a practising analyst to rank the Phase 3 capabilities",
+  "note": "Deferred by the owner on 2026-10-28. An operator has since confirmed the core question and ranked the outputs (see .board/README.md), so this session is now only about the Phase 3 capability items. Owner ruling 2026-11-05: the owner arranges the session; Claude prepares the agenda (docs/analyst-session-agenda.md)."
+ },
+ {
+  "ref": "SPC-081",
+  "priority": "low",
+  "order": 81,
+  "group": "phase3",
+  "minutes": 600,
+  "kind": "research",
+  "deps": [
+   "SPC-080"
+  ],
+  "task": "Reachability as a field: keep a warm per-object reachable set across the catalogue"
+ },
+ {
+  "ref": "SPC-082",
+  "priority": "low",
+  "order": 82,
+  "group": "phase3",
+  "minutes": 480,
+  "kind": "research",
+  "deps": [
+   "SPC-080"
+  ],
+  "task": "Behavioural fingerprinting across the GEO belt",
+  "note": "Population baseline for output 1: anomaly is easier to see against a population than one history. The strongest candidate to promote once SPC-080 is held."
+ },
+ {
+  "ref": "SPC-083",
+  "priority": "low",
+  "order": 83,
+  "group": "phase3",
+  "minutes": 480,
+  "kind": "research",
+  "deps": [
+   "SPC-080"
+  ],
+  "task": "Intent from an approach sequence across drift phases, not a single burn"
+ },
+ {
+  "ref": "SPC-084",
+  "priority": "low",
+  "order": 84,
+  "group": "phase3",
+  "minutes": 480,
+  "kind": "research",
+  "deps": [
+   "SPC-080"
+  ],
+  "task": "Counterfactual planning: blue options, costs and decide-by times against a detected threat"
+ },
+ {
+  "ref": "SPC-085",
+  "priority": "low",
+  "order": 85,
+  "group": "phase3",
+  "minutes": 360,
+  "kind": "research",
+  "deps": [
+   "SPC-080"
+  ],
+  "task": "Propellant-bounded threat horizons: can this object ever reach my asset again"
+ },
+ {
+  "ref": "SPC-100",
+  "priority": "high",
+  "order": 100,
+  "group": "decision",
+  "minutes": 240,
+  "task": "Decision Engine foundation: bind a scenario to a real red track and blue asset",
+  "note": "Owner ruling 2026-10-28: invest in every phase. Operator ranks recommended response 4th of 4, so the engine follows the outputs 1 to 3 work. Scenarios carry no orbit today; this takes the element sets, epochs and data mode from the session. Design estimate rose to 270 minutes on review (scratchpad design, wf_2415740b-d94).",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/routes/decision.py",
+   "spectre/web/templates/partials/decision_panel.html"
+  ],
+  "state": "built",
+  "est": 270,
+  "version": "0.11.0",
+  "actualNote": "not measured: built by workflow agents interleaved with other V0.11 work and across a container restart, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-101",
+  "priority": "high",
+  "order": 101,
+  "group": "decision",
+  "minutes": 180,
+  "task": "Decision Engine: every outcome figure carries its own basis (lookup, computed or sampled)",
+  "note": "Must land before the first computed figure is shown. The audit's modelled-estimate rule (F-034) is per result today; mixed results need it per field, on the banner and in each cell.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/templates/partials/decision_results.html",
+   "spectre/domain/provenance.py"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.9.0",
+  "actualNote": "not measured: built alongside the other V0.9 items, partly by parallel agents, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-102",
+  "priority": "high",
+  "order": 102,
+  "group": "decision",
+  "minutes": 240,
+  "task": "Decision Engine reference cases: hand-checked scenarios with independent closest approach and TCA",
+  "note": "The gate every later phase must pass, as the orbital audit did: co-planar LEO, GEO drift-in, a plane change. Values from an independent integration, never from the code under test. Pulled forward from V0.12 into 0.11.0: it had no dependency and SPC-110 waits on it.",
+  "files": [
+   "tests/unit/test_decision_reference_cases.py"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.11.0",
+  "actualNote": "not measured: built by workflow agents interleaved with other V0.11 work and across a container restart, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-110",
+  "priority": "high",
+  "order": 110,
+  "group": "decision",
+  "minutes": 360,
+  "task": "Phase 2: separation series from the Monte Carlo engine against a blue trajectory",
+  "note": "monte_carlo.py returns element statistics at the horizon, not trajectories, so closest approach cannot come from it yet. Adds per-sample minimum separation and its time, P5, P50 and P95, and the existing convergence check.",
+  "deps": [
+   "SPC-100",
+   "SPC-102"
+  ],
+  "files": [
+   "spectre/astro/monte_carlo.py"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.13.0",
+  "actualNote": "not measured: built by workflow agents (design, build, review, fix) alongside SPC-029, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-111",
+  "priority": "high",
+  "order": 111,
+  "group": "decision",
+  "minutes": 180,
+  "task": "Phase 2: attach a manoeuvre hypothesis to an adversary action",
+  "note": "From an archetype (MANOEUVRE_ARCHETYPES), entered delta-V and RIC direction, or a detected manoeuvre via hypothesis_from_tle_record. Direction basis and archetype travel with it (audit F-104).",
+  "deps": [
+   "SPC-100"
+  ],
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/astro/monte_carlo.py"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.12.0",
+  "actualNote": "not measured: built by a workflow agent alongside the other V0.12 items, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-112",
+  "priority": "high",
+  "order": 112,
+  "group": "decision",
+  "minutes": 240,
+  "task": "Phase 2: score outcomes on the sampled closest-approach distribution",
+  "note": "Score on P5 separation, the smallest miss distance. The April spec says P95 and calls it conservative; for separation that is the optimistic tail. Adds ca_percentiles and ca_std_km to OutcomeMetrics.",
+  "deps": [
+   "SPC-101",
+   "SPC-110",
+   "SPC-111"
+  ],
+  "files": [
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.13.0",
+  "actualNote": "not measured: built by workflow agents (design, build, review, fix) alongside SPC-029, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-113",
+  "priority": "high",
+  "order": 113,
+  "group": "decision",
+  "minutes": 180,
+  "task": "Phase 2: evaluate off the request thread with a time budget and named refusals",
+  "note": "Up to 25 cells of 500 samples each. Adversary samples are propagated once per action and blue once per response, then paired. A cell that fails says why, as the sweep does: no silent excepts. Since 0.13.0 the route already runs the evaluation on a worker thread, so other sessions are not stalled; what remains is the time budget, per-cell refusals and pairing propagations. Built in 0.14.0 with a 120 s budget and a 6,000 sample-hour cap from measured rates (Claude's call; a 300 s budget, cap 15,000, is the owner's to choose). Blue is one trajectory per scenario because our response is not applied to its orbit, so no per-response pairing was built.",
+  "deps": [
+   "SPC-112"
+  ],
+  "files": [
+   "spectre/web/routes/decision.py",
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.14.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-034, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-114",
+  "priority": "high",
+  "order": 114,
+  "group": "decision",
+  "minutes": 240,
+  "task": "Phase 2 panel: hypothesis section per adversary row",
+  "note": "Archetype, delta-V, RIC direction, sigma and samples (100 to 2000, default 500), range-checked inline as F-164 does for the existing fields.",
+  "deps": [
+   "SPC-111"
+  ],
+  "files": [
+   "spectre/web/templates/partials/decision_panel.html",
+   "spectre/web/routes/decision.py"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.14.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-034, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-115",
+  "priority": "high",
+  "order": 115,
+  "group": "decision",
+  "minutes": 240,
+  "task": "Phase 2 results: P5 to P95 bands in each cell and an uncertainty column",
+  "note": "Hover shows the full distribution; the ranking gains the spread of the composite score across samples.",
+  "deps": [
+   "SPC-112"
+  ],
+  "files": [
+   "spectre/web/templates/partials/decision_results.html"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.14.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-034, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-120",
+  "priority": "high",
+  "order": 120,
+  "group": "decision",
+  "minutes": 300,
+  "task": "Phase 3: SGP4-propagated closest approach and TCA for each outcome",
+  "note": "Propagate both objects over the horizon and refine each minimum as the access search does (F-115). Replaces the per-type lookup distance whenever a scenario is bound. Built in 0.15.0 for rows whose action does not move red; a manoeuvre row with no hypothesis stays a lookup, since its no-burn miss would understate the threat (Claude's call).",
+  "deps": [
+   "SPC-100",
+   "SPC-102"
+  ],
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/astro/propagator.py"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.15.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-035, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-121",
+  "priority": "high",
+  "order": 121,
+  "group": "decision",
+  "minutes": 360,
+  "task": "Phase 3: friendly manoeuvre responses computed from the manoeuvre library",
+  "note": "Response delta-V is cost times 0.05 km/s today. Size the burn to a target separation, propagate the blue asset after it and score what it buys. Built in 0.16.0. Once any response burns, every computed figure in that result is on RK45 for both objects; computed means one deterministic propagation on one named propagator (Claude's call, not a ruling).",
+  "deps": [
+   "SPC-120"
+  ],
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/astro/maneuvers.py"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.16.0",
+  "actualNote": "not measured: built by workflow agents (design, builds, reviews, fixes) interleaved with other 0.16.0 work and a usage-limit pause, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-123",
+  "priority": "high",
+  "order": 123,
+  "group": "decision",
+  "minutes": 300,
+  "task": "Phase 3: custody in outcomes from the operator's definition",
+  "note": "Custody is lost while information is not timely and actionable enough to judge normality and warning time (operator, 2026-10-28). Uses SPC-018's status; replaces the rule of thumb in compute_outcome_metrics. Built in 0.15.0. Degraded custody scores as lost (Claude's call by the operator's definition, not a ruling): offline, every bound evaluation reads custody lost. Reversible in custody_over_horizon.",
+  "deps": [
+   "SPC-018",
+   "SPC-120"
+  ],
+  "files": [
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.15.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-035, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-124",
+  "priority": "med",
+  "order": 124,
+  "group": "decision",
+  "minutes": 300,
+  "task": "Phase 3 results: TCA per cell, Show trajectory, TCA histogram",
+  "note": "Show trajectory opens the Hill-frame view through the existing geometry route; the histogram uses the vendored Chart.js.",
+  "deps": [
+   "SPC-120",
+   "SPC-115"
+  ],
+  "files": [
+   "spectre/web/templates/partials/decision_results.html",
+   "spectre/web/routes/geometry.py"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.16.0",
+  "actualNote": "not measured: built by workflow agents (design, builds, reviews, fixes) interleaved with other 0.16.0 work and a usage-limit pause, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-125",
+  "priority": "med",
+  "order": 125,
+  "group": "decision",
+  "minutes": 120,
+  "task": "Phase 3: retire lookup constants wherever a computed figure exists",
+  "note": "Constants stay only for unbound scenarios, labelled as lookups, so no consumer can mistake one for the other.",
+  "deps": [
+   "SPC-121",
+   "SPC-123"
+  ],
+  "files": [
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.19.0",
+  "actualNote": "not measured: built by workflow agents across a container restart, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-130",
+  "priority": "med",
+  "order": 130,
+  "group": "decision",
+  "minutes": 240,
+  "task": "Phase 5: seed adversary probability and confidence from NOTSO history",
+  "note": "Map NOTSO types to action types and use OperatorBehaviourProfile, with the sample size shown and a floor below which no prior is offered. Sub-threshold routine burns carry no NOTSO, so the prior must not read their absence as inactivity.",
+  "deps": [
+   "SPC-100"
+  ],
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/astro/notso.py"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.21.0",
+  "actualNote": "not measured: built by workflow agents across a container restart, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-131",
+  "priority": "med",
+  "order": 131,
+  "group": "decision",
+  "minutes": 240,
+  "task": "Phase 5 panel: Load from NOTSO per adversary row, and a NOTSO timeline in the results",
+  "note": "",
+  "deps": [
+   "SPC-130"
+  ],
+  "files": [
+   "spectre/web/templates/partials/decision_panel.html",
+   "spectre/web/templates/partials/decision_results.html",
+   "spectre/web/routes/decision.py"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.22.0",
+  "actualNote": "not measured: built by workflow agents (build, review, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-132",
+  "priority": "med",
+  "order": 132,
+  "group": "decision",
+  "minutes": 180,
+  "task": "Phase 5: an interval on each NOTSO-derived probability, carried into the expected-value pick",
+  "note": "Shows whether the recommendation changes across the interval, not just at its centre.",
+  "deps": [
+   "SPC-130"
+  ],
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/templates/partials/decision_results.html"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.22.0",
+  "actualNote": "not measured: built by workflow agents (build, review, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-140",
+  "priority": "med",
+  "order": 140,
+  "group": "decision",
+  "minutes": 480,
+  "task": "Phase 4: multi-turn game tree, 1 to 3 turns",
+  "note": "GameNode and recursive evaluation. Turn 2 starts from the propagated states turn 1 left, so it needs computed responses and custody first. Branch count capped and inside the time budget. Built in 0.23.0; the choices are numbered D1 to D15 (from 0.24.0) and recorded in docs/decision_engine_phases.md for the owner.",
+  "deps": [
+   "SPC-121",
+   "SPC-123",
+   "SPC-113"
+  ],
+  "files": [
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 480,
+  "version": "0.23.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-141",
+  "priority": "med",
+  "order": 141,
+  "group": "decision",
+  "minutes": 360,
+  "task": "Phase 4: selectors over the tree, with a Bayesian update after turn 1",
+  "note": "Recursive minimax, expected value and minimin. The update needs a stated likelihood model; NOTSO priors feed it where they exist.",
+  "deps": [
+   "SPC-140",
+   "SPC-130"
+  ],
+  "files": [
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.23.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-142",
+  "priority": "med",
+  "order": 142,
+  "group": "decision",
+  "minutes": 300,
+  "task": "Phase 4 view: turn-depth selector, collapsible tree and per-turn recommendation",
+  "note": "Server-rendered with details and summary, not D3: D3 is not vendored here, and adding it means a new third-party library to track and scan.",
+  "deps": [
+   "SPC-141"
+  ],
+  "files": [
+   "spectre/web/templates/partials/decision_panel.html",
+   "spectre/web/templates/partials/decision_results.html",
+   "spectre/web/routes/decision.py"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.24.0",
+  "actualNote": "not measured: built by workflow agents (build, two reviews, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-150",
+  "priority": "high",
+  "order": 150,
+  "group": "decision",
+  "minutes": 180,
+  "task": "Open a decision scenario from a threat-sweep entry",
+  "note": "Pre-fills red, blue and the hypothesis from the worst course of action, so the sweep's answer becomes a decision. Uses the element-set history from SPC-001 for a detected-manoeuvre hypothesis.",
+  "deps": [
+   "SPC-100",
+   "SPC-111",
+   "SPC-001"
+  ],
+  "files": [
+   "spectre/web/routes/threat.py",
+   "spectre/web/routes/decision.py",
+   "spectre/web/templates/partials/threat_sweep.html"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.20.0",
+  "actualNote": "not measured: built by workflow agents, with one fix pass that stopped early and was rerun, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-151",
+  "priority": "med",
+  "order": 151,
+  "group": "decision",
+  "minutes": 240,
+  "task": "Source and cite the default composite weights",
+  "note": "Audit F-S05-02: the weights are uncited. Needs an analyst's view, so it waits with the Phase 3 capability session.",
+  "deps": [
+   "SPC-080"
+  ],
+  "kind": "research"
+ },
+ {
+  "ref": "SPC-152",
+  "priority": "med",
+  "order": 152,
+  "group": "decision",
+  "minutes": 120,
+  "task": "Rewrite the Decision Engine section of the operator guide and phase document as each phase ships",
+  "note": "docs/decision_engine_phases.md and docs/generate_guide.py.",
+  "deps": [
+   "SPC-115"
+  ],
+  "files": [
+   "docs/decision_engine_phases.md",
+   "docs/generate_guide.py"
+  ],
+  "track": "tooling",
+  "state": "built",
+  "est": 120,
+  "version": "0.24.0",
+  "actualNote": "not measured: built by workflow agents (build, two reviews, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-009",
+  "priority": "high",
+  "order": 2,
+  "group": "normal",
+  "minutes": 300,
+  "deps": [
+   "SPC-001"
+  ],
+  "task": "Is this normal: judge each detected burn against the object's own history and say so in one sentence",
+  "note": "Operator ranking 2026-10-28, output 1 of 4. Pattern of life already classifies a burn against per-regime budgets and scores the object; this adds the comparison with its own past burns (size, kind, direction, cadence), e.g. routine for this object, or unlike anything in its last 200 days, with the history length it rests on.",
+  "files": [
+   "spectre/astro/pattern_of_life.py",
+   "spectre/domain/pol_assessment.py",
+   "spectre/web/templates/partials/pol_manoeuvre_detail.html"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.7.0",
+  "actualNote": "not measured: built interleaved with the other V0.7 items in one agent session, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-018",
+  "priority": "high",
+  "order": 3,
+  "group": "custody",
+  "minutes": 240,
+  "deps": [
+   "SPC-001"
+  ],
+  "task": "Custody status per red object: is our information timely and actionable enough to judge normality and warning time",
+  "note": "Operator definition 2026-10-28: custody is having timely and actionable information to determine outputs 1 and 2. Built from element-set age (the 0.6.3 STALE limits), measured cadence, history length and the detection floor. Held, degraded or lost, with the reason, shown on the sweep and pattern of life.",
+  "files": [
+   "spectre/web/elsets.py",
+   "spectre/web/routes/threat.py",
+   "spectre/web/templates/partials/threat_sweep.html",
+   "spectre/astro/pattern_of_life.py"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.8.0",
+  "actualNote": "not measured: built interleaved with the other V0.8 items in one agent session, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-019",
+  "priority": "med",
+  "order": 19,
+  "group": "hygiene",
+  "minutes": 90,
+  "task": "UDL routes put exception text into the browser at six sites",
+  "note": "Found by the V0.9 design review. udl.py returns f-strings carrying {exc} at the UDL login, TLE, state vector, catalogue, NOTSO page fetch and NOTSO sync error paths. The fix CodeQL drove for pol.py applies: a fixed sentence to the browser, the detail through log_safe to the log.",
+  "files": [
+   "spectre/web/routes/udl.py"
+  ],
+  "state": "built",
+  "est": 90,
+  "version": "0.10.0",
+  "actualNote": "not measured: built alongside the other V0.10 items, partly by parallel agents"
+ },
+ {
+  "ref": "SPC-022",
+  "priority": "low",
+  "order": 22,
+  "group": "hygiene",
+  "minutes": 120,
+  "task": "Response time per blue asset, not one per sign-in",
+  "note": "Decide-by uses one response time per sign-in (0.10.0); the item asked for one per asset.",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "spectre/web/planning_state.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.12.0",
+  "actualNote": "not measured: built by a workflow agent alongside the other V0.12 items, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-023",
+  "priority": "med",
+  "order": 23,
+  "group": "hygiene",
+  "minutes": 60,
+  "task": "Pattern of Life routes put exception text into the page",
+  "note": "Found by the V0.10 UDL build: pol.py error paths (about lines 489, 507, 538 at 0.10.0). The fix used for udl.py applies.",
+  "files": [
+   "spectre/web/routes/pol.py"
+  ],
+  "state": "built",
+  "est": 60,
+  "version": "0.11.0",
+  "actualNote": "not measured: built by workflow agents interleaved with other V0.11 work and across a container restart, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-024",
+  "priority": "med",
+  "order": 24,
+  "group": "hygiene",
+  "minutes": 45,
+  "task": "Setting the session data mode silently treats an unknown value as REAL",
+  "note": "Found by the V0.10 UDL build: POST /udl/data-mode. Refuse it as the per-fetch override does.",
+  "files": [
+   "spectre/web/routes/udl.py"
+  ],
+  "state": "built",
+  "est": 45,
+  "version": "0.11.0",
+  "actualNote": "not measured: built by workflow agents interleaved with other V0.11 work and across a container restart, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-025",
+  "priority": "low",
+  "order": 25,
+  "group": "hygiene",
+  "minutes": 45,
+  "task": "The intercept panel's data mode field is not checked against the four modes",
+  "note": "Found by the V0.10 UDL build.",
+  "files": [
+   "spectre/web/routes/maneuver.py"
+  ],
+  "state": "built",
+  "est": 45,
+  "version": "0.11.0",
+  "actualNote": "not measured: built by workflow agents interleaved with other V0.11 work and across a container restart, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-026",
+  "priority": "med",
+  "order": 26,
+  "group": "hygiene",
+  "minutes": 60,
+  "task": "Read Alpha-5 catalogue numbers in satno_from_tle",
+  "note": "Found by the SPC-100 review: a held set numbered A0001 reads 'SATNO unreadable', and two element sets for one Alpha-5 object are not caught as the same object by the binder. Alpha-5 covers catalogue numbers from 100,000.",
+  "files": [
+   "spectre/data/intel.py",
+   "spectre/web/decision_binding.py"
+  ],
+  "state": "built",
+  "est": 60,
+  "version": "0.12.0",
+  "actualNote": "not measured: built by a workflow agent alongside the other V0.12 items, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-027",
+  "priority": "low",
+  "order": 27,
+  "group": "hygiene",
+  "minutes": 30,
+  "task": "Define the --ops-gold colour token or replace its 22 uses",
+  "note": "Found by the SPC-100 review: no stylesheet under spectre/web/static defines --ops-gold, so every use falls back to the inherited colour. Pick an existing caution token or define it in style.css.",
+  "files": [
+   "spectre/web/static/style.css"
+  ],
+  "state": "built",
+  "est": 30,
+  "version": "0.12.0",
+  "actualNote": "not measured: built by a workflow agent alongside the other V0.12 items, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-028",
+  "priority": "high",
+  "order": 28,
+  "group": "warning",
+  "minutes": 120,
+  "task": "V0.9 review leftovers: custody-lost watch half, band map pin, undated burn times, credentials on sign-out",
+  "note": "Left by the 0.11.0 fix groups as outside their scope. (1) Finding 13, watch half: _watch_after_sweep treats a burn as already told when custody was lost. (2) Finding 29: pin the band map in threat_sweep.html. (3) burn_watch._record and threat._change_notes give an undated burn a single time it has not earned; the sweep says 'between X and Y'. (4) Finding 6: clear_account_state does not blank the stored UDL credentials, so a check in flight at sign-out can still use them.",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "spectre/web/burn_watch.py",
+   "spectre/web/planning_state.py",
+   "spectre/web/templates/partials/threat_sweep.html"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.12.0",
+  "actualNote": "not measured: built by a workflow agent alongside the other V0.12 items, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-032",
+  "priority": "low",
+  "order": 32,
+  "group": "udl",
+  "minutes": 240,
+  "task": "UDL observation endpoints (EO, radar, RF)",
+  "note": "Split from SPC-031 in 0.11.0: three separate UDL services, each needing its own contract check. Deferred in V0.12 (Claude's call, not a ruling): three more UDL contracts inferred before the first is checked live (SPC-033) would stack unverified assumptions.",
+  "files": [
+   "spectre/web/routes/udl.py"
+  ],
+  "deps": [
+   "SPC-033"
+  ]
+ },
+ {
+  "ref": "SPC-033",
+  "priority": "med",
+  "order": 33,
+  "group": "udl",
+  "minutes": 30,
+  "needs_owner": true,
+  "human_minutes": 30,
+  "task": "Check the UDL conjunction contract against live UDL",
+  "note": "SPC-031 reads /conjunction with satNo1 and satNo2, and the fields named in spectre/web/udl_conjunction.py's module comment. Metres is assumed when no unit is given. This needs a UDL account and network access the build environment lacks. Owner ruling 2026-11-05: Claude writes a probe (scripts/udl_conjunction_probe.py); the owner runs it where UDL is reachable and returns the output.",
+  "files": [
+   "spectre/web/udl_conjunction.py"
+  ]
+ },
+ {
+  "ref": "SPC-029",
+  "priority": "low",
+  "order": 29,
+  "group": "hygiene",
+  "minutes": 90,
+  "task": "Define or replace the 13 CSS names used but defined nowhere",
+  "note": "Found building SPC-027 in 0.12.0: tests/unit/test_css_tokens_are_defined.py allowlists 13 undefined var(--name) uses in _KNOWN_UNDEFINED, each with a reason. Each falls back to the inherited colour today. Defining them repaints panels in both themes, so pick per name; the allowlist may only shrink.",
+  "files": [
+   "spectre/web/static/style.css",
+   "tests/unit/test_css_tokens_are_defined.py"
+  ],
+  "state": "built",
+  "est": 90,
+  "version": "0.13.0",
+  "actualNote": "not measured: built by workflow agents (design, build, review, fix) alongside SPC-029, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-116",
+  "priority": "med",
+  "order": 116,
+  "group": "decision",
+  "minutes": 60,
+  "task": "A coarse velocity check when a hypothesis starts from the bound red track",
+  "note": "SPC-112 refuses a hypothesis whose pre-burn position is more than 10 km from the bound red track, but checks no velocity: element-set error alone allows about 11 m/s, more than the 2 m/s archetype burns, so a tight check would refuse honest cases. A coarse check, about 0.1 km/s, would still catch a unit or object mix-up. Claude's call in 0.13.0 to defer it, not a ruling.",
+  "deps": [
+   "SPC-112"
+  ],
+  "files": [
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 60,
+  "version": "0.14.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-034, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-034",
+  "priority": "low",
+  "order": 34,
+  "group": "hygiene",
+  "minutes": 45,
+  "task": "Steel theme: the admin nav ghost buttons have dark text on the dark bar; the admin flash uses an undefined class",
+  "note": "Found building SPC-029 in 0.13.0. spectre-card-custody is used by the admin flash and defined by no stylesheet.",
+  "files": [
+   "spectre/web/static/style.css"
+  ],
+  "state": "built",
+  "est": 45,
+  "version": "0.14.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-034, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-035",
+  "priority": "med",
+  "order": 35,
+  "group": "hygiene",
+  "minutes": 60,
+  "task": "Admin error flash text below 4.5:1 in all three themes; Steel logout hover and focus ring unmeasured or marginal",
+  "note": "Found building SPC-034 in 0.14.0. The error flash needs its own text token, as the success flash got. The Steel focus ring is 3.14:1, just over the 3:1 floor.",
+  "files": [
+   "spectre/web/static/themes.css",
+   "spectre/web/static/spectre-theme.css",
+   "tests/unit/test_contrast_floors.py"
+  ],
+  "state": "built",
+  "est": 60,
+  "version": "0.15.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-035, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-117",
+  "priority": "med",
+  "order": 117,
+  "group": "decision",
+  "minutes": 120,
+  "task": "Convergence tolerance for sampled closest approach: 1 km absolute refuses most burns already made",
+  "note": "Measured in the V0.14 design: a burn already made, the operator's 'something moved' case, gave half-widths of 1.77 to 8.37 km against the engine's 1 km tolerance (monte_carlo.py), so it is refused as not converged even when the spread is small next to the miss. Decide whether a relative tolerance is honest, and say on the page what it means.",
+  "deps": [
+   "SPC-112"
+  ],
+  "files": [
+   "spectre/astro/monte_carlo.py",
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.15.0",
+  "actualNote": "not measured: built by workflow agents (design, two build rounds, reviews, fixes) alongside SPC-035, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-118",
+  "priority": "med",
+  "order": 118,
+  "group": "decision",
+  "minutes": 120,
+  "task": "Trim the sampled path to element-set limits, as the computed path is, and give each TCA an uncertainty",
+  "note": "From the V0.15 design risks. The computed path searches only while both orbits are inside their age limits; the sampled path does not (100 samples over 48 h is admitted on a 24 h LEO limit). A slow approach makes TCA ill-conditioned: 0.044 km moved the GEO TCA by 1,951 s, so a per-cell TCA uncertainty (position error over closing speed) is owed.",
+  "deps": [
+   "SPC-120"
+  ],
+  "files": [
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.16.0",
+  "actualNote": "not measured: built by workflow agents (design, builds, reviews, fixes) interleaved with other 0.16.0 work and a usage-limit pause, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-119",
+  "priority": "low",
+  "order": 119,
+  "group": "decision",
+  "minutes": 45,
+  "task": "Decision Engine wording: BIND_TO_EARN tells a red-bound operator to bind red; the limit-at-horizon-end edge sentence",
+  "note": "Left by the V0.15 fix round. BIND_TO_EARN predates 0.15.0. Custody evaluation may also wait up to 20 s on a first UDL history fetch; say so on the page while it waits.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/decision_custody.py"
+  ],
+  "state": "built",
+  "est": 45,
+  "version": "0.19.0",
+  "actualNote": "not measured: built by workflow agents across a container restart, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-160",
+  "priority": "high",
+  "order": -10,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Confidence stops counting copies and geometry",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: I12 four measured cases. Across all 64 subsets of the 6 inputs, adding one never lowers the level unless it adds a conflict. SYNTHETIC gives LOW. Custody LOST gives LOW. History figures count once Owner priority: the Threat Understanding items lead the backlog from 2026-11-03. Built in 0.16.0: an undated record cannot establish identity, so sweep confidence tops out at MODERATE until dated records arrive (SPC-165).",
+  "files": [
+   "spectre/domain/threat_assessment.py",
+   "spectre/web/routes/threat.py",
+   "threat_sweep.html",
+   "tests/unit/test_threat_assessment.py",
+   "test_threat_sweep_template.py"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.16.0",
+  "actualNote": "not measured: built by workflow agents (design, builds, reviews, fixes) interleaved with other 0.16.0 work and a usage-limit pause, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-161",
+  "priority": "high",
+  "order": -9,
+  "group": "understanding",
+  "minutes": 180,
+  "task": "Separate the custody-gap meaning from `AdversaryAction.confidence`",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: Raising intelligence confidence no longer lengthens our custody gap. Existing reference cases are unchanged at the default",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/routes/decision.py",
+   "tests/unit/test_decision_reference_cases.py"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.17.0",
+  "actualNote": "not measured: built by workflow agents (build, reviews, fixes) alongside other 0.17.0 items, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-162",
+  "priority": "high",
+  "order": -8,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Evidence items, reliability and coverage",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: q in [0, 1]. Freshness monotone in age. QDF reset halves pre-burn items. Undated counts as one half-life. Manufacturable cap. I2 duplicate no-op. A single capped item never earns",
+  "files": [
+   "spectre/domain/threat_understanding.py",
+   "tests/unit/test_threat_understanding.py"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.16.0",
+  "actualNote": "not measured: built by workflow agents (design, builds, reviews, fixes) interleaved with other 0.16.0 work and a usage-limit pause, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-163",
+  "priority": "high",
+  "order": -7,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Threat range, readings, voiding and conflicts",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: I1, I3, I5, I6, I7, I9. floor ≤ assessed ≤ ceiling across parametrised grids. Contrast A voids the status",
+  "files": [
+   "threat_understanding.py"
+  ],
+  "deps": [
+   "SPC-162"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.16.0",
+  "actualNote": "not measured: built by workflow agents (design, builds, reviews, fixes) interleaved with other 0.16.0 work and a usage-limit pause, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-164",
+  "priority": "high",
+  "order": -6,
+  "group": "understanding",
+  "minutes": 240,
+  "task": "Understanding categories, caps and statement",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: One case per criterion row. SYNTHETIC LOW. UNKNOWN mode MODERATE. Manual set cap. I4",
+  "files": [
+   "threat_understanding.py"
+  ],
+  "deps": [
+   "SPC-162",
+   "SPC-163"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.16.0",
+  "actualNote": "not measured: built by workflow agents (design, builds, reviews, fixes) interleaved with other 0.16.0 work and a usage-limit pause, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-165",
+  "priority": "high",
+  "order": -5,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Adapters from held signals",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: The absence rule with the Δv test. `corroborated_by` opens a group. The `long_gap` halving. The worked example rows 1 to 6 reproduce",
+  "files": [
+   "threat_understanding.py",
+   "spectre/web/routes/threat.py",
+   "spectre/web/routes/gcat.py"
+  ],
+  "deps": [
+   "SPC-162"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.17.0",
+  "actualNote": "not measured: built by workflow agents (build, reviews, fixes) alongside other 0.17.0 items, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-166",
+  "priority": "high",
+  "order": -4,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Sweep wiring in shadow, with ledger hash",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: The legacy verdict is unchanged on all 20 bundled red objects. I10: same inputs give the same hash",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "spectre/domain/provenance.py",
+   "tests/unit/test_threat_sweep.py"
+  ],
+  "deps": [
+   "SPC-163",
+   "SPC-164",
+   "SPC-165"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.17.0",
+  "actualNote": "not measured: built by workflow agents (build, reviews, fixes) alongside other 0.17.0 items, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-167",
+  "priority": "high",
+  "order": -3,
+  "group": "understanding",
+  "minutes": 180,
+  "task": "Status becomes evidence; decide-by withheld only on an earned MINIMAL ceiling",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: Degraded with a newer burn keeps decide-by. A COMPUTED spent tank with no later burn still withholds Built in 0.17.0. On one provider's history a spent tank does not earn the MINIMAL ceiling, so decide-by stands (concept decision 8, Claude's choice, not a ruling); SPC-169 is how a second provider earns it.",
+  "files": [
+   "spectre/domain/threat_assessment.py",
+   "spectre/web/routes/threat.py"
+  ],
+  "deps": [
+   "SPC-163"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.17.0",
+  "actualNote": "not measured: built by workflow agents (build, reviews, fixes) alongside other 0.17.0 items, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-168",
+  "priority": "high",
+  "order": -2,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Operator display: Threat and Understanding lines, outlined badge, strip, ledger, panels",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: I13 regex: no shared sentence, no percentage, no bare band. The badge is outlined under LOW. The strip matches on every panel",
+  "files": [
+   "threat_sweep.html",
+   "pair_card.html",
+   "pol_results.html"
+  ],
+  "deps": [
+   "SPC-166"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.18.0",
+  "actualNote": "not measured: built by workflow agents (build, two reviews, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-169",
+  "priority": "high",
+  "order": -1,
+  "group": "understanding",
+  "minutes": 240,
+  "task": "Screening with cached history; RANGE and UNDERSTANDING columns",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: A cached history raises Understanding. An uncached one reads \"no history held\". The new disagreement case renders",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "threat_screen.html",
+   "spectre/domain/threat_assessment.py",
+   "test_threat_screen_template.py"
+  ],
+  "deps": [
+   "SPC-166"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.18.0",
+  "actualNote": "not measured: built by workflow agents (build, two reviews, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-170",
+  "priority": "high",
+  "order": 0,
+  "group": "understanding",
+  "minutes": 240,
+  "task": "Cues and value of information",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: Order follows steps per hour. VOI is 0 when both hypotheticals give the same range. No cue for an earned dimension. Contrast B ranks as in 4.12",
+  "files": [
+   "threat_understanding.py"
+  ],
+  "deps": [
+   "SPC-163",
+   "SPC-164"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.18.0",
+  "actualNote": "not measured: built by workflow agents (build, two reviews, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-171",
+  "priority": "high",
+  "order": 1,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Decision Engine: collect-first rows and the MINIMAX guidance",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: A straddle with time gives COLLECT_FIRST. The same range with decide-by PASSED gives ACT_ON_CEILING. Bases stay LOOKUP. Probability is never prefilled Built in 0.19.0. Collections are listed beside the ranking, not scored as SENSOR_RETASK rows (concept decision 12, Claude's choice): scored, an invented zero-cost row became the top recommendation. The sweep hands its picture to the engine (hold_threat_picture).",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/routes/decision.py",
+   "test_decision_figure_basis.py",
+   "test_decision_understanding.py"
+  ],
+  "deps": [
+   "SPC-170",
+   "SPC-161"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.19.0",
+  "actualNote": "not measured: built by workflow agents across a container restart, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-172",
+  "priority": "med",
+  "order": 2,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Interactions v1 from warning changes",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: A pass with no prior burn adds nothing. NEWLY_IN_REACH after a burn raises the floor to HIGH. Worked example row 7",
+  "files": [
+   "spectre/domain/interaction_graph.py",
+   "spectre/web/routes/threat.py"
+  ],
+  "deps": [
+   "SPC-165"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.19.0",
+  "actualNote": "not measured: built by workflow agents across a container restart, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-173",
+  "priority": "med",
+  "order": 3,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Interactions v2: UDL conjunctions and closest approaches held per object",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: Malformed miss-distance strings are refused and stated. Stale sets are refused. The \"closer than before the burn\" rule holds",
+  "files": [
+   "spectre/web/udl_conjunction.py",
+   "spectre/astro/elset_approach.py",
+   "interaction_graph.py"
+  ],
+  "deps": [
+   "SPC-172"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.20.0",
+  "actualNote": "not measured: built by workflow agents, with one fix pass that stopped early and was rerun, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-174",
+  "priority": "med",
+  "order": 4,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Hostile seeds and propagation",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: 1-hop and 2-hop values. A third hop adds nothing. A benign seed has no effect. One edge never lifts the floor past MEDIUM through propagation Built in 0.20.0: the seed list is read only from SPECTRE_HOSTILE_SEEDS and none ships (concept decision 5 still open for the owner: who holds the list).",
+  "files": [
+   "interaction_graph.py"
+  ],
+  "deps": [
+   "SPC-172"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.20.0",
+  "actualNote": "not measured: built by workflow agents, with one fix pass that stopped early and was rerun, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-175",
+  "priority": "med",
+  "order": 5,
+  "group": "understanding",
+  "minutes": 240,
+  "task": "Verdict switch behind a setting, with a reference table",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: The old and new verdicts for all 20 bundled red objects match a committed table. The setting stays off until the owner signs off The setting stays off until the owner signs off against the reference table (concept section 9, decisions 2 and 3). Built in 0.21.0 behind SPECTRE_THREAT_VERDICT_SWITCH, off. Turning it on needs the owner's sign-off on docs/threat_verdict_reference.md (11 of 20 demonstration verdicts change, all to the access ceiling, because the bundled data is synthetic). Owner ruling 2026-11-05: keep the switch off.",
+  "files": [
+   "spectre/domain/threat_assessment.py",
+   "spectre/config/constants.py"
+  ],
+  "deps": [
+   "SPC-166",
+   "SPC-167",
+   "SPC-168",
+   "SPC-169"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.21.0",
+  "actualNote": "not measured: built by workflow agents across a container restart, so no honest per-item time exists",
+  "needs_owner": false
+ },
+ {
+  "ref": "SPC-176",
+  "priority": "med",
+  "order": 6,
+  "group": "understanding",
+  "minutes": 300,
+  "task": "Adjudication log and coverage report",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: An override never changes a band. The coverage rate is computed once 30 or more adjudications exist",
+  "files": [
+   "spectre/domain/adjudication.py",
+   "spectre/web/routes/threat.py"
+  ],
+  "deps": [
+   "SPC-166"
+  ],
+  "state": "built",
+  "est": 300,
+  "version": "0.21.0",
+  "actualNote": "not measured: built by workflow agents across a container restart, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-177",
+  "priority": "low",
+  "order": 7,
+  "group": "understanding",
+  "minutes": 120,
+  "task": "Citation check gate for doctrine wording",
+  "note": "Threat Understanding concept (docs/threat_confidence_concept.md, owner request 2026-11-03). Proof: A test fails if any yardstick or ICD 203 term renders while the `VERIFIED` flag is false Needs network access to gov.uk and dni.gov, and MOD channels for AJP-2.1, to verify the doctrine citations. Closed: Owner ruling 2026-11-05, doctrine words stay off screen. The page keeps its plain HIGH, MODERATE and LOW.",
+  "files": [
+   "docs/threat_confidence_concept.md",
+   "spectre/domain/threat_understanding.py"
+  ],
+  "needs_owner": false,
+  "human_minutes": 60,
+  "state": "closed"
+ },
+ {
+  "ref": "SPC-178",
+  "priority": "med",
+  "order": 1,
+  "group": "decision",
+  "minutes": 60,
+  "task": "Evaluation budget 300 s, cost cap 12,000 sample-hours",
+  "note": "Owner ruling 2026-11-05. D6 budget ruling. EVALUATION_BUDGET_S 120 to 300; MAX_SAMPLE_HOURS follows at the measured 40 sample-hours a second. Panel and refusal wording, guide and phases doc updated.",
+  "files": [
+   "spectre/domain/decision.py",
+   "docs/decision_engine_phases.md"
+  ],
+  "state": "built",
+  "est": 60,
+  "version": "0.25.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-179",
+  "priority": "high",
+  "order": 2,
+  "group": "decision",
+  "minutes": 120,
+  "task": "Degraded custody carries one quarter of the custody penalty",
+  "note": "Owner ruling 2026-11-05. Was scored as LOST. Degraded (orbit current, no history to judge burns) now sits between held and lost at 0.25 of the penalty; the basis line names the weight as the owner's.",
+  "files": [
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.25.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-180",
+  "priority": "med",
+  "order": 8,
+  "group": "understanding",
+  "minutes": 90,
+  "task": "Name hostile seeds on screen and in the ledger",
+  "note": "Owner ruling 2026-11-05. Concept decisions 5 and 15. The seed list never becomes classified, so a propagated path names its seed by catalogue number and name; the classified caveats are dropped from the docs.",
+  "files": [
+   "spectre/domain/interaction_graph.py",
+   "spectre/web/templates/partials/threat_sweep.html"
+  ],
+  "state": "built",
+  "est": 90,
+  "version": "0.37.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-181",
+  "priority": "high",
+  "order": 9,
+  "group": "understanding",
+  "minutes": 120,
+  "task": "Engine reads the Threat picture at any age, with its age shown",
+  "note": "Owner ruling 2026-11-05. Concept decision 9. THREAT_PICTURE_MAX_AGE removed; every figure fed by the picture carries its age in words.",
+  "files": [
+   "spectre/web/decision_threat.py",
+   "spectre/web/templates/partials/decision_results.html"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.27.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-182",
+  "priority": "med",
+  "order": 10,
+  "group": "understanding",
+  "minutes": 90,
+  "task": "Any cue with value above 0 may trigger collect first",
+  "note": "Owner ruling 2026-11-05. Concept decision 10. Drops the off-the-line test; section 4.10 as first written. Cues whose result SPECTRE cannot read still never count (Claude's call: their result never lands).",
+  "files": [
+   "spectre/domain/threat_understanding.py",
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 90,
+  "version": "0.37.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-183",
+  "priority": "med",
+  "order": 3,
+  "group": "decision",
+  "minutes": 120,
+  "task": "Track whether each P was edited",
+  "note": "Owner ruling 2026-11-05. Concept decision 11. The form records an edited flag per adversary row, so a deliberate 0.5 is not read as untouched.",
+  "files": [
+   "spectre/web/templates/partials/decision_panel.html",
+   "spectre/web/routes/decision.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.25.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-184",
+  "priority": "med",
+  "order": 4,
+  "group": "decision",
+  "minutes": 480,
+  "task": "Carry every burn of a transfer from the sweep",
+  "note": "Owner ruling 2026-11-05. Concept decision 13. A scenario opened from the sweep carries each burn of the transfer, not only its departure burn, never applying a burn the bound red element set already includes.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/routes/threat.py",
+   "spectre/web/routes/decision.py"
+  ],
+  "state": "built",
+  "est": 480,
+  "version": "0.25.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-185",
+  "priority": "med",
+  "order": 5,
+  "group": "decision",
+  "minutes": 120,
+  "task": "Load NOTSO suggestions for every row when the panel opens",
+  "note": "Owner ruling 2026-11-05. Concept decision 16. Every row's suggestion shows at once; applying stays the operator's tick, honoured at Evaluate.",
+  "files": [
+   "spectre/web/templates/partials/decision_panel.html",
+   "spectre/web/routes/decision.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.37.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-186",
+  "priority": "med",
+  "order": 11,
+  "group": "understanding",
+  "minutes": 120,
+  "task": "The strongest reading in a source chain counts once",
+  "note": "Owner ruling 2026-11-05. Concept decision 6. Any reading from a chain counts once at the chain's best reliability, so a new copy never widens the range. The 20 pinned legacy verdicts are untouched.",
+  "files": [
+   "spectre/domain/threat_understanding.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.37.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-187",
+  "priority": "med",
+  "order": 6,
+  "group": "decision",
+  "minutes": 360,
+  "task": "Unequal turns, set by the engine",
+  "note": "Owner ruling 2026-11-05. D3. Turn boundaries are placed by the engine from the rows' burn times so every burn falls inside its own turn; the operator never sets a length.",
+  "files": [
+   "spectre/domain/decision_tree.py",
+   "spectre/domain/turn_update.py"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.37.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-188",
+  "priority": "med",
+  "order": 7,
+  "group": "decision",
+  "minutes": 240,
+  "task": "Measure trees and set their own cost cap",
+  "note": "Owner ruling 2026-11-05. D6. Time trees under load at the 300 s budget and set a tree cap from the measurements, stated with its basis.",
+  "files": [
+   "spectre/domain/decision_tree.py",
+   "scripts/measure_tree_cost.py"
+  ],
+  "deps": [
+   "SPC-178"
+  ],
+  "state": "built",
+  "version": "0.38.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists",
+  "est": 240
+ },
+ {
+  "ref": "SPC-189",
+  "priority": "med",
+  "order": 8,
+  "group": "decision",
+  "minutes": 180,
+  "task": "Mark the best branch under each response",
+  "note": "Owner ruling 2026-11-05. D14. A recommended continuation after every response, including responses the rule would not pick, marked in words apart from the plan itself.",
+  "files": [
+   "spectre/domain/tree_selectors.py",
+   "spectre/web/tree_view.py"
+  ],
+  "state": "built",
+  "version": "0.38.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists",
+  "est": 180
+ },
+ {
+  "ref": "SPC-190",
+  "priority": "low",
+  "order": 9,
+  "group": "decision",
+  "minutes": 360,
+  "task": "Interactive tree diagram",
+  "note": "Owner ruling 2026-11-05. D15. A drawn, collapsible, zoomable tree beside the plain sections, which stay as the text alternative. Claude's call: drawn as server-rendered SVG with a first-party script file under the CSP, so no third-party library joins the supply chain; the owner may still ask for a vendored one.",
+  "files": [
+   "spectre/web/tree_view.py",
+   "spectre/web/static/js/tree_diagram.js",
+   "spectre/web/templates/partials/decision_results.html"
+  ],
+  "deps": [
+   "SPC-189"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.41.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-191",
+  "priority": "high",
+  "order": 0,
+  "group": "eval-trial",
+  "minutes": 360,
+  "task": "F-10: closest approach enters the score linearly over 0 to 50,000 km at weight 0.25; 1 m/s of our delta-V weighs the…",
+  "note": "Evaluation finding F-10 (Critical, §1b, L1, L2), evaluation/EVALUATION.md. Remediation: a threshold-anchored value function in _norm_ca, anchored at an operator-set keep-out distance; a re-anchored delta-V scale; reference cases re-derived. Closing evidence: P-17 inverted; a scale rationale signed by the technical authority. Owner, 2026-11-10: F-10 first. Built in 0.26.0: P-17 inverted in tests/unit/test_decision_score_scales.py. The finding stays open until the technical authority signs the scale rationale (SPC-227).",
+  "files": [
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.26.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-192",
+  "priority": "high",
+  "order": 10,
+  "group": "eval-gate",
+  "minutes": 360,
+  "task": "F-01: a finished evaluation is held in session memory and logged as one line naming the recommendation; nothing reco…",
+  "note": "Evaluation finding F-01 (Critical, G1, L5), evaluation/EVALUATION.md. Remediation: a durable decision record (new table in spectre/web/models.py) written by spectre/web/routes/decision.py, capturing the operator's decision and rationale on the results page. Closing evidence: a stored record per evaluation, retrievable after sign-out, holding the operator's decision; a test.",
+  "files": [
+   "spectre/web/decision_job.py",
+   "spectre/web/models.py",
+   "spectre/web/planning_state.py",
+   "spectre/web/routes/decision.py"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.27.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-193",
+  "priority": "high",
+  "order": 11,
+  "group": "eval-gate",
+  "minutes": 360,
+  "task": "F-02: provenance hashes the inputs but stores none; the result lives at most the 8 h sign-in. Identical inputs repea…",
+  "note": "Evaluation finding F-02 (Critical, G2, L4), evaluation/EVALUATION.md. Remediation: store canonical inputs (element sets as fetched, rows, responses, weights, rule, seeds, code version) with the record; add a replay command. Closing evidence: a replay test reproducing a stored recommendation exactly from the record alone.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/domain/provenance.py",
+   "spectre/web/planning_state.py"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.28.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-194",
+  "priority": "high",
+  "order": 12,
+  "group": "eval-gate",
+  "minutes": 360,
+  "task": "F-03: one rule per evaluation, chosen on the panel and changeable after a result is seen; minimax's pick is named on…",
+  "note": "Evaluation finding F-03 (Critical, G3, L1, L5), evaluation/EVALUATION.md. Remediation: compute all three picks in every ScenarioResult and show them side by side with a disagreement line in decision_results.html; set a primary rule per deployment before use. Closing evidence: the page showing three picks; a disagreement test; the configuration record.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/routes/decision.py",
+   "spectre/web/templates/partials/decision_panel.html"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.28.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-195",
+  "priority": "high",
+  "order": 13,
+  "group": "eval-gate",
+  "minutes": 360,
+  "task": "F-04: no field can mark a response unacceptable; every response enters a compensatory weighted sum.",
+  "note": "Evaluation finding F-04 (Critical, G4, L1), evaluation/EVALUATION.md. Remediation: a veto with a stated reason on FriendlyResponse and scenario-level constraints, applied before find_robust_response and the tree selectors; vetoed responses shown greyed with the reason. Closing evidence: probe P-06 written as specified and passing.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/domain/tree_selectors.py"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.29.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-196",
+  "priority": "high",
+  "order": 14,
+  "group": "eval-gate",
+  "minutes": 360,
+  "task": "F-05: every figure is tagged computed, sampled or lookup, but operator judgements (cost, reversibility, time to exec…",
+  "note": "Evaluation finding F-05 (Critical, G5, L2), evaluation/EVALUATION.md. Remediation: Basis.JUDGEMENT for operator-entered values; a lookup register in docs/ with source, owner and date; the code version on the results page. Closing evidence: every figure on the page tagged one of four; the register.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/domain/provenance.py",
+   "spectre/web/templates/partials/decision_results.html"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.29.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-197",
+  "priority": "high",
+  "order": 15,
+  "group": "eval-gate",
+  "minutes": 120,
+  "task": "F-06: no repository test pins SGP4 to the published vectors or the production RK45 to a reference. The evaluation's…",
+  "note": "Evaluation finding F-06 (Critical, G7, L2, L4), evaluation/EVALUATION.md. Remediation: adopt P-12 and P-13 into tests/unit with fixed thresholds, run in CI. Closing evidence: both tests green in CI.",
+  "files": [
+   "spectre/astro/monte_carlo.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.27.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-198",
+  "priority": "high",
+  "order": 16,
+  "group": "eval-gate",
+  "minutes": 900,
+  "task": "F-07: no hazard analysis or safety-related determination; the audit left the operational status of the engine as \"a…",
+  "note": "Evaluation finding F-07 (Critical, G8, L6), evaluation/EVALUATION.md. Remediation: hazard identification, a hazard log and a safety-related determination under Def Stan 00-056, owned by the safety lead. Closing evidence: the hazard log and the signed determination. Hazard log and safety-related determination: the safety lead's work, outside the code. 2026-11-14: the owner reports this done on the briefing page; the document has not reached the repository, so nothing links to it yet.",
+  "files": [],
+  "needs_owner": true,
+  "human_minutes": 240
+ },
+ {
+  "ref": "SPC-199",
+  "priority": "high",
+  "order": 17,
+  "group": "eval-gate",
+  "minutes": 900,
+  "task": "F-08: a trust-boundary inventory exists, not an engine threat model; no ISN 2023/09 artefacts; the Content Security…",
+  "note": "Evaluation finding F-08 (Critical, G9, L7), evaluation/EVALUATION.md. Remediation: an engine threat model against ISN 2023/09; a nonce-based policy with the inline scripts moved to static files. Closing evidence: the threat model; a policy without 'unsafe-inline' and 'unsafe-eval'; tests. Built in 0.32.0: script-src 'self' alone, and a draft threat model. Gate G9 stays open until the security lead signs the model (SPC-229).",
+  "files": [
+   "spectre/web/app.py",
+   "spectre/web/templates/partials/decision_results.html"
+  ],
+  "state": "built",
+  "est": 900,
+  "version": "0.32.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-200",
+  "priority": "high",
+  "order": 18,
+  "group": "eval-gate",
+  "minutes": 360,
+  "task": "F-09: many out-of-envelope inputs are detected and refused in sentences, but no operating design domain is stated, a…",
+  "note": "Evaluation finding F-09 (Critical, G10, L2), evaluation/EVALUATION.md. Remediation: an operating design domain in docs/, checked at evaluation entry with a flag per breach (with F-29 to F-31). Closing evidence: the document and a test per breach.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/elsets.py"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.30.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-201",
+  "priority": "high",
+  "order": 19,
+  "group": "eval-gate",
+  "minutes": 120,
+  "task": "F-25: element sets from UDL reach the engine with no checksum or range check (tle_checksum_valid is called only at o…",
+  "note": "Evaluation finding F-25 (Critical, G9, L2, L7), evaluation/EVALUATION.md. Remediation: checksum and field range checks in spectre/web/elsets.py on every ingest path; on failure refuse and keep the held set. Closing evidence: P-14's UDL case inverted; a test per path.",
+  "files": [
+   "spectre/web/elsets.py",
+   "spectre/web/routes/operator.py",
+   "spectre/web/routes/udl.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.30.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-202",
+  "priority": "high",
+  "order": 2,
+  "group": "eval-trial",
+  "minutes": 900,
+  "task": "F-11: the miss payoff is an SGP4 point miss or a P5 over burn dispersions only; element-set error, 1 km plus 2 km a…",
+  "note": "Evaluation finding F-11 (High, §1g, §1h, L2, L3), evaluation/EVALUATION.md. Remediation: sample the initial state from the along_track model in run_separation_series, or add it in quadrature in _computed_cell; state it on screen. Closing evidence: a test showing the band widen with element-set age at the model's rate.",
+  "files": [
+   "spectre/astro/along_track.py",
+   "spectre/astro/monte_carlo.py",
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 900,
+  "version": "0.32.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-203",
+  "priority": "high",
+  "order": 3,
+  "group": "eval-trial",
+  "minutes": 360,
+  "task": "F-12: expected value divides each P by the sum over the rows entered; no residual row; no check that P sums to 1. A…",
+  "note": "Evaluation finding F-12 (High, §1a, §1b, L1), evaluation/EVALUATION.md. Remediation: P summing to at most 1 with a residual \"none of these\" row; the shares used shown beside each P. Closing evidence: P-03b inverted; a refusal when P sums above 1.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/domain/tree_selectors.py"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.30.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-204",
+  "priority": "high",
+  "order": 4,
+  "group": "eval-trial",
+  "minutes": 360,
+  "task": "F-14: collect-first advice rests on Threat range band steps against a fixed, unsourced action line, and calls that l…",
+  "note": "Evaluation finding F-14 (High, §1f, L1, L3), evaluation/EVALUATION.md. Remediation: derive decision relevance from the matrix (the pick under each cue outcome); drop the \"where your response changes\" wording until then. Closing evidence: a test that a cue unable to change the pick yields no collect-first advice.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/domain/threat_understanding.py"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.31.0",
+  "actualNote": "not measured: built by workflow agents (build interrupted by a container restart and resumed, three reviews, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-205",
+  "priority": "high",
+  "order": 5,
+  "group": "eval-trial",
+  "minutes": 360,
+  "task": "F-16: default weights are uncited direct ratings; no weight stability is computed or shown. In the bound scenarios a…",
+  "note": "Evaluation finding F-16 (High, §1b, §1h, L1, L3), evaluation/EVALUATION.md. Remediation: show the smallest single-weight change that flips the pick (exact, since the score is linear in the weights); swing-weight elicitation (SPC-151). Closing evidence: the stability line on screen matching P-16.",
+  "files": [
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.31.0",
+  "actualNote": "not measured: built by workflow agents (build interrupted by a container restart and resumed, three reviews, fix), so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-206",
+  "priority": "med",
+  "order": 6,
+  "group": "eval-trial",
+  "minutes": 120,
+  "task": "F-13: a tie goes to the response entered first, and the tie is not shown.",
+  "note": "Evaluation finding F-13 (Medium, §1c, L1), evaluation/EVALUATION.md. Remediation: detect ties within a stated tolerance and show every tied response. Closing evidence: P-05's tie case showing both.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/domain/tree_selectors.py"
+  ],
+  "state": "built",
+  "version": "0.38.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists",
+  "est": 120
+ },
+ {
+  "ref": "SPC-207",
+  "priority": "med",
+  "order": 7,
+  "group": "eval-trial",
+  "minutes": 360,
+  "task": "F-17: the lookup model's relations are unsourced: a sensor retask's custody gap is half its time to execute, a manoe…",
+  "note": "Evaluation finding F-17 (Medium, L1, L2), evaluation/EVALUATION.md. Remediation: restrict lookup-only results to training, or source each relation through the F-05 register. Closing evidence: register entries, or an enforced training-only label.",
+  "files": [
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.39.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-208",
+  "priority": "med",
+  "order": 8,
+  "group": "eval-trial",
+  "minutes": 120,
+  "task": "F-18: composite scores are coloured green below 0.25, amber below 0.50 and red above, with no source for the thresho…",
+  "note": "Evaluation finding F-18 (Medium, L5), evaluation/EVALUATION.md. Remediation: remove the colours, or tie them to sourced thresholds. Closing evidence: the page without unsourced colour bands.",
+  "files": [
+   "spectre/web/templates/partials/decision_results.html"
+  ],
+  "state": "built",
+  "version": "0.38.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists",
+  "est": 120
+ },
+ {
+  "ref": "SPC-209",
+  "priority": "med",
+  "order": 1,
+  "group": "eval-accred",
+  "minutes": 900,
+  "task": "F-19: the force model is two-body, J2 and exponential drag; the module asserts burn dispersion dominates force-model…",
+  "note": "Evaluation finding F-19 (Medium, §1g, L2), evaluation/EVALUATION.md. Remediation: compare against a higher-fidelity propagator by regime and burn size, and state where the claim holds. Closing evidence: a comparison table by regime.",
+  "files": [
+   "spectre/astro/monte_carlo.py"
+  ],
+  "state": "built",
+  "est": 900,
+  "version": "0.43.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-210",
+  "priority": "med",
+  "order": 2,
+  "group": "eval-accred",
+  "minutes": 0,
+  "task": "F-22: the update's likelihood is a deterministic custody rule, stated as uncalibrated; no calibration evidence exist…",
+  "note": "Evaluation finding F-22 (Medium, §1e, L3, L4), evaluation/EVALUATION.md. Remediation: back-test the custody likelihood on held histories and report a Brier score. Closing evidence: a calibration report with its data and code. 0.39.0 built the harness (scripts/calibrate_likelihood.py, CSV history,predicted,observed) and states the likelihood as uncalibrated wherever the posterior is shown. No real held histories exist in the repository. Closing needs the owner to supply held histories whose predicted probabilities the update produced and whose outcomes come from a source other than the custody it read.",
+  "files": [
+   "spectre/domain/turn_update.py"
+  ],
+  "needs_owner": true,
+  "human_minutes": 120
+ },
+ {
+  "ref": "SPC-211",
+  "priority": "med",
+  "order": 9,
+  "group": "eval-trial",
+  "minutes": 120,
+  "task": "F-23: decide-by uses a 12 h default response time chosen by the developer, \"tuned, not sourced\".",
+  "note": "Evaluation finding F-23 (Medium, §1f, L1), evaluation/EVALUATION.md. Remediation: require an operator-set response time before decide-by shows, or source the default. Closing evidence: a test, or a cited default.",
+  "files": [
+   "spectre/domain/decide_by.py"
+  ],
+  "state": "built",
+  "version": "0.38.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists",
+  "est": 120
+ },
+ {
+  "ref": "SPC-212",
+  "priority": "med",
+  "order": 3,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-24: no record of the JSP 936 in-scope decision or an ethical risk assessment.",
+  "note": "Evaluation finding F-24 (Medium, L8), evaluation/EVALUATION.md. Remediation: record the in-scope decision and complete the ethical risk assessment (framework recommendation 1). Closing evidence: the recorded decision and assessment. The JSP 936 scoping decision and ethical risk assessment are the owner's to record. 2026-11-14: the owner reports this done on the briefing page; the document has not reached the repository, so nothing links to it yet.",
+  "files": [],
+  "needs_owner": true,
+  "human_minutes": 240
+ },
+ {
+  "ref": "SPC-213",
+  "priority": "med",
+  "order": 10,
+  "group": "eval-trial",
+  "minutes": 120,
+  "task": "F-26: the half-width shown as how closely P5 is known is the widest of the P5, P50 and P95 half-widths, and also dec…",
+  "note": "Evaluation finding F-26 (Medium, L2, L3), evaluation/EVALUATION.md. Remediation: label P5 with its own half-width; name the convergence figure separately. Closing evidence: the label equal to P5's half-width; a test.",
+  "files": [
+   "spectre/astro/monte_carlo.py",
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.40.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-214",
+  "priority": "med",
+  "order": 11,
+  "group": "eval-trial",
+  "minutes": 120,
+  "task": "F-27: the production RK45 adds up to 0.652 km of position and 0.353 km of separation error at 72 h, unstated, agains…",
+  "note": "Evaluation finding F-27 (Medium, L2, L3), evaluation/EVALUATION.md. Remediation: tighten the tolerances or state the integrator error in the sampled basis note. Closing evidence: P-13 under 0.1 km at 72 h, or the error stated.",
+  "files": [
+   "spectre/astro/monte_carlo.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.40.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-215",
+  "priority": "med",
+  "order": 12,
+  "group": "eval-trial",
+  "minutes": 360,
+  "task": "F-29: deep-space orbits are evaluated with no regime statement; a Molniya-class orbit gets the LEO 24 h staleness li…",
+  "note": "Evaluation finding F-29 (Medium, G10, L2), evaluation/EVALUATION.md. Remediation: regime-specific limits and error rates; flag SDP4 cells. Closing evidence: a test per regime. 0.30.0 flags SDP4 sets as outside the envelope; the sourced limits and error rates remain open.",
+  "files": [
+   "spectre/astro/along_track.py",
+   "spectre/web/elsets.py"
+  ],
+  "state": "built",
+  "est": 360,
+  "version": "0.40.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-216",
+  "priority": "med",
+  "order": 13,
+  "group": "eval-trial",
+  "minutes": 120,
+  "task": "F-30: the SGP4 path has no altitude floor; a decayed object between perigee error intervals produced \"Computed: 643.…",
+  "note": "Evaluation finding F-30 (Medium, G10), evaluation/EVALUATION.md. Remediation: the RK45 path's altitude floor applied to the SGP4 path. Closing evidence: P-14's decayed case refused.",
+  "files": [
+   "spectre/astro/elset_approach.py",
+   "spectre/astro/monte_carlo.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.30.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-217",
+  "priority": "med",
+  "order": 14,
+  "group": "eval-trial",
+  "minutes": 120,
+  "task": "F-31: all five weights at 0 are accepted (every score 0); every P at 0 under expected value is accepted; in both the…",
+  "note": "Evaluation finding F-31 (Medium, G10, L1), evaluation/EVALUATION.md. Remediation: refuse a zero weight total and expected value with zero total P, as the tree already does (turn_update.py:196-197). Closing evidence: tests for both refusals.",
+  "files": [
+   "spectre/domain/decision.py",
+   "spectre/web/routes/decision.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.30.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-218",
+  "priority": "low",
+  "order": 4,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-15: the guide calls the engine \"game-theoretic scenario evaluation\"; it computes pure-strategy rules only (P-02: p…",
+  "note": "Evaluation finding F-15 (Low, §1a, L1, L5), evaluation/EVALUATION.md. Remediation: reword to decision analysis with a worst-case floor; state that randomised responses are not considered. Closing evidence: the regenerated guide.",
+  "files": [
+   "docs/generate_guide.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.27.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-219",
+  "priority": "low",
+  "order": 5,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-20: custody loss and closest approach are added independently.",
+  "note": "Evaluation finding F-20 (Low, §1b, L1), evaluation/EVALUATION.md. Remediation: document the assumption; add an interaction term if the analyst session supports one. Closing evidence: the documented assumption or a tested term.",
+  "files": [
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.41.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-220",
+  "priority": "low",
+  "order": 6,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-21: leaves are valued as if no one moves after the last turn (at most 3); stated on screen.",
+  "note": "Evaluation finding F-21 (Low, §1d, L1), evaluation/EVALUATION.md. Remediation: name it in the guide's limitations. Closing evidence: the guide text.",
+  "files": [
+   "spectre/domain/decision_tree.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.41.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-221",
+  "priority": "low",
+  "order": 7,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-32: scores are not checked finite before selection; an injected NaN lookup printed \"nan\" and the pick followed row…",
+  "note": "Evaluation finding F-32 (Low, L1), evaluation/EVALUATION.md. Remediation: refuse a non-finite score in find_robust_response. Closing evidence: a test with an injected NaN.",
+  "files": [
+   "spectre/domain/decision.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.42.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-222",
+  "priority": "low",
+  "order": 8,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-33: a missing row value silently becomes P 0.5, Conf 0.5 or gap 0.7; a missing weight takes its default.",
+  "note": "Evaluation finding F-33 (Low, L5), evaluation/EVALUATION.md. Remediation: refuse missing values. Closing evidence: a test.",
+  "files": [
+   "spectre/web/routes/decision.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.42.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-223",
+  "priority": "low",
+  "order": 9,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-34: no range check on element-set fields; an inclination of 597.4° produced a computed miss of 356.0 km.",
+  "note": "Evaluation finding F-34 (Low, L2), evaluation/EVALUATION.md. Remediation: field range checks at ingest, with F-25. Closing evidence: a test refusing 597.4°.",
+  "files": [
+   "spectre/web/elsets.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.30.0",
+  "actualNote": "not measured: built by workflow agents (build, three reviews, fix) in two worktrees, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-224",
+  "priority": "low",
+  "order": 10,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-35: the seed is fixed at 42; at N 50 whether a row converges is one draw (15 of 20 seeds in one case).",
+  "note": "Evaluation finding F-35 (Low, L2, L4), evaluation/EVALUATION.md. Remediation: show the seed; check convergence on two seeds. Closing evidence: a test.",
+  "files": [
+   "spectre/astro/monte_carlo.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.42.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-225",
+  "priority": "low",
+  "order": 11,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-36: SGP4 runs on WGS-72; the RK45 started from its states uses WGS-84 constants; nothing states this.",
+  "note": "Evaluation finding F-36 (Low, L2), evaluation/EVALUATION.md. Remediation: state the handover and quantify it. Closing evidence: a note with a measured figure.",
+  "files": [
+   "spectre/astro/constants.py",
+   "spectre/astro/propagator.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.42.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-226",
+  "priority": "low",
+  "order": 12,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "F-38: an element set dated in the future is given age 0, so it reads as current.",
+  "note": "Evaluation finding F-38 (Low, L2), evaluation/EVALUATION.md. Remediation: probe it; if confirmed, refuse future epochs. Closing evidence: the probe result and a test.",
+  "files": [
+   "spectre/web/elsets.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.42.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-227",
+  "priority": "high",
+  "order": 0,
+  "group": "eval-trial",
+  "minutes": 0,
+  "needs_owner": true,
+  "human_minutes": 60,
+  "task": "Technical authority to sign the score-scale rationale (F-10 closing evidence)",
+  "note": "Read docs/decision_engine_phases.md, Score scales (SPC-191): the keep-out-anchored closest-approach scale, the delta-V scale to 1,000 m/s and the 10 km default are Claude's choices, unsourced. Sign, amend or reject; F-10 closes on signature.",
+  "files": [
+   "docs/decision_engine_phases.md"
+  ]
+ },
+ {
+  "ref": "SPC-228",
+  "priority": "high",
+  "order": 1,
+  "group": "eval-gate",
+  "minutes": 0,
+  "needs_owner": true,
+  "human_minutes": 60,
+  "task": "Rule on retention, access and erasure of decision records (data protection lead)",
+  "note": "SPC-192 stores each operator's username, scenario and response names and free-text rationale, with no retention applied; a deleted account's records are kept, readable by an admin. docs/SECURITY.md and docs/decision_engine_phases.md list this as open. From 0.28.0 the record also holds the evaluation's canonical inputs, including element-set text (SPC-193).",
+  "files": [
+   "docs/SECURITY.md",
+   "docs/decision_engine_phases.md"
+  ]
+ },
+ {
+  "ref": "SPC-229",
+  "priority": "high",
+  "order": 2,
+  "group": "eval-gate",
+  "minutes": 0,
+  "needs_owner": true,
+  "human_minutes": 120,
+  "task": "Security lead to review and sign the draft engine threat model",
+  "note": "docs/threat-model-decision-engine.md: 11 threats by the 7 ISN 2023/09 principles, each with what exists in the code, what remains and its owner. Draft by Claude; does not close gate G9 until signed.",
+  "files": [
+   "docs/threat-model-decision-engine.md"
+  ]
+ },
+ {
+  "ref": "SPC-230",
+  "priority": "low",
+  "order": 20,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "Fix scripts/smoke-browser.py: Chromium path and the asset-screening check",
+  "note": "Found building SPC-202: the script looks for chrome-linux/ where the installed browser is chrome-linux64/, and its [asset-screening-result] check fails on 0.31.0 as well, before any 0.32.0 change.",
+  "files": [
+   "scripts/smoke-browser.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.42.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-231",
+  "priority": "high",
+  "order": 0,
+  "group": "port",
+  "minutes": 720,
+  "task": "Port the small charming-dirac changes: base image 3.12.16, Grype gate, temp-file clean-up, SGP4-XP and UCT refusal, actor eligibility (15-year cut), ages for every target flown, includes(), true closest-approach figures, option colours",
+  "note": "Owner ruling 2026-11-12: port the small changes as V0.33. From charming-dirac 59a6612, d056c6d, ce216a0, 7ed9d0b (refusal only), 1357a67 with 0f5fa30, 03b7507, 7bf8af8, d2e6513 (figures only, keep-and-label), 30ff084 (CSS only). Not built or scanned as an image here: no Docker daemon (SPC-236).",
+  "files": [
+   "Dockerfile",
+   "scripts/verify-container.sh",
+   "spectre/astro/elset_check.py",
+   "spectre/domain/actor_eligibility.py",
+   "spectre/astro/maneuvers.py"
+  ],
+  "state": "built",
+  "est": 720,
+  "version": "0.33.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-232",
+  "priority": "high",
+  "order": 1,
+  "group": "port",
+  "minutes": 840,
+  "task": "Port the UDL archive-first fetch from every provider, recording the provider (charming-dirac 7ed9d0b, 5751c3e)",
+  "note": "Owner ruling 2026-11-12: then the rest. The refusal of SGP4-XP and UCT sets landed in 0.33.0; this is the fetch order, the provider field and the source list.",
+  "files": [
+   "spectre/web/routes/udl.py",
+   "spectre/web/elsets.py"
+  ],
+  "state": "built",
+  "est": 840,
+  "version": "0.34.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-233",
+  "priority": "high",
+  "order": 2,
+  "group": "port",
+  "minutes": 600,
+  "task": "Port the Sonar rules checker gating new code only, and clear its findings in 0.32.0's JavaScript (charming-dirac c930087)",
+  "note": "Owner ruling 2026-11-12: latent Code Quality issues are converted as touched; the checker gates new code only. The comparison counted 55 findings in the JavaScript 0.32.0 moved out of templates.",
+  "files": [
+   "scripts/check-quality.sh",
+   "spectre/web/static/js/"
+  ],
+  "state": "built",
+  "est": 600,
+  "version": "0.35.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-234",
+  "priority": "high",
+  "order": 3,
+  "group": "port",
+  "minutes": 840,
+  "task": "Port the engineering parts of the NOTSO realistic intercepts with a Max delta-V default of 171.8 m/s and its evidence data (charming-dirac d3447e2)",
+  "note": "Owner ruling 2026-11-12: Max delta-V default 171.8 m/s from NOTSO, overruling R7. manoeuvre_evidence.json may be ported; the NOTSO export itself is not. Owner confirmed 2026-11-12: 171.8 m/s for the Intercept Engine only, sweep and asset screening keep 500 m/s; the fleet ceiling comes from the shipped record only, live cache data raises a satellite's own figures.",
+  "files": [
+   "spectre/astro/maneuvers.py",
+   "spectre/data/"
+  ],
+  "state": "built",
+  "est": 840,
+  "version": "0.36.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-235",
+  "priority": "low",
+  "order": 4,
+  "group": "port",
+  "minutes": 0,
+  "needs_owner": true,
+  "human_minutes": 5,
+  "task": "Retire the claude/charming-dirac-qcrnpv branch once SPC-232 to SPC-234 are built",
+  "note": "Deleting a remote branch is the owner's call. The branch holds the NOTSO export (U//DS-JCO-NOTIF) in a public repository; history keeps it after the branch is deleted.",
+  "files": []
+ },
+ {
+  "ref": "SPC-236",
+  "priority": "high",
+  "order": 5,
+  "group": "port",
+  "minutes": 0,
+  "needs_owner": true,
+  "human_minutes": 30,
+  "task": "Run scripts/verify-container.sh on a machine with Docker; the Grype stage must end PASS, not SKIPPED",
+  "note": "0.33.0 moved the base image to Python 3.12.16 (digest 935c3c5b...) and added the Grype stage. Neither the image build nor the scan could run here: no Docker daemon. 2026-11-14: the owner cannot run Docker on the machine to hand. Option: a CI job that runs scripts/verify-container.sh, GitHub's runners having Docker.",
+  "files": [
+   "Dockerfile",
+   "Dockerfile.docker-only",
+   "scripts/verify-container.sh"
+  ]
+ },
+ {
+  "ref": "SPC-237",
+  "priority": "med",
+  "order": 6,
+  "group": "port",
+  "minutes": 240,
+  "task": "V-bar hop entry burn always fires outward radial, whichever side the target is on",
+  "note": "Found by the 0.33.0 review (plausible, not flown). vbar_hop_intercept fires +b_hat, which drifts red backwards in the linear model; for a target ahead the recorded burn moves red away. The 0.33.0 miss figure uses abs(on_axis), so both sides read the same closest approach. Pre-existing in the solver; fly both sides to confirm, then sign the burn by the target's side.",
+  "files": [
+   "spectre/astro/maneuvers.py"
+  ],
+  "state": "built",
+  "est": 240,
+  "version": "0.40.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-238",
+  "priority": "low",
+  "order": 7,
+  "group": "port",
+  "minutes": 180,
+  "task": "A flown closest-approach search that cannot run fails the method on the manoeuvre page",
+  "note": "Found by the 0.33.0 review. _flown_closest_km calls closest_approach, which raises when no sample is finite or past 100,000 samples (an R-bar time of about 70 days or more in LEO). Inside the sweep the figure is skipped, so a method can succeed there and fail on the manoeuvre page. Fix: return NaN and show 'not computed' in intercept_result.html and all_intercepts_result.html, never NaN as a number.",
+  "files": [
+   "spectre/astro/maneuvers.py",
+   "spectre/web/templates/partials/intercept_result.html",
+   "spectre/web/templates/partials/all_intercepts_result.html"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.36.0",
+  "actualNote": "folded into SPC-234; not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-239",
+  "priority": "med",
+  "order": 8,
+  "group": "port",
+  "minutes": 180,
+  "task": "Asset screen judges a payload's age from the cached element set before it refreshes the live ones",
+  "note": "Found by the 0.33.0 review (plausible). threat.py selects candidates through _resolve_hrr_tle before _refresh_actor_tles runs, so on a first screen an old payload with nothing cached is screened, and on the next it is left out. The bundled synthetic sets all carry designator 20001A, so from 2036 every bundled object with no intel record would be cut.",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "spectre/domain/actor_eligibility.py"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.41.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-240",
+  "priority": "high",
+  "order": 9,
+  "group": "port",
+  "minutes": 0,
+  "needs_owner": true,
+  "human_minutes": 30,
+  "task": "Live UDL checks for the archive-first fetch: what /elset/current answers with no source, archive query time for a busy GEO object, and each provider's ephemType",
+  "note": "0.34.0 rests on charming-dirac's field observation that /elset/current with no source answers for 18th SPCS alone; HEAD's old comment said one set per provider. Also unknown: how long the 72-hour /elset query takes for a busy GEO object with 10 refreshes in parallel, and which providers file SGP4-XP (an XP set as the newest refuses the fetch, by design). Needs the owner's UDL account; scripts/udl_probe.py (SPC-033) is the place to add the checks. 2026-11-13, owner's probe on 41866 (GOES-16): /elset/current with no source returned one 18th SPCS set (check 1 confirmed for this object). The 72 h /elset archive held EXO (ephemType 2 on every set, every 15 to 30 min), NorthStar (0), KBR (0) and 18th SPCS (0, posted about 5 to 6 h after epoch); no ephemType 4 (check 3 answered for this object). Query time not yet reported (check 2 open). Finding: EXO's type 2 sets are refused, and being often a millisecond newer than KBR and NorthStar they block the fetch; see SPC-243. 2026-11-14: the owner marked it done; the archive query time (check 2) was not reported.",
+  "files": [
+   "spectre/web/routes/udl.py"
+  ]
+ },
+ {
+  "ref": "SPC-241",
+  "priority": "high",
+  "order": 10,
+  "group": "port",
+  "minutes": 0,
+  "needs_owner": true,
+  "human_minutes": 15,
+  "task": "Confirm the U//DS-JCO-NOTIF dissemination control does not carry over to spectre/data/manoeuvre_evidence.json in a public repository",
+  "note": "0.36.0 ships the derived file. The 0.36.0 review found only catalogue numbers, satellite names, counts, ISO dates and delta-V figures, no personal data or message text; fleet.source names the export file (notification_2026-03-27..., 3,124 messages). The derived file carries no marking. If the control does carry over, the file and its fleet.source come out of the repository and the release.",
+  "files": [
+   "spectre/data/manoeuvre_evidence.json"
+  ],
+  "state": "closed",
+  "supersededBy": "Owner ruling 2026-11-12: the U//DS-JCO-NOTIF control does not carry over to the derived file; keep spectre/data/manoeuvre_evidence.json in the repository."
+ },
+ {
+  "ref": "SPC-242",
+  "priority": "low",
+  "order": 21,
+  "group": "eval-accred",
+  "minutes": 120,
+  "task": "Fix the test-order fault: some groupings of test_decision_record_route.py fail with 'database is locked'",
+  "note": "Found building SPC-209: one 18-part split of the suite put 64 errors and 6 failures into test_decision_record_route.py, reproduced on an untouched 1023223 tree. No single file paired with it reproduces it. The whole suite in one process passes. Find the test that leaves a SQLite connection or transaction open.",
+  "files": [
+   "tests/integration/test_decision_record_route.py",
+   "tests/conftest.py"
+  ],
+  "state": "built",
+  "est": 120,
+  "version": "0.44.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-243",
+  "priority": "high",
+  "order": 8,
+  "group": "port",
+  "minutes": 180,
+  "task": "A refused newer element set must not block the UDL fetch: take the newest accepted set and name the newer ones refused",
+  "note": "Found from the owner's SPC-240 probe on 41866, 2026-11-13. EXO files every set with ephemType 2, which check_elset refuses, and its epochs are often a millisecond newer than the matching KBR and NorthStar sets, so they are not tied at the newest. Replaying four real records at 13:00 UTC: the newest is EXO alone, it is refused, and the fetch returns nothing although KBR and NorthStar pass. Fix: take the newest set the check accepts, and state each newer set refused, its provider and why, on screen and in the log; staleness limits still apply. Reverses the 0.34.0 rule that an older set is not taken instead (Claude's design call, not an owner ruling). Whether UDL's ephemType 2 means plain SGP4 is unconfirmed; it stays refused until a source says so.",
+  "files": [
+   "spectre/web/routes/udl.py",
+   "spectre/astro/elset_check.py"
+  ],
+  "state": "built",
+  "est": 180,
+  "version": "0.45.0",
+  "actualNote": "not measured: built by a worktree agent with an independent review, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-244",
+  "priority": "med",
+  "order": 9,
+  "group": "port",
+  "minutes": 240,
+  "needs_owner": true,
+  "human_minutes": 15,
+  "task": "Accept ephemeris type 2 element sets by converting their Brouwer mean motion to Kozai, per provider, once confirmed",
+  "note": "Owner research, 2026-11-14, cites AGI STK and a.i. solutions FreeFlyer: type 2 marks SGP4 elements whose mean motion is the Brouwer form, which the standard SGP4 code converts again. A local test on a near-equatorial GEO object at three epochs found the type 2 provider's mean motion 3.77e-5 rev/day below other providers' (predicted Brouwer offset 3.73e-5); converted to Kozai, its sets agreed with another provider's within 0.05 to 0.38 km over 72 h against about 30 km unconverted. Needs: an inclined-object repeat of the test (the offset changes size and sign with inclination), and the owner's ruling to accept per provider with the conversion stated on screen. Types 1, 3 to 9 stay refused.",
+  "files": [
+   "spectre/astro/elset_check.py",
+   "spectre/web/routes/udl.py"
+  ]
+ }
+]

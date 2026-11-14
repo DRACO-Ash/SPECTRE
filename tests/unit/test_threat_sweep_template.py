@@ -13,6 +13,7 @@ something that was never tried. These cases are the guard.
 
 from __future__ import annotations
 
+import html
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,8 +22,9 @@ from typing import Any
 import pytest
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from spectre.domain.custody import Custody
 from spectre.domain.models import ThreatAssessment, ThreatSweepEntry, ThreatTarget
-from spectre.domain.threat_assessment import CapabilityEvidence
+from spectre.domain.threat_assessment import CapabilityEvidence, ConfidenceContext
 from spectre.web.routes.threat import _compute_worst_coa
 
 _TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "spectre" / "web" / "templates"
@@ -135,11 +137,15 @@ class TestTheTwoFindingsStaySeparatelyVisible:
         html = _render(_context())
         assert "GEOMETRIC ACCESS" in html
         assert "ASSESSED CAPABILITY" in html
-        # 401 m/s is an AGGRESSIVE profile for GEO; the object is Degraded,
-        # so capability is MINIMAL. Shown side by side rather than collapsed
-        # into one word that then disagrees with the intel panel beside it.
-        assert re.search(r"GEOMETRIC ACCESS.*?MEDIUM", html, re.S)
-        assert re.search(r"ASSESSED CAPABILITY.*?MINIMAL", html, re.S)
+        # 401 m/s is an AGGRESSIVE profile for GEO, but no flown platform
+        # delivers it in 0.5 h, so access floors at MINIMAL; the object is
+        # Degraded, so capability is MINIMAL. Shown side by side rather than
+        # collapsed into one word that then disagrees with the intel panel
+        # beside it. Each band is read from the element after its own label:
+        # "GEOMETRIC ACCESS.*?MEDIUM" passed only by reaching the old
+        # confidence MEDIUM further along the line (SPC-160).
+        assert re.search(r"GEOMETRIC ACCESS</span>\s*<strong>MINIMAL</strong>", html)
+        assert re.search(r"ASSESSED CAPABILITY</span>\s*<strong>MINIMAL</strong>", html)
         assert "MINIMAL THREAT" in html, "the weaker side governs the verdict"
 
     def test_missing_evidence_is_declared_not_hidden(self) -> None:
@@ -147,6 +153,45 @@ class TestTheTwoFindingsStaySeparatelyVisible:
         # Four: the discretionary reserve is listed too since audit F-228.
         assert "4 input(s) unavailable" in html
         assert "propellant budget" in html
+
+
+def _worst(capability: CapabilityEvidence, context: ConfidenceContext) -> dict[str, Any]:
+    """The worst case card for the fixture's one entry, with *capability* and *context*."""
+    coa = _compute_worst_coa(_context()["assessment"].entries, capability, 3.0, context)
+    assert coa is not None
+    return coa
+
+
+class TestTheConfidenceSaysWhatItRestsOn:
+    """SPC-160: confidence counts sources once, never geometry, and says what held it down."""
+
+    def test_the_basis_is_on_the_page(self) -> None:
+        page = html.unescape(_render(_context()))
+        # The fixture's record is undated, as all 44 bundled records are, so it
+        # cannot establish identity and is named as not counted.
+        assert "Rests on 0 independent sources: nothing is held about the satellite itself." in page
+        assert "the assessed record, which carries no date, so cannot establish identity" in page
+        assert "Orbital geometry is not counted." in page
+
+    def test_a_synthetic_set_reads_low_and_says_why(self) -> None:
+        coa = _worst(CapabilityEvidence(intel_threat_level="HIGH", propellant_used_pct=20.0, manoeuvres_observed=4),
+                     ConfidenceContext(data_mode="SYNTHETIC", custody=Custody.HELD))
+        page = html.unescape(_render(_context(worst_coa=coa)))
+        assert re.search(r"CONFIDENCE</span>\s*<strong>LOW</strong>", page)
+        assert "computed from SYNTHETIC element sets: describes the exercise, not the satellite" in page
+
+    def test_an_unrecognised_label_is_named_as_missing_with_its_reason(self) -> None:
+        coa = _worst(CapabilityEvidence(intel_threat_level="SEVERE"), ConfidenceContext("REAL", Custody.HELD))
+        page = html.unescape(_render(_context(worst_coa=coa)))
+        assert "assessed threat level ('SEVERE' is not a recognised band)" in page
+
+    def test_a_conflict_is_named(self) -> None:
+        coa = _worst(CapabilityEvidence(intel_threat_level="HIGH", operational_status="Degraded",
+                                        propellant_used_pct=20.0, manoeuvres_observed=4),
+                     ConfidenceContext("REAL", Custody.HELD))
+        page = html.unescape(_render(_context(worst_coa=coa)))
+        assert "the record says Degraded, but the history shows 4 burns: possible deception" in page
+        assert re.search(r"CONFIDENCE</span>\s*<strong>MODERATE</strong>", page)
 
 
 class TestThePostureIsOnTheScreen:

@@ -1,0 +1,86 @@
+# Decision probes P-01 to P-10, P-15 to P-18. Commit d8e4fd7, 2026-11-06T15:57:41Z
+# Command: PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python -m pytest -p no:cacheprovider -o addopts='' -q -s -rA evaluation/probes/test_p01_p05_rules.py evaluation/probes/test_p06_p10_model.py evaluation/probes/test_p15_p18_reproducibility_sensitivity.py
+P-01 costs=[[0.2, 0.6, 0.4], [0.8, 0.3, 0.55]] P=[0.6, 0.4] expected={'minimax': 'R2', 'minimin': 'R0', 'expected_value': 'R0'} observed={'minimax': 'R2', 'minimin': 'R0', 'expected_value': 'R0'}
+.P-01 costs=[[0.1, 0.7, 0.6, 0.8], [0.9, 0.2, 0.5, 0.05], [0.7, 0.6, 0.65, 0.6]] P=[0.2, 0.3, 0.5] expected={'minimax': 'R2', 'minimin': 'R3', 'expected_value': 'R3'} observed={'minimax': 'R2', 'minimin': 'R3', 'expected_value': 'R3'}
+.P-02 pure minimax value=1.0 mixed value=0.5 pick=R0 pick with columns reversed=R0 (index 0 both times: tie broken by order)
+.P-03 dominated column [0.65, 0.8500000000000001] added: expected={'minimax': 'R2', 'minimin': 'R0', 'expected_value': 'R0'} observed={'minimax': 'R2', 'minimin': 'R0', 'expected_value': 'R0'}
+.P-03 dominated column [0.8500000000000001, 0.9500000000000001, 0.75] added: expected={'minimax': 'R2', 'minimin': 'R3', 'expected_value': 'R3'} observed={'minimax': 'R2', 'minimin': 'R3', 'expected_value': 'R3'}
+.P-03 end to end minimax: before=F1 after adding a dominated copy=F1
+P-03 end to end minimin: before=F0 after adding a dominated copy=F0
+P-03 end to end expected_value: before=F1 after adding a dominated copy=F1
+.P-03b one row P 0.1 -> R0; P 1.0 -> R0; rows 0.9/0.9 -> R1; 0.5/0.5 -> R1; P 0 row added -> R0 (base R0); expected scores if P 0.1 were read as stated with a residual nothing-happens row at cost 0: [0.020000000000000004, 0.06, 0.04000000000000001], versus the engine's [0.2, 0.6, 0.4]
+.P-04 k=0.01: expected={'minimax': 'R2', 'minimin': 'R0', 'expected_value': 'R0'} observed={'minimax': 'R2', 'minimin': 'R0', 'expected_value': 'R0'}
+.P-04 k=3.0: expected={'minimax': 'R2', 'minimin': 'R0', 'expected_value': 'R0'} observed={'minimax': 'R2', 'minimin': 'R0', 'expected_value': 'R0'}
+.P-04 k=1000.0: expected={'minimax': 'R2', 'minimin': 'R0', 'expected_value': 'R0'} observed={'minimax': 'R2', 'minimin': 'R0', 'expected_value': 'R0'}
+.P-04 k=0.01: expected={'minimax': 'R2', 'minimin': 'R3', 'expected_value': 'R3'} observed={'minimax': 'R2', 'minimin': 'R3', 'expected_value': 'R3'}
+.P-04 k=3.0: expected={'minimax': 'R2', 'minimin': 'R3', 'expected_value': 'R3'} observed={'minimax': 'R2', 'minimin': 'R3', 'expected_value': 'R3'}
+.P-04 k=1000.0: expected={'minimax': 'R2', 'minimin': 'R3', 'expected_value': 'R3'} observed={'minimax': 'R2', 'minimin': 'R3', 'expected_value': 'R3'}
+.P-04 weights (0.35, 0.25, 0.2, 0.1, 0.1) -> (0.35, 0.25, 0.2, 0.1, 0.1); times 7 -> (0.35, 0.25, 0.2, 0.1, 0.1)
+.P-05 case: every row and column permutation gives {'minimax': 'R2', 'minimin': 'R0', 'expected_value': 'R0'}; distinct outcomes seen: {('R2', 'R0', 'R0')}
+.P-05 case: every row and column permutation gives {'minimax': 'R2', 'minimin': 'R3', 'expected_value': 'R3'}; distinct outcomes seen: {('R2', 'R3', 'R3')}
+.P-05 tie: worst cases X 0.5, Y 0.5, Z 0.9; recommendation when entered {'as (X, Y, Z)': 'X', 'as (Y, X, Z)': 'Y'}
+.P-06 FriendlyResponse fields=['id', 'name', 'action_type', 'cost', 'reversibility', 'time_to_execute_hours', 'description', 'burn']; Scenario fields=['name', 'epoch_utc', 'adversary_actions', 'friendly_responses', 'horizon_hours', 'w_custody', 'w_closest_approach', 'w_dv_cost', 'w_time_to_exec', 'w_reversibility', 'binding', 'threat', 'turns', 'observed']; constraint-like fields=[]; minimax recommends retask sensor, chosen on score alone
+.P-07 minimax: matrix pick F1, depth-1 tree pick F1; scores equal: True
+.P-07 minimin: matrix pick F1, depth-1 tree pick F1; scores equal: True
+.P-07 expected_value: matrix pick F1, depth-1 tree pick F1; scores equal: True
+.P-07 two turns, unbound: refusal='No tree built: a tree starts each turn from where the last one left both orbits, so it needs a red track and a blue asset bound, both current. This result is one turn.'; pick F1 against one-turn F1
+.P-07 branches(rows, responses, turns)={(2, 3, 2): 42, (3, 3, 3): 819, (5, 5, 2): 650}; cap 1000
+.P-08 shares after a burn: (0.625, 0.37499999999999994, None); line: If turn 1 shows a burn: row 1, A0, 0.62 of the weight, from the default P of 0.5, untouched; row 2, A1, 0.37 of the weight, from your P.
+.P-08 priors 1e-300, 1e-300, 0: shares after a burn (0.5, 0.5, 0.0)
+.P-09 two copies of one observation refused: Scenario.observed must be a Seen or None; got [<Seen.BURN: 'a burn'>, <Seen.BURN: 'a burn'>]
+.P-10 cues checked (observation, steps, range width): [('hold UDL conjunctions for it', 3, 4), ('pull its element-set history', 3, 4), ('pull its GCAT catalogue entry', 0, 4), ('hold UDL conjunctions for it', 3, 4), ('pull its element-set history', 3, 4), ('pull its GCAT catalogue entry', 0, 4), ('analyst to date and source the', 0, 4), ('hold UDL conjunctions for it', 3, 4), ('pull its element-set history', 3, 4), ('analyst to date and source the', 0, 4), ('hold UDL conjunctions for it', 3, 4), ("pull a second provider's eleme", 4, 4), ('analyst to date and source the', 0, 4), ('hold UDL conjunctions for it', 0, 1), ("pull a second provider's eleme", 0, 1), ('analyst to date and source the', 0, 1), ('hold UDL conjunctions for it', 0, 1), ("pull a second provider's eleme", 0, 1), ('analyst to date and source the', 0, 1), ('hold UDL conjunctions for it', 0, 1), ('analyst to date and source the', 0, 1), ('analyst to date and source the', 0, 1), ('hold UDL conjunctions for it', 3, 4), ("pull a second provider's eleme", 4, 4), ('analyst to date and source the', 2, 4)]
+.P-10 decide-by in 10 h: COLLECT_FIRST: Collect first: probe collection, about 4.0 h, lands before decide-by at 22:00 UTC on 1 Jun. The Threat range runs from LOW to CRITICAL, across Threat HIGH, where your response changes, and this could settle it.
+P-10 decide-by in 3 h: ACT_ON_CEILING: Act on the ceiling: treat it as Threat CRITICAL. The Threat range runs from LOW to CRITICAL, across Threat HIGH, where your response changes, and no collection SPECTRE can read lands before decide-by at 15:00 UTC on 1 Jun.
+.P-10 straddle: advice COLLECT_FIRST, pick F1; critical: advice ACT_ON_CEILING, pick F1; matrices identical: True
+.P-15 lookup: pick F1 then F1; scores identical True; sampled bands identical True; input hashes identical True (1 inputs); code version 0.24.2; computed_at differs True; nothing is stored to replay from
+.P-15 computed: pick F1 then F1; scores identical True; sampled bands identical True; input hashes identical True (3 inputs); code version 0.24.2; computed_at differs True; nothing is stored to replay from
+.P-15 sampled: pick F1 then F1; scores identical True; sampled bands identical True; input hashes identical True (4 inputs); code version 0.24.2; computed_at differs True; nothing is stored to replay from
+.P-16 lookup: starting picks {'minimax': 'F1', 'expected_value': 'F1'}; score rebuilt from cell figures within 3.33e-07; smallest change per weight (others rescaled) that changes the pick: {'w_custody': {'expected_value': (-0.306, 'F0'), 'minimax': (-0.323, 'F0')}, 'w_closest_approach': {'expected_value': (0.348, 'F2'), 'minimax': (0.685, 'F2')}, 'w_dv_cost': {'minimax': (0.8, 'F0'), 'expected_value': (0.8, 'F0')}, 'w_time_to_exec': {'expected_value': (0.746, 'F0'), 'minimax': (0.804, 'F0')}, 'w_reversibility': {'expected_value': (0.516, 'F0'), 'minimax': (0.63, 'F0')}}; confirmed by a full re-evaluation: {('w_custody', 'expected_value'): True, ('w_custody', 'minimax'): True, ('w_closest_approach', 'expected_value'): True, ('w_closest_approach', 'minimax'): True, ('w_dv_cost', 'minimax'): True, ('w_dv_cost', 'expected_value'): True, ('w_time_to_exec', 'expected_value'): True, ('w_time_to_exec', 'minimax'): True, ('w_reversibility', 'expected_value'): True, ('w_reversibility', 'minimax'): True}
+.P-16 computed: starting picks {'minimax': 'F1', 'expected_value': 'F1'}; score rebuilt from cell figures within 5.55e-17; smallest change per weight (others rescaled) that changes the pick: {'w_custody': {'minimax': (0.65, 'F0'), 'expected_value': (0.65, 'F0')}, 'w_closest_approach': {'expected_value': (0.706, 'F0'), 'minimax': (0.75, 'F0')}, 'w_dv_cost': {'expected_value': (-0.088, 'F0'), 'minimax': (-0.089, 'F0')}, 'w_time_to_exec': {'minimax': (0.9, 'F0'), 'expected_value': (0.9, 'F0')}, 'w_reversibility': {'expected_value': (0.081, 'F0'), 'minimax': (0.082, 'F0')}}; confirmed by a full re-evaluation: {('w_custody', 'minimax'): True, ('w_custody', 'expected_value'): True, ('w_closest_approach', 'expected_value'): True, ('w_closest_approach', 'minimax'): True, ('w_dv_cost', 'expected_value'): True, ('w_dv_cost', 'minimax'): True, ('w_time_to_exec', 'minimax'): True, ('w_time_to_exec', 'expected_value'): True, ('w_reversibility', 'expected_value'): True, ('w_reversibility', 'minimax'): True}
+.P-16 sampled: starting picks {'minimax': 'F1', 'expected_value': 'F1'}; score rebuilt from cell figures within 5.00e-07; smallest change per weight (others rescaled) that changes the pick: {'w_custody': {'minimax': (0.65, 'F0'), 'expected_value': (0.65, 'F0')}, 'w_closest_approach': {'minimax': (0.75, 'F0'), 'expected_value': (0.75, 'F0')}, 'w_dv_cost': {'minimax': (-0.089, 'F0'), 'expected_value': (-0.089, 'F0')}, 'w_time_to_exec': {'minimax': (0.9, 'F0'), 'expected_value': (0.9, 'F0')}, 'w_reversibility': {'minimax': (0.082, 'F0'), 'expected_value': (0.082, 'F0')}}; confirmed by a full re-evaluation: {('w_custody', 'minimax'): True, ('w_custody', 'expected_value'): True, ('w_closest_approach', 'minimax'): True, ('w_closest_approach', 'expected_value'): True, ('w_dv_cost', 'minimax'): True, ('w_dv_cost', 'expected_value'): True, ('w_time_to_exec', 'minimax'): True, ('w_time_to_exec', 'expected_value'): True, ('w_reversibility', 'minimax'): True, ('w_reversibility', 'expected_value'): True}
+.P-17 score X (no burn, 1 km) 0.251384; score Y (1 m/s, 100 km) 0.252889; minimax recommends X; break-even: 1 m/s of our delta-V weighs the same as 400 km of miss distance; a 100 m/s and a 500 m/s burn score 0.450889 and 0.450889
+.P-18 lookup: 12 cells, 24 basis marks on the page (closest approach and custody per cell), 12 score spread lines, modelled banner True, recommendation stability wording found: []
+.P-18 computed: 16 cells, 32 basis marks on the page (closest approach and custody per cell), 16 score spread lines, modelled banner True, recommendation stability wording found: []
+.
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p01_rules_match_hand_computed_answers[A]
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p01_rules_match_hand_computed_answers[B]
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p02_pure_strategy_minimax_is_not_the_mixed_value
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p03_a_dominated_response_changes_no_pick[A]
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p03_a_dominated_response_changes_no_pick[B]
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p03_end_to_end_a_dominated_response_changes_no_pick
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p03b_p_is_renormalised_over_the_rows_entered
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p04_positive_scaling_changes_no_choice[A-0.01]
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p04_positive_scaling_changes_no_choice[A-3.0]
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p04_positive_scaling_changes_no_choice[A-1000.0]
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p04_positive_scaling_changes_no_choice[B-0.01]
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p04_positive_scaling_changes_no_choice[B-3.0]
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p04_positive_scaling_changes_no_choice[B-1000.0]
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p04_end_to_end_scaling_the_weights_changes_nothing
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p05_permutations_without_ties_change_no_result[A]
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p05_permutations_without_ties_change_no_result[B]
+PASSED evaluation/probes/test_p01_p05_rules.py::test_p05_a_tie_is_broken_by_the_order_responses_were_entered
+PASSED evaluation/probes/test_p06_p10_model.py::test_p06_no_veto_can_be_expressed
+PASSED evaluation/probes/test_p06_p10_model.py::test_p07_depth_one_equals_the_matrix[minimax]
+PASSED evaluation/probes/test_p06_p10_model.py::test_p07_depth_one_equals_the_matrix[minimin]
+PASSED evaluation/probes/test_p06_p10_model.py::test_p07_depth_one_equals_the_matrix[expected_value]
+PASSED evaluation/probes/test_p06_p10_model.py::test_p07_an_unbound_two_turn_tree_is_refused_and_the_matrix_stands
+PASSED evaluation/probes/test_p06_p10_model.py::test_p07_no_pruning_full_enumeration_is_counted
+PASSED evaluation/probes/test_p06_p10_model.py::test_p08_posterior_matches_a_hand_computation
+PASSED evaluation/probes/test_p06_p10_model.py::test_p08_tiny_priors_do_not_underflow
+PASSED evaluation/probes/test_p06_p10_model.py::test_p09_an_observation_cannot_be_entered_twice
+PASSED evaluation/probes/test_p06_p10_model.py::test_p10_cue_value_is_never_negative_and_never_exceeds_the_range
+PASSED evaluation/probes/test_p06_p10_model.py::test_p10_delay_changes_the_advice
+PASSED evaluation/probes/test_p06_p10_model.py::test_p10_collect_first_cannot_change_the_engines_recommendation
+PASSED evaluation/probes/test_p15_p18_reproducibility_sensitivity.py::test_p15_same_inputs_same_result[lookup]
+PASSED evaluation/probes/test_p15_p18_reproducibility_sensitivity.py::test_p15_same_inputs_same_result[computed]
+PASSED evaluation/probes/test_p15_p18_reproducibility_sensitivity.py::test_p15_same_inputs_same_result[sampled]
+PASSED evaluation/probes/test_p15_p18_reproducibility_sensitivity.py::test_p16_smallest_single_weight_change_that_flips_the_pick[lookup]
+PASSED evaluation/probes/test_p15_p18_reproducibility_sensitivity.py::test_p16_smallest_single_weight_change_that_flips_the_pick[computed]
+PASSED evaluation/probes/test_p15_p18_reproducibility_sensitivity.py::test_p16_smallest_single_weight_change_that_flips_the_pick[sampled]
+PASSED evaluation/probes/test_p15_p18_reproducibility_sensitivity.py::test_p17_closest_approach_barely_moves_the_score
+PASSED evaluation/probes/test_p15_p18_reproducibility_sensitivity.py::test_p18_every_figure_on_the_page_carries_its_basis[lookup]
+PASSED evaluation/probes/test_p15_p18_reproducibility_sensitivity.py::test_p18_every_figure_on_the_page_carries_its_basis[computed]
+38 passed in 8.71s
+# exit 0

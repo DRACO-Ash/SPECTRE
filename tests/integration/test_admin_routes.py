@@ -1,8 +1,29 @@
-"""Integration tests for /admin/users CRUD routes."""
+"""Integration tests for /admin/users CRUD routes.
+
+Each test makes the accounts it needs and the module removes them at the end.
+The tests that edited new_op used to rely on an earlier test creating it, so
+run alone they failed whatever the code did, and the mutation runner credited
+those failures to its mutants (SPC-071). The accounts left behind, an admin
+among them, changed what a later module's last-admin test was testing.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
+import pytest
+
 from tests.conftest import csrf_headers
+from tests.integration.test_admin_route_outcomes import remove_accounts
+
+#: Every account this module creates; the module removes them all when it ends.
+_MADE_HERE = ("new_op", "second_admin", "op_forbidden", "throwaway", "shape_probe", "shape_update", "shape_delete")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _leave_no_accounts(client: object) -> Iterator[None]:
+    yield
+    remove_accounts(client, _MADE_HERE)
 
 
 def _admin_session(client: object) -> dict[str, str]:  # type: ignore[type-arg]
@@ -40,6 +61,17 @@ def _row(client: object, cookies: dict[str, str], username: str) -> tuple[str, s
         if f">{username}<" in match.group(0):
             return match.group(1), match.group(0)
     raise AssertionError(f"{username} is not in the admin user table")
+
+
+def _ensure_new_op(client: object, cookies: dict[str, str]) -> None:  # type: ignore[type-arg]
+    """Create the operator new_op, password hunter2, unless an earlier test already has."""
+    if ">new_op<" not in client.get("/admin/users", cookies=cookies).content.decode():  # type: ignore[attr-defined]
+        client.post(  # type: ignore[attr-defined]
+            "/admin/users",
+            data={"username": "new_op", "password": "hunter2", "role": "operator"},
+            cookies=cookies, headers=csrf_headers(cookies),
+        )
+    _row(client, cookies, "new_op")
 
 
 def _role(client: object, cookies: dict[str, str], username: str) -> str:  # type: ignore[type-arg]
@@ -101,6 +133,7 @@ class TestCreateUser:
 
     def test_duplicate_username_rejected(self, client: object) -> None:
         cookies = _admin_session(client)
+        _ensure_new_op(client, cookies)
         resp = client.post(  # type: ignore[attr-defined]
             "/admin/users",
             data={"username": "new_op", "password": "whatever", "role": "operator"},
@@ -165,6 +198,7 @@ class TestEditUser:
     def test_update_role(self, client: object) -> None:
         """POST /admin/users/{id} changes the role, as the table then shows."""
         cookies = _admin_session(client)
+        _ensure_new_op(client, cookies)
         uid, _ = _row(client, cookies, "new_op")
         assert _role(client, cookies, "new_op") == "operator"
         promote = client.post(  # type: ignore[attr-defined]
@@ -183,6 +217,7 @@ class TestEditUser:
     def test_password_reset(self, client: object) -> None:
         """POST /admin/users/{id} with new_password resets the password."""
         cookies = _admin_session(client)
+        _ensure_new_op(client, cookies)
         uid, _ = _row(client, cookies, "new_op")
         reset_resp = client.post(  # type: ignore[attr-defined]
             f"/admin/users/{uid}",
@@ -304,13 +339,9 @@ class TestFlashResponseShape:
             data={"username": "shape_update", "password": "hunter2", "role": "operator"},
             cookies=cookies, headers=csrf_headers(cookies),
         )
-        listing = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
-        import re
-
-        ids = re.findall(rb'id="user-row-(\d+)"', listing.content)
-        assert ids, "no user rows rendered"
+        uid, _ = _row(client, cookies, "shape_update")
         resp = client.post(  # type: ignore[attr-defined]
-            f"/admin/users/{int(ids[-1])}",
+            f"/admin/users/{uid}",
             data={"role": "operator", "new_password": ""},
             cookies=cookies, headers=csrf_headers(cookies),
         )
@@ -325,12 +356,9 @@ class TestFlashResponseShape:
             data={"username": "shape_delete", "password": "hunter2", "role": "operator"},
             cookies=cookies, headers=csrf_headers(cookies),
         )
-        listing = client.get("/admin/users", cookies=cookies)  # type: ignore[attr-defined]
-        import re
-
-        ids = re.findall(rb'id="user-row-(\d+)"', listing.content)
+        uid, _ = _row(client, cookies, "shape_delete")
         resp = client.request(  # type: ignore[attr-defined]
-            "DELETE", f"/admin/users/{int(ids[-1])}",
+            "DELETE", f"/admin/users/{uid}",
             cookies=cookies, headers=csrf_headers(cookies),
         )
         assert resp.status_code == 200

@@ -8,14 +8,18 @@ state vectors.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
 
+from spectre.astro.closest_approach import closest_approach
 from spectre.astro.constants import MU_EARTH, R_EARTH
 from spectre.astro.cw_geometry import CWState, _cw_propagate, _eci_to_hill_matrix, _initial_hill_state
-from spectre.astro.kepler import propagate_two_body
+from spectre.astro.kepler import KeplerConvergenceError, propagate_two_body
 from spectre.astro.lambert import LambertSolution, cheapest_lambert, solve_lambert
 from spectre.astro.propagator import StateVector, TLEOrbit, state_to_keplerian
 from spectre.astro.tactical import (
@@ -57,6 +61,10 @@ class Burn:
     dv_prograde: float = 0.0  # km/s — along-track component
     dv_normal: float = 0.0    # km/s — cross-track component
     dv_radial: float = 0.0    # km/s — radial component
+    # km/s: radial, in-track and cross-track in the burning object's own frame at its state just before the burn,
+    # the frame the Decision Engine applies a burn in (SPC-184). The parts above are split at whichever state the
+    # solver passed, which for a Lambert arrival burn is the target's. None for a burn of no size.
+    own_ric: tuple[float, float, float] | None = None
 
 
 @dataclass
@@ -145,7 +153,8 @@ def lambert_intercept(
 
     # Decompose delta-V into VNB (prograde/normal/radial) frame.
     burn1 = _make_burn(1, t_departure, sol.delta_v1, sv_red)
-    burn2 = _make_burn(2, t_arrival, sol.delta_v2, sv_blue)
+    # Split at the target's state, as the sweep shows it; red's own frame there is the end of its transfer arc.
+    burn2 = _make_burn(2, t_arrival, sol.delta_v2, sv_blue, own=StateVector(epoch=t_arrival, r=r_target, v=sol.v2))
 
     # Actual miss distance at arrival.
     _miss = float(np.linalg.norm(r_target - sv_blue.r)) if target_distance_km > 0 else 0.0
@@ -348,8 +357,9 @@ def phasing_intercept(
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        # The closure is at the chaser's radius, so the radial gap remains.
-        miss_distance_km=abs(r_red - r_blue),
+        # How close the phasing orbit brings the chaser, flown: the radial gap alone (F-025) said nothing of the
+        # along-track or out-of-plane error (charming-dirac d2e6513).
+        miss_distance_km=_flown_closest_km(sv_red, dv1_vec, blue_orbit, result.time_to_intercept_s, mu),
     )
 
 
@@ -409,7 +419,8 @@ def cw_radial_intercept(
         total_delta_v=cw.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        miss_distance_km=desired_separation_km,
+        # The separation asked for is from red's own orbit, not from the target: the hop is flown instead.
+        miss_distance_km=_flown_closest_km(sv_red, dv_vec, blue_orbit, time_s, mu),
     )
 
 
@@ -474,9 +485,17 @@ def vbar_hop_intercept(
 ) -> InterceptSolution:
     """V-bar hop approach sequence along the velocity vector.
 
-    Executes a multi-hop V-bar approach using two radial burns per hop.
-    If *hop_distance_km* is ``None``, derives it from the current
-    along-track separation divided by *n_hops*.
+    Each hop is two radial impulses half an orbit apart, an entry and a stop, each n·d/4 (Clohessy-Wiltshire): the
+    entry starts the hop and, half an orbit on, the radial rate it gave is reversed, so the same impulse stops it.
+    An outward impulse drifts the chaser backwards along V-bar, so the hop fires inward to advance on a target ahead
+    and outward to fall back on one behind (SPC-237). A hop's stop and the next hop's entry fall at the same instant,
+    the same way, so they are one burn of twice the size: *n_hops* hops are n_hops + 1 burns, whose sizes add up to
+    the sequence's cost. The solution used to list only the first entry and the last stop, which flown advance one
+    hop's distance while the cost counted every hop (V0.40 review). If *hop_distance_km* is ``None``, it is the
+    current along-track separation divided by *n_hops*.
+
+    The miss is the closest red comes to the target flying every burn (flown_approach), as the other approaches
+    report theirs; NaN inside miss_not_read.
 
     Args:
         red_tle: TLE of the manoeuvring satellite.
@@ -496,41 +515,41 @@ def vbar_hop_intercept(
 
     r_ref = (sv_red.r_mag + sv_blue.r_mag) / 2.0
 
+    dr = np.array(sv_blue.r) - np.array(sv_red.r)
+    on_axis = float(np.dot(dr, sv_red.v / sv_red.v_mag))
     if hop_distance_km is None:
-        dr = np.array(sv_blue.r) - np.array(sv_red.r)
-        v_hat_d = sv_red.v / sv_red.v_mag
-        along_track_sep = abs(float(np.dot(dr, v_hat_d)))
-        hop_distance_km = max(along_track_sep / n_hops, 1.0)
+        hop_distance_km = max(abs(on_axis) / n_hops, 1.0)
+    # +1 for a target ahead along V-bar, -1 for one behind (SPC-237).
+    side = math.copysign(1.0, on_axis)
 
     result = vbar_hop_sequence(r_ref, hop_distance_km, n_hops, mu=mu)
     t_arrival = t_departure + timedelta(seconds=result.total_time_s)
-
-    # First radial burn (entry): magnitude = dv_per_hop / 2
-    v_hat = sv_red.v / sv_red.v_mag
-    h_vec = np.cross(sv_red.r, sv_red.v)
-    h_mag = float(np.linalg.norm(h_vec))
-    n_hat = h_vec / h_mag if h_mag > 1e-10 else np.array([0.0, 0.0, 1.0])
-    b_hat = np.cross(v_hat, n_hat)  # radial direction
-    dv_mag = result.delta_v_per_hop / 2.0
-    burn1 = _make_burn(1, t_departure, b_hat * dv_mag, sv_red)
-
-    # Final corrective burn (anti-radial, closing the last hop)
-    sv_red_arr = red_orbit.propagate(t_arrival)
-    v_hat_a = sv_red_arr.v / sv_red_arr.v_mag
-    h_a = np.cross(sv_red_arr.r, sv_red_arr.v)
-    h_a_mag = float(np.linalg.norm(h_a))
-    n_hat_a = h_a / h_a_mag if h_a_mag > 1e-10 else np.array([0.0, 0.0, 1.0])
-    b_hat_a = np.cross(v_hat_a, n_hat_a)
-    burn2 = _make_burn(2, t_arrival, -b_hat_a * dv_mag, sv_red_arr)
+    impulse = result.delta_v_per_hop / 2.0
+    burns: list[Burn] = []
+    # Each burn is radial at red's own position then, the plan flown two-body to it, as flight.fly flies it.
+    sv = sv_red
+    for k in range(n_hops + 1):
+        at = t_departure + timedelta(seconds=k * result.time_per_hop_s)
+        sv = _after_burn(sv, at, np.zeros(3), mu)
+        size = impulse if k in (0, n_hops) else 2.0 * impulse
+        burn = _make_burn(k + 1, at, -side * sv.r / sv.r_mag * size, sv)
+        burns.append(burn)
+        sv = _after_burn(sv, at, burn.delta_v, mu)
 
     return InterceptSolution(
         method="vbar_hop",
-        burns=[burn1, burn2],
+        burns=burns,
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        miss_distance_km=result.total_advance_km,
+        miss_distance_km=_flown_plan_km(sv_red, burns, blue_orbit, result.total_time_s, mu),
     )
+
+
+def _flown_plan_km(sv: StateVector, burns: Sequence[Burn], target: TLEOrbit, span_s: float, mu: float) -> float:
+    """The closest *target* comes to red flying every one of *burns* from *sv* for *span_s* s; NaN inside
+    miss_not_read or when the search cannot run."""
+    return flown_approach(sv, [(b.epoch, b.delta_v) for b in burns], target, span_s, mu).miss_km
 
 
 def hbar_hop_intercept(
@@ -544,9 +563,14 @@ def hbar_hop_intercept(
 ) -> InterceptSolution:
     """H-bar hop approach sequence in the orbit-normal direction.
 
-    Executes a multi-hop H-bar approach using normal burns at node
-    crossings.  If *hop_distance_km* is ``None``, derives it from the
-    current cross-track separation divided by *n_hops*.
+    Out-of-plane motion is simple harmonic, so each hop is one normal burn of n·d at a plane crossing, along the
+    out-of-plane velocity there, which raises the swing by d (tactical.hbar_hop_sequence): *n_hops* burns half an
+    orbit apart, alternating in direction, whose sizes add up to the sequence's cost. The swing peaks a quarter orbit
+    after the last burn, on the side that burn points to, which is set to the target's side. The solution used to
+    list a first burn and a second at arrival, the same way, which is not the sequence it costed (V0.40 review). If
+    *hop_distance_km* is ``None``, it is the current cross-track separation divided by *n_hops*.
+
+    The miss is the closest red comes to the target flying every burn (flown_approach); NaN inside miss_not_read.
 
     Args:
         red_tle: TLE of the manoeuvring satellite.
@@ -566,37 +590,33 @@ def hbar_hop_intercept(
 
     r_ref = (sv_red.r_mag + sv_blue.r_mag) / 2.0
 
+    dr = np.array(sv_blue.r) - np.array(sv_red.r)
+    cross_track = float(np.dot(dr, _unit_normal(sv_red)))
     if hop_distance_km is None:
-        dr = np.array(sv_blue.r) - np.array(sv_red.r)
-        h_vec0 = np.cross(sv_red.r, sv_red.v)
-        h_mag0 = float(np.linalg.norm(h_vec0))
-        n_hat0 = h_vec0 / h_mag0 if h_mag0 > 1e-10 else np.array([0.0, 0.0, 1.0])
-        cross_track_sep = abs(float(np.dot(dr, n_hat0)))
-        hop_distance_km = max(cross_track_sep / n_hops, 1.0)
+        hop_distance_km = max(abs(cross_track) / n_hops, 1.0)
 
     result = hbar_hop_sequence(r_ref, hop_distance_km, n_hops, mu=mu)
     t_arrival = t_departure + timedelta(seconds=result.total_time_s)
-
-    # First normal burn in the orbit-normal (H-bar) direction
-    h_vec = np.cross(sv_red.r, sv_red.v)
-    h_mag = float(np.linalg.norm(h_vec))
-    n_hat = h_vec / h_mag if h_mag > 1e-10 else np.array([0.0, 0.0, 1.0])
-    burn1 = _make_burn(1, t_departure, n_hat * result.delta_v_per_hop, sv_red)
-
-    # Final corrective burn (anti-normal)
-    sv_red_arr = red_orbit.propagate(t_arrival)
-    h_arr = np.cross(sv_red_arr.r, sv_red_arr.v)
-    h_arr_mag = float(np.linalg.norm(h_arr))
-    n_hat_arr = h_arr / h_arr_mag if h_arr_mag > 1e-10 else np.array([0.0, 0.0, 1.0])
-    burn2 = _make_burn(2, t_arrival, n_hat_arr * result.delta_v_per_hop, sv_red_arr)
+    # Burn k points (-1)^k times the first, so the last, which sets the side of the final peak, points to the target.
+    last = math.copysign(1.0, cross_track)
+    burns: list[Burn] = []
+    # Each burn is along red's own orbit normal then, the plan flown two-body to it, as flight.fly flies it.
+    sv = sv_red
+    for k in range(n_hops):
+        at = t_departure + timedelta(seconds=k * result.time_per_hop_s)
+        sv = _after_burn(sv, at, np.zeros(3), mu)
+        sense = last * (-1.0) ** (n_hops - 1 - k)
+        burn = _make_burn(k + 1, at, sense * _unit_normal(sv) * result.delta_v_per_hop, sv)
+        burns.append(burn)
+        sv = _after_burn(sv, at, burn.delta_v, mu)
 
     return InterceptSolution(
         method="hbar_hop",
-        burns=[burn1, burn2],
+        burns=burns,
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
-        miss_distance_km=result.total_advance_km,
+        miss_distance_km=_flown_plan_km(sv_red, burns, blue_orbit, result.total_time_s, mu),
     )
 
 
@@ -705,7 +725,9 @@ def plane_change_intercept(
             total_delta_v=dv_mag,
             departure_epoch=t_burn,
             arrival_epoch=t_burn,
-            miss_distance_km=0.0,
+            # Aligning the planes does nothing to the along-track gap, so the miss is the closest approach over the
+            # revolution after the burn. It was 0.0, and a GEO target 610 km away read as reached (d2e6513).
+            miss_distance_km=_flown_closest_km(sv_burn, dv_vec, blue_orbit, period_s, mu),
         )
     # Different altitudes: a Hohmann-like transfer with the plane change on
     # the slower burn, as combined_altitude_plane_change prices it.
@@ -1689,7 +1711,9 @@ def min_time_intercept_wrapper(
     sol, sv_target = hit
     t_arrival = t_epoch + timedelta(seconds=hi)
     burn1 = _make_burn(1, t_epoch, sol.delta_v1, sv_red)
-    burn2 = _make_burn(2, t_arrival, sol.delta_v2, sv_target)
+    burn2 = _make_burn(
+        2, t_arrival, sol.delta_v2, sv_target, own=StateVector(epoch=t_arrival, r=sv_target.r, v=sol.v2),
+    )
 
     return InterceptSolution(
         method="min_time",
@@ -1713,13 +1737,124 @@ def _separation(sv: StateVector, target: TLEOrbit) -> float:
     """Distance (km) from *sv* to *target* at the same epoch."""
     return float(np.linalg.norm(sv.r - target.propagate(sv.epoch).r))
 
+
+#: Samples per revolution when the closest approach of a flown burn is searched for; closest_approach refines each
+#: minimum it finds. One every 15 minutes at GEO and one a minute in LEO, against relative motion that, after a
+#: plane change or a phasing burn, changes over the whole revolution (charming-dirac d2e6513 sampled at this rate).
+_APPROACH_SAMPLES_PER_REV = 96
+#: The closest approach's time is refined to this, in seconds: the miss is all that is reported, and a second of
+#: relative motion moves it by metres at most.
+_APPROACH_TCA_TOLERANCE_S = 1.0
+
+
+#: True while a caller that reads no miss runs the solvers: the threat sweep, which decides arrival by method and
+#: shows no miss. Flying each burn costs a few milliseconds a solve, and the sweep makes thousands (it took a 24-target
+#: GEO sweep from 0.7 s to 1.2 s), so inside it the flown figure is NaN, not computed, and nothing there reads it.
+_MISS_NOT_READ: ContextVar[bool] = ContextVar("_MISS_NOT_READ", default=False)
+
+
+@contextmanager
+def miss_not_read() -> Iterator[None]:
+    """Run the solvers inside this block without flying their burns for a miss; each flown miss is NaN."""
+    token = _MISS_NOT_READ.set(True)
+    try:
+        yield
+    finally:
+        _MISS_NOT_READ.reset(token)
+
+
+@dataclass(frozen=True)
+class FlownApproach:
+    """The closest a flown plan brings red to the target, km, and when; NaN and None when it was not computed."""
+
+    miss_km: float
+    at: datetime | None
+
+    @property
+    def computed(self) -> bool:
+        """Whether there is a figure: NaN is never read as arriving (charming-dirac 5e13b5b, SPC-238)."""
+        return math.isfinite(self.miss_km)
+
+
+#: A flown miss nothing reads (inside miss_not_read) or one the search could not run for (SPC-238).
+NOT_COMPUTED = FlownApproach(math.nan, None)
+
+
+def _after_burn(leg: StateVector, epoch: datetime, dv: np.ndarray, mu: float) -> StateVector:
+    """*leg* coasted two-body to *epoch*, then *dv* applied: the state just after that burn."""
+    dt = (epoch - leg.epoch).total_seconds()
+    r, v = propagate_two_body(leg.r, leg.v, dt, mu) if dt else (leg.r, leg.v)
+    return StateVector(epoch=epoch, r=r, v=np.asarray(v, dtype=float) + np.asarray(dv, dtype=float))
+
+
+def orbit_period_s(sv: StateVector, mu: float = MU_EARTH) -> float | None:
+    """The period of the orbit *sv* is on, s; None when it is not closed."""
+    energy = float(np.dot(sv.v, sv.v)) / 2.0 - mu / float(np.linalg.norm(sv.r))
+    return 2.0 * math.pi * math.sqrt((-mu / (2.0 * energy)) ** 3 / mu) if energy < 0.0 else None
+
+
+def flown_approach(
+    sv: StateVector, burns: Sequence[tuple[datetime, np.ndarray]], target: TLEOrbit, span_s: float,
+    mu: float = MU_EARTH,
+) -> FlownApproach:
+    """The closest *target* comes to an object at *sv* that makes *burns* and coasts two-body for *span_s* seconds.
+
+    The one flown-miss path (0.33.0, SPC-234): plane change, phasing and the R-bar hop fly their single burn through
+    it, and spectre.astro.flight.fly flies every burn of any plan through it for the Intercept Engine. Each burn is
+    (epoch, ECI delta-V, km/s), applied in time order; between burns the motion is two-body, and the target is on
+    SGP4. The search is spectre.astro.closest_approach (SPC-102), sampled _APPROACH_SAMPLES_PER_REV times a
+    revolution of the shortest orbit flown after a burn. A span of 0 is the separation at *sv* itself.
+
+    NOT_COMPUTED inside miss_not_read, and when the search cannot run: no finite separation, or more samples than
+    closest_approach takes, which an R-bar time of about 70 days in LEO needs. That failed the method on the
+    manoeuvre page while the sweep, which reads no miss, solved it (SPC-238).
+    """
+    if _MISS_NOT_READ.get():
+        return NOT_COMPUTED
+    legs = [sv]
+    for epoch, dv in sorted(burns, key=lambda b: b[0]):
+        legs.append(_after_burn(legs[-1], epoch, dv, mu))
+    flown = legs[1:] or legs
+
+    def separation(t: float) -> float:
+        when = sv.epoch + timedelta(seconds=t)
+        leg = next(s for s in reversed(legs) if s.epoch <= when or s is legs[0])
+        r, _ = propagate_two_body(leg.r, leg.v, t - (leg.epoch - sv.epoch).total_seconds(), mu)
+        return float(np.linalg.norm(r - target.propagate(when).r))
+
+    if not span_s > 0.0:
+        return FlownApproach(separation(0.0), sv.epoch)
+    periods = [p for p in (orbit_period_s(s, mu) for s in flown) if p is not None]
+    step_s = min(min(periods, default=span_s) / _APPROACH_SAMPLES_PER_REV, span_s)
+    try:
+        found = closest_approach(separation, span_s, step_s=step_s, tolerance_s=_APPROACH_TCA_TOLERANCE_S)
+    except KeplerConvergenceError:
+        raise  # a propagator fault, a ValueError by type, is not the search being unable to run
+    except ValueError:
+        return NOT_COMPUTED
+    return FlownApproach(found.miss_km, sv.epoch + timedelta(seconds=found.tca_s))
+
+
+def _flown_closest_km(sv: StateVector, dv: np.ndarray, target: TLEOrbit, span_s: float, mu: float) -> float:
+    """The closest *target* comes to an object that burns *dv* at *sv* and coasts two-body for *span_s* seconds.
+
+    flown_approach with the one burn; NaN inside miss_not_read or when the search cannot run (SPC-238).
+    """
+    return flown_approach(sv, [(sv.epoch, dv)], target, span_s, mu).miss_km
+
+
 def _make_burn(
     number: int,
     epoch: datetime,
     dv_eci: np.ndarray,
     sv: StateVector,
+    own: StateVector | None = None,
 ) -> Burn:
-    """Create a Burn with VNB decomposition from an ECI delta-V vector."""
+    """Create a Burn with VNB decomposition from an ECI delta-V vector.
+
+    The VNB parts are split at *sv*; ``own_ric`` at *own*, the burning object's own state just before the burn,
+    when *sv* is another object's (SPC-184), else at *sv*.
+    """
     mag = float(np.linalg.norm(dv_eci))
     if mag < 1e-14:
         return Burn(burn_number=number, epoch=epoch, delta_v=dv_eci, delta_v_mag=0.0)
@@ -1735,6 +1870,8 @@ def _make_burn(
     normal = float(np.dot(dv_eci, n_hat))
     radial = float(np.dot(dv_eci, b_hat))
 
+    mine = sv if own is None else own
+    ric = _eci_to_hill_matrix(mine.r, mine.v) @ dv_eci
     return Burn(
         burn_number=number,
         epoch=epoch,
@@ -1743,4 +1880,5 @@ def _make_burn(
         dv_prograde=prograde,
         dv_normal=normal,
         dv_radial=radial,
+        own_ric=(float(ric[0]), float(ric[1]), float(ric[2])),
     )

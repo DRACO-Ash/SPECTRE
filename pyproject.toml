@@ -41,7 +41,7 @@ namespaces = false
 
 [project]
 name = "spectre"
-version = "0.6.4"
+version = "0.45.0"
 description = "Space Planning, Evaluation and Counter-Threat Response Engine: orbital mechanics, threat assessment, and manoeuvre planning."
 requires-python = ">=3.12"
 
@@ -70,7 +70,10 @@ omit = ["tests/*", "spectre/app_logging/config.py"]
 # coverage cannot slip, and raised as it improves. The HOUSE STANDARD is 80,
 # declared once in scripts/check-quality.sh and reported against on every run:
 # this file must never claim a floor the standard does not accept silently.
-fail_under = 74
+# 90 rests on 95.9 measured at 74d1105 (SPC-014): at 74 the floor guarded
+# nothing, and the five points left are headroom for SQLite and PostgreSQL
+# runs measuring different lines.
+fail_under = 90
 show_missing = true
 
 [tool.ruff]

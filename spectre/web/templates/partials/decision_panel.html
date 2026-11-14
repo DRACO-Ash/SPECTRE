@@ -1,5 +1,152 @@
 {# Decision Engine — Scenario Builder input panel #}
-{# Context: pol (PolAnalysis|None) #}
+{# Context: pol (PolAnalysis|None); red_tracks, blue_assets, selected_red, selected_blue and
+   binding_note for the bind fields (SPC-100), each optional; archetypes, default_samples, min_samples,
+   max_samples, max_sample_hours and longest_horizon for the hypothesis section (SPC-114), each optional;
+   adversary_fields_note and default_gap for each adversary row's P, Conf and Gap (SPC-161), each optional;
+   default_probability, the engine's own default for P, optional: nothing from Understanding fills P (SPC-171);
+   keep_out, optional: the keep-out distance's default, range and note (SPC-191);
+   prefill (decision_from_sweep.SweepPrefill|None), optional: the fill from a sweep entry and what it says, or its
+   problem; it never carries P, Conf or Gap (SPC-150) #}
+
+{% set fill = prefill if prefill is defined and prefill and not prefill.problem else none %}
+{% set refusal = prefill.problem if prefill is defined and prefill else "" %}
+{% set adv_rows = fill.rows if fill and fill.rows else [none] %}
+{# With no keep_out the field shows no figure and no range: a default here would show without its basis, and its
+   range would be a second copy of the engine's. A blank is refused when posted. #}
+{% set keep = keep_out if keep_out is defined else {"default": "", "min": "", "max": "", "note": ""} %}
+
+{% set hyp = {
+  "archetypes": archetypes if archetypes is defined else [],
+  "default_samples": default_samples if default_samples is defined else 500,
+  "min_samples": min_samples if min_samples is defined else 100,
+  "max_samples": max_samples if max_samples is defined else 2000,
+  "max_sample_hours": max_sample_hours if max_sample_hours is defined else "",
+  "longest_horizon": longest_horizon if longest_horizon is defined else "",
+  "longest_horizon_one_burn": longest_horizon_one_burn if longest_horizon_one_burn is defined else "",
+  "longest_horizon_five_burns": longest_horizon_five_burns if longest_horizon_five_burns is defined else "",
+  "burn_axes": burn_axes if burn_axes is defined else [("cheapest", "Cheapest, from the manoeuvre library")],
+  "default_budget": default_budget if default_budget is defined else "50",
+  "max_budget": max_budget if max_budget is defined else "1000",
+  "max_target": max_target if max_target is defined else "100000",
+  "fields_note": adversary_fields_note if adversary_fields_note is defined else "",
+  "default_gap": default_gap if default_gap is defined else 0.7,
+  "default_probability": default_probability if default_probability is defined else 0.5,
+  "max_veto_reason": max_veto_reason if max_veto_reason is defined else 500,
+} %}
+
+{# ── Our burn for one friendly row (SPC-121). Read only for a manoeuvre response; a blank target leaves its delta-V
+     a lookup. Every field sits in its label and carries no id, because the block is repeated per row, and the
+     row builder below emits this same block. Every row posts all three fields, blanks included. ── #}
+{% macro response_burn_fields(h) -%}
+<details class="fr-burn" style="grid-column:1 / -1; font-size:0.6rem; color:var(--text-dim); margin-top:0.15rem">
+  <summary style="cursor:pointer">Our burn (manoeuvre responses only)</summary>
+  <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:0.3rem; margin-top:0.2rem">
+    <label>Target separation (km)
+      <input type="number" name="fr_target" min="0" max="{{ h.max_target }}" step="any" placeholder="blank: a lookup" style="width:100%; font-size:0.6rem">
+    </label>
+    <label>Delta-V budget (m/s)
+      <input type="number" name="fr_budget" min="0" max="{{ h.max_budget }}" step="any" placeholder="{{ h.default_budget }}" style="width:100%; font-size:0.6rem">
+    </label>
+    <label>Axis
+      <select name="fr_axis" style="width:100%; font-size:0.6rem">
+        {%- for value, label in h.burn_axes %}
+        <option value="{{ value }}">{{ label }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+  </div>
+  <p style="margin:0.2rem 0 0">With both sides bound, our burn is sized at the response's time to execute after the
+    scenario epoch to put the closest approach at the target, within the budget, and applied to the blue asset.</p>
+</details>
+{%- endmacro %}
+
+{# ── Not permitted for one friendly row (SPC-195, evaluation F-04): a labelled box and a labelled reason, required
+     when the box is ticked. The box posts the row's own id, so a tick names its row; every row posts its reason,
+     blank included, so the reasons stay aligned with the rows. A response so marked is still evaluated and shown, but
+     no rule picks it. The row builder below emits this same block with its own id. No div inside, no handler. The
+     box sets its own width, since the stylesheet stretches every input to the width of its box. ── #}
+{% macro response_veto_fields(h, row_id) -%}
+<div class="fr-veto" style="grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:0.3rem 0.6rem; align-items:center; font-size:0.6rem; color:var(--text-dim); margin-top:0.15rem">
+  <label style="display:inline-flex; align-items:center; gap:0.25rem; white-space:nowrap"><input type="checkbox" name="fr_vetoed" value="{{ row_id }}" style="width:auto; flex:none; margin:0; padding:0"> Not permitted</label>
+  <label style="flex:1 1 12rem">Reason not permitted (legal, rules of engagement or safety; required when ticked, at most {{ h.max_veto_reason }} characters)
+    <input type="text" name="fr_veto_reason" maxlength="{{ h.max_veto_reason }}" style="width:100%; font-size:0.6rem">
+  </label>
+</div>
+{%- endmacro %}
+
+{# ── A manoeuvre hypothesis for one adversary row (SPC-114). Every field sits in its label and carries no id,
+     because the block is repeated per row, and the row builder below emits this same block. Every row posts all
+     eight fields, blanks included, so the columns stay aligned with the adversary rows. ── #}
+{% macro hypothesis_fields(h, row=none) -%}
+{%- set fixed = row is not none and row.burn_at is not none -%}
+{%- set detected = row is not none and row.detected -%}
+<details class="adv-hypothesis" style="grid-column:1 / -1; font-size:0.6rem; color:var(--text-dim); margin-top:0.15rem"{% if row is not none and row.archetype %} open{% endif %}>
+  <summary style="cursor:pointer">Manoeuvre hypothesis (optional)</summary>
+  {# Hidden, posted by every row (SPC-150): a burn the sweep fixed at its own UTC time, and whether it is the
+     detected burn evaluate builds from the held history. Blank on a row the operator builds. #}
+  <input type="hidden" name="hyp_burn_at" value="{{ row.burn_at_iso if row is not none else '' }}">
+  <input type="hidden" name="hyp_detected" value="{{ '1' if detected else '' }}">
+  {# Hidden, posted by every row (SPC-184): the transfer's later burns, each at its own UTC time with its parts in
+     m/s, carried with the first; blank for a single burn. #}
+  <input type="hidden" name="hyp_then" value="{{ row.then_value if row is not none else '' }}">
+  <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:0.3rem; margin-top:0.2rem">
+    <label>Archetype
+      <select name="hyp_archetype" style="width:100%; font-size:0.6rem">
+        <option value="">None: this row stays a lookup</option>
+        {%- for key, label in h.archetypes %}
+        <option value="{{ key }}"{% if row is not none and row.archetype == key %} selected{% endif %}>{{ label }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    <label>Delta-V (m/s)
+      <input type="number" name="hyp_dv" min="0" max="1000" step="any"{% if detected %} readonly placeholder="the detection's"{% else %}{% if row is not none and row.dv_m_s %} value="{{ row.dv_m_s }}"{% endif %} placeholder="archetype's"{% endif %} style="width:100%; font-size:0.6rem">
+    </label>
+    <label>Radial
+      <input type="number" name="hyp_dir_r" min="-1" max="1" step="any"{% if detected %} readonly placeholder="the detection's"{% else %}{% if row is not none and row.direction[0] %} value="{{ row.direction[0] }}"{% endif %} placeholder="archetype's"{% endif %} style="width:100%; font-size:0.6rem">
+    </label>
+    <label>In-track
+      <input type="number" name="hyp_dir_i" min="-1" max="1" step="any"{% if detected %} readonly placeholder="the detection's"{% else %}{% if row is not none and row.direction[1] %} value="{{ row.direction[1] }}"{% endif %} placeholder="archetype's"{% endif %} style="width:100%; font-size:0.6rem">
+    </label>
+    <label>Cross-track
+      <input type="number" name="hyp_dir_c" min="-1" max="1" step="any"{% if detected %} readonly placeholder="the detection's"{% else %}{% if row is not none and row.direction[2] %} value="{{ row.direction[2] }}"{% endif %} placeholder="archetype's"{% endif %} style="width:100%; font-size:0.6rem">
+    </label>
+    <label>Delta-V spread, 1 sigma (m/s)
+      <input type="number" name="hyp_sigma" min="0" max="100" step="any" placeholder="archetype's" style="width:100%; font-size:0.6rem">
+    </label>
+    <label>Samples
+      <input type="number" name="hyp_samples" value="{{ row.samples if row is not none else h.default_samples }}" min="{{ h.min_samples }}" max="{{ h.max_samples }}" step="1" style="width:100%; font-size:0.6rem">
+    </label>
+    <label>Burn time (hours from the scenario epoch)
+      {%- if fixed %}
+      <input type="number" name="hyp_burn_h" value="" readonly placeholder="fixed at {{ row.burn_label }}" step="any" style="width:100%; font-size:0.6rem">
+      {%- else %}
+      <input type="number" name="hyp_burn_h" value="0" min="-72" step="any" style="width:100%; font-size:0.6rem">
+      {%- endif %}
+    </label>
+  </div>
+  {% if fixed %}
+  <p class="hyp-fixed" style="margin:0.2rem 0 0">Fixed at {{ row.burn_label }} from the sweep, so the burn stays at
+    that time however long this panel is open.{% if detected %} It is the burn detected in the element-set history,
+    started from the element set before it; its delta-V and direction are the detection's.{% endif %} To enter your
+    own burn, set the archetype to None and add a row.</p>
+  {% endif %}
+  {% if row is not none and row.burn_lines %}
+  {# Every burn of the transfer (SPC-184), one action with one P: burn 1 is the fields above, the rest are carried
+     as the sweep gave them. In words, wrapping at phone width. #}
+  <p class="hyp-transfer-lead" style="margin:0.2rem 0 0">This row carries {{ row.burn_lines | length }} burns of one
+    transfer as one action, listed in time order:</p>
+  <ol class="hyp-transfer" aria-label="The transfer's burns" style="margin:0.15rem 0 0 1rem; padding:0; overflow-wrap:anywhere">
+    {% for line in row.burn_lines %}<li>{{ line }}</li>{% endfor %}
+  </ol>
+  {% endif %}
+  <p style="margin:0.2rem 0 0">Starts from the bound red track's state at the burn time. 0 is the moment you press
+    Evaluate; a negative time is a burn already made since the red element set's epoch. Blank fields take the
+    archetype's, and an archetype's direction is assumed in-track.{% if h.longest_horizon %} At most
+    {{ h.max_sample_hours }} sample-hours per evaluation: at {{ h.default_samples }} samples a horizon up to about
+    {{ h.longest_horizon }} h fits{% if h.longest_horizon_one_burn %} with no burn to size, {{ h.longest_horizon_one_burn }} h
+    with one and {{ h.longest_horizon_five_burns }} h with five{% endif %}, less when the burn is before the scenario epoch.{% endif %}</p>
+</details>
+{%- endmacro %}
 
 <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px;
             padding:0.75rem 0.9rem; margin-bottom:0.6rem">
@@ -9,6 +156,9 @@
                 letter-spacing:0.05em">Decision Engine — What-If Scenario</div>
     <span style="font-size:0.6rem; color:var(--text-dim)">Phase 1 · Deterministic</span>
   </div>
+  {# Every finished evaluation is recorded, with the operator's decision on it (SPC-192). A new tab, so the
+     scenario being built here stays as it is. #}
+  <p style="font-size:0.62rem; margin:-0.3rem 0 0.4rem"><a href="/plan/decision/records" target="_blank" rel="noopener">Decision records (opens in a new tab)</a></p>
 
   <p style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.6rem">
     Define adversary actions and friendly responses. The engine evaluates every combination
@@ -16,35 +166,65 @@
     {% if pol %}<em>Active PoL object: SATNO {{ pol.satno }}.</em>{% endif %}
   </p>
 
+  {# Opened from a threat-sweep entry (SPC-150): what was filled, from which sweep, and what was not and why. #}
+  {% if refusal %}
+  <p class="error-msg" role="alert" style="font-size:0.7rem; margin-bottom:0.6rem">{{ refusal }}</p>
+  {% elif fill %}
+  <section class="decision-prefill" aria-label="Pre-filled from the threat sweep"
+           style="border-left:3px solid var(--ops-blue); background:var(--bg); border-radius:4px;
+                  padding:0.4rem 0.6rem; margin-bottom:0.6rem; font-size:0.66rem; color:var(--text-dim)">
+    <div style="font-weight:700">{{ fill.source }}</div>
+    <ul style="margin:0.25rem 0 0.25rem 1rem; padding:0">
+      {% for line in fill.filled %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+    {% for line in fill.left %}<p style="margin:0.15rem 0 0">{{ line }}</p>{% endfor %}
+  </section>
+  {% endif %}
+
   <form hx-post="/plan/decision/evaluate"
         hx-target="#decision-results"
         hx-swap="innerHTML"
         hx-indicator="#decision-indicator"
         hx-disabled-elt="find button[type=submit]">
 
-    {# ── Scenario name + horizon ── #}
-    <div style="display:grid; grid-template-columns:2fr 1fr; gap:0.5rem; margin-bottom:0.5rem">
+    {# ── Scenario name, horizon and keep-out distance (SPC-191) ── #}
+    <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:0.5rem; margin-bottom:0.5rem">
       <label style="font-size:0.65rem; color:var(--text-dim)">
         Scenario Name
-        <input type="text" name="scenario_name" value="Unnamed Scenario"
+        <input type="text" name="scenario_name" value="{{ fill.scenario_name if fill else 'Unnamed Scenario' }}"
                style="width:100%; font-size:0.65rem; margin-top:0.15rem">
       </label>
       <label style="font-size:0.65rem; color:var(--text-dim)">
         Horizon (h)
-        <input type="number" name="horizon_hours" value="72" min="1" max="720" step="1"
+        <input type="number" name="horizon_hours" value="{{ fill.horizon_h if fill else 72 }}" min="0.1" max="720" step="0.1"
+               style="width:100%; font-size:0.65rem; margin-top:0.15rem">
+      </label>
+      <label style="font-size:0.65rem; color:var(--text-dim)">
+        Keep-out distance (km)
+        <input type="number" name="keep_out_km" value="{{ keep.default }}"{% if keep.min %} min="{{ keep.min }}"{% endif %}{% if keep.max %} max="{{ keep.max }}"{% endif %} step="any"
                style="width:100%; font-size:0.65rem; margin-top:0.15rem">
       </label>
     </div>
+    {% if keep.note %}
+    <p class="keep-out-note" style="margin:-0.3rem 0 0.5rem; font-size:0.6rem; color:var(--text-dim)">{{ keep.note }}</p>
+    {% endif %}
+
+    {# ── Bind to real objects (SPC-100). Rebuilt from the session each time it comes into view;
+         the fragment never emits this wrapper's id, so the swap does not re-trigger itself. ── #}
+    <div id="decision-bind" hx-get="/plan/decision/bind" hx-trigger="intersect" hx-swap="innerHTML"
+         hx-target="this" hx-indicator="this" hx-disabled-elt="this"
+         hx-include="#dec-red-sat, #dec-blue-sat">{% include "partials/decision_bind_fields.html" %}</div>
 
     {# ── Adversary Actions ── #}
-    <div style="font-size:0.65rem; font-weight:700; color:var(--ops-gold); text-transform:uppercase;
+    <div style="font-size:0.65rem; font-weight:700; color:var(--gold); text-transform:uppercase;
                 letter-spacing:0.05em; margin-bottom:0.3rem">Adversary Actions</div>
-    <div id="adv-rows">
-      {# Template row — JS duplicates this #}
+    <div id="adv-rows" data-row-count="{{ adv_rows | length }}">
+      {# Template row: JS duplicates this. A scenario opened from the sweep renders one row per filled row. #}
+      {% for row in adv_rows %}
       <div class="adv-row" style="display:grid; grid-template-columns:1.5fr 1.5fr 0.8fr 0.8fr 0.8fr 0.4fr;
                                    gap:0.3rem; margin-bottom:0.25rem; align-items:end">
-        <input type="hidden" name="adv_id" value="A1">
-        <input type="text"   name="adv_name" placeholder="Name (e.g. Proximity approach)"
+        <input type="hidden" name="adv_id" value="A{{ loop.index }}">
+        <input type="text"   name="adv_name" aria-label="Adversary action name"{% if row is not none %} value="{{ row.name }}"{% endif %} placeholder="Name (e.g. Proximity approach)"
                style="font-size:0.63rem">
         <select name="adv_type" style="font-size:0.63rem">
           <option value="manoeuvre">Manoeuvre</option>
@@ -52,25 +232,44 @@
           <option value="posture_change">Posture Change</option>
           <option value="no_action">No Action</option>
         </select>
-        <input type="number" name="adv_prob" value="0.5" min="0" max="1" step="0.05"
-               placeholder="P" style="font-size:0.63rem" title="Probability [0,1]">
-        <input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05"
-               placeholder="Conf" style="font-size:0.63rem" title="Intel confidence [0,1]">
-        <span style="font-size:0.6rem; color:var(--text-dim)">P · Conf</span>
+        {# SPC-161: Conf no longer sets the custody gap; Gap does, and the note under the rows says what each means. #}
+        <label style="font-size:0.6rem; color:var(--text-dim)">P<input type="number" name="adv_prob" value="{{ hyp.default_probability }}" min="0" max="1" step="0.05"
+               style="width:100%; font-size:0.63rem" title="Likelihood this action happens [0,1]; weights expected value"></label>
+        <label style="font-size:0.6rem; color:var(--text-dim)">Conf<input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05"
+               style="width:100%; font-size:0.63rem" title="How sure the intelligence behind P is [0,1]; moves no figure"></label>
+        <label style="font-size:0.6rem; color:var(--text-dim)">Gap<input type="number" name="adv_gap" value="{{ hyp.default_gap }}" min="0" max="1" step="0.05"
+               style="width:100%; font-size:0.63rem" title="Share of the horizon custody is lost after an unanswered manoeuvre [0,1]; rule of thumb"></label>
         {# The glyph is the whole of the button, so without aria-label a screen
            reader announced these four row controls as an unnamed "button" and an
            operator navigating by control could not tell one from another
            (WCAG 4.1.2). The name states the action, which is removing a row,
            not closing the panel. The same name is repeated on the rows the
            script below builds. #}
-        <button type="button" onclick="removeRow(this,'adv-row')" aria-label="Remove adversary action"
+        <button type="button" data-action="removeRow" data-row-class="adv-row" aria-label="Remove adversary action"
                 style="font-size:0.65rem; padding:0.1rem 0.3rem; background:var(--bg-secondary);
                        border:1px solid var(--border); border-radius:3px; cursor:pointer; color:var(--text-dim)">
           ✕
         </button>
+        {{ hypothesis_fields(hyp, row) }}
       </div>
+      {% endfor %}
     </div>
-    <button type="button" onclick="addAdvRow()"
+    {# ── The NOTSO suggestion for each adversary row (SPC-130): asked for on load and on every change in the form,
+         which sends the red track, the horizon, each row's id, name and type, and any tick, so a tick still matching
+         stays ticked. Every row's suggestion shows as the panel opens, with no control to load it (SPC-185).
+         Nothing fills P or Conf; a ticked suggestion is applied at Evaluate. It sets its own target,
+         indicator and disabled element, since htmx would otherwise take the form's: its reply would land in the
+         results, outside the form, and the form's submit button, which it does not hold, makes htmx throw. ── #}
+    <div class="adv-priors" hx-get="/plan/decision/prior" hx-trigger="load, change from:closest form"
+         hx-include="closest form" hx-target="this" hx-swap="innerHTML" hx-indicator="this"
+         hx-disabled-elt="this" aria-live="polite"
+         style="font-size:0.6rem; color:var(--text-dim); margin:0 0 0.3rem">
+      <p class="adv-prior-note">Bind a red track to be offered a NOTSO suggestion for each row's P and Conf.</p>
+    </div>
+    {% if hyp.fields_note %}
+    <p class="adv-fields-note hint" style="font-size:0.6rem; color:var(--text-dim); margin:0 0 0.3rem">{{ hyp.fields_note }}</p>
+    {% endif %}
+    <button type="button" data-action="addAdvRow"
             style="font-size:0.63rem; margin-bottom:0.5rem" class="btn-secondary">
       + Add Adversary Action
     </button>
@@ -78,11 +277,11 @@
     {# ── Friendly Responses ── #}
     <div style="font-size:0.65rem; font-weight:700; color:var(--ops-blue); text-transform:uppercase;
                 letter-spacing:0.05em; margin-bottom:0.3rem">Friendly Responses</div>
-    <div id="fr-rows">
+    <div id="fr-rows" data-row-count="1">
       <div class="fr-row" style="display:grid; grid-template-columns:1.5fr 1.5fr 0.7fr 0.7fr 0.7fr 0.4fr;
                                   gap:0.3rem; margin-bottom:0.25rem; align-items:end">
         <input type="hidden" name="fr_id" value="R1">
-        <input type="text"   name="fr_name" placeholder="Name (e.g. Collision avoidance)"
+        <input type="text"   name="fr_name" aria-label="Friendly response name" placeholder="Name (e.g. Collision avoidance)"
                style="font-size:0.63rem">
         <select name="fr_type" style="font-size:0.63rem">
           <option value="manoeuvre">Manoeuvre</option>
@@ -94,16 +293,18 @@
                placeholder="Cost" style="font-size:0.63rem" title="Normalised cost [0,1]">
         <input type="number" name="fr_rev" value="0.8" min="0" max="1" step="0.05"
                placeholder="Rev" style="font-size:0.63rem" title="Reversibility [0,1]">
-        <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.5"
+        <input type="number" name="fr_time" aria-label="Time to execute, hours" value="6" min="0.1" max="720" step="0.1"
                placeholder="h" style="font-size:0.63rem" title="Time to execute (h)">
-        <button type="button" onclick="removeRow(this,'fr-row')" aria-label="Remove friendly response"
+        <button type="button" data-action="removeRow" data-row-class="fr-row" aria-label="Remove friendly response"
                 style="font-size:0.65rem; padding:0.1rem 0.3rem; background:var(--bg-secondary);
                        border:1px solid var(--border); border-radius:3px; cursor:pointer; color:var(--text-dim)">
           ✕
         </button>
+        {{ response_burn_fields(hyp) }}
+        {{ response_veto_fields(hyp, "R1") }}
       </div>
     </div>
-    <button type="button" onclick="addFrRow()"
+    <button type="button" data-action="addFrRow"
             style="font-size:0.63rem; margin-bottom:0.5rem" class="btn-secondary">
       + Add Friendly Response
     </button>
@@ -131,15 +332,56 @@
       </div>
     </details>
 
-    {# ── Strategy selector ── #}
-    <label style="font-size:0.65rem; color:var(--text-dim); display:block; margin-bottom:0.5rem">
+    {# ── Strategy selector: it defaults to the deployment's primary rule, SPECTRE_PRIMARY_RULE (SPC-194), and the
+         results show every rule's pick with the primary rule's as the headline, whichever is chosen here. ── #}
+    {% set primary = primary_rule if primary_rule is defined else "minimax" %}
+    <label style="font-size:0.65rem; color:var(--text-dim); display:block; margin-bottom:0.2rem">
       Selector Strategy
       <select name="strategy" style="font-size:0.65rem; margin-left:0.4rem">
-        <option value="minimax">Minimax: cautious, best worst case</option>
-        <option value="expected_value">Expected Value: probability-weighted cost</option>
-        <option value="minimin">Minimin: optimistic, best best case (not robust)</option>
+        {%- for value, label in (("minimax", "Minimax: cautious, best worst case"),
+                                 ("expected_value", "Expected Value: probability-weighted cost"),
+                                 ("minimin", "Minimin: optimistic, best best case (not robust)")) %}
+        <option value="{{ value }}"{% if value == primary %} selected{% endif %}>{{ label }}</option>
+        {%- endfor %}
       </select>
     </label>
+    <p class="primary-rule-note" style="font-size:0.6rem; color:var(--text-dim); margin:0 0 0.5rem">This deployment's
+      primary rule is {{ primary | replace('_', ' ') }}: its pick heads the results, beside every rule's pick, whichever
+      rule you choose here.</p>
+
+    {# ── The game tree (SPC-142): how many turns, and what turn 1 showed of red for the update after it. Plain
+         fields: no htmx region, no handler, no script. A depth that cannot fit is refused when Evaluate is pressed,
+         naming the largest that would; nothing is worked out until then. ── #}
+    {% set max_turns_shown = max_turns if max_turns is defined else 3 %}
+    {% set observation_choices = observations if observations is defined else [
+      ("burn", "A burn: custody lost at a burn in turn 1"),
+      ("no_burn", "No burn: custody held through turn 1"),
+      ("nothing", "Nothing: custody degraded, lost for another reason, or not read")
+    ] %}
+    <div class="tree-fields" style="margin-bottom:0.5rem; font-size:0.65rem; color:var(--text-dim)">
+      <label class="tree-depth" style="display:block; margin-bottom:0.3rem">
+        Turn depth
+        <select name="turns" style="display:block; font-size:0.65rem; margin-top:0.15rem; max-width:100%; box-sizing:border-box">
+          {%- for k in range(1, max_turns_shown + 1) %}
+          <option value="{{ k }}"{% if k == 1 %} selected{% endif %}>{% if k == 1 %}1 turn: the outcome matrix alone{% else %}{{ k }} turns: red may move again after each response{% endif %}</option>
+          {%- endfor %}
+        </select>
+      </label>
+      <label class="tree-observed" style="display:block; margin-bottom:0.3rem">
+        Turn 1 shows (for the update)
+        <select name="observed" style="display:block; font-size:0.65rem; margin-top:0.15rem; max-width:100%; box-sizing:border-box">
+          <option value="">Not stated: nothing is updated</option>
+          {%- for value, label in observation_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {%- endfor %}
+        </select>
+      </label>
+      <p class="tree-hint" style="margin:0; font-size:0.6rem">A tree of 2 or 3 turns needs a red
+        track and a blue asset bound, both current, and a propagated orbit from every row, so a manoeuvre row needs a
+        hypothesis. A depth whose branches or cost the evaluation cannot fit is refused when you press Evaluate,
+        naming the largest that would. What turn 1 shows is read through the bound red track's custody, needs a
+        depth of 2 or 3, and only expected value reads it: it moves no figure and writes no P.</p>
+    </div>
 
     <div class="submit-row">
       <button type="submit" class="btn-primary">Evaluate</button>
@@ -154,41 +396,31 @@
 
 <div id="decision-results"></div>
 
-<script>
-var _advCount = 1;
-var _frCount  = 1;
-
-function addAdvRow() {
-  _advCount++;
-  var c = _advCount;
-  var div = document.createElement('div');
-  div.className = 'adv-row';
-  div.style.cssText = 'display:grid;grid-template-columns:1.5fr 1.5fr 0.8fr 0.8fr 0.8fr 0.4fr;gap:0.3rem;margin-bottom:0.25rem;align-items:end';
-  div.innerHTML = `
-    <input type="hidden" name="adv_id" value="A${c}">
-    <input type="text" name="adv_name" placeholder="Adversary action name" style="font-size:0.63rem">
+{# The rows Add Adversary Action and Add Friendly Response build: decision.js clones one, writing the row's own
+   number where __ROW__ stands. Inert until cloned, so nothing in them posts (SPC-199). Every clone of a row is the
+   same markup and says only what the server row says, so a field in either is named with aria-label rather than
+   by an id a <label for> would point at (SPC-233). #}
+<template id="adv-row-template">
+  <div class="adv-row" style="display:grid;grid-template-columns:1.5fr 1.5fr 0.8fr 0.8fr 0.8fr 0.4fr;gap:0.3rem;margin-bottom:0.25rem;align-items:end">
+    <input type="hidden" name="adv_id" value="A__ROW__">
+    <input type="text" name="adv_name" placeholder="Adversary action name" aria-label="Adversary action name" style="font-size:0.63rem">
     <select name="adv_type" style="font-size:0.63rem">
       <option value="manoeuvre">Manoeuvre</option>
       <option value="sensor_retask">Sensor Retask</option>
       <option value="posture_change">Posture Change</option>
       <option value="no_action">No Action</option>
     </select>
-    <input type="number" name="adv_prob" value="0.5" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Probability [0,1]">
-    <input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Intel confidence [0,1]">
-    <span style="font-size:0.6rem;color:var(--text-dim)">P · Conf</span>
-    <button type="button" onclick="removeRow(this,'adv-row')" aria-label="Remove adversary action" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>`;
-  document.getElementById('adv-rows').appendChild(div);
-}
-
-function addFrRow() {
-  _frCount++;
-  var c = _frCount;
-  var div = document.createElement('div');
-  div.className = 'fr-row';
-  div.style.cssText = 'display:grid;grid-template-columns:1.5fr 1.5fr 0.7fr 0.7fr 0.7fr 0.4fr;gap:0.3rem;margin-bottom:0.25rem;align-items:end';
-  div.innerHTML = `
-    <input type="hidden" name="fr_id" value="R${c}">
-    <input type="text" name="fr_name" placeholder="Friendly response name" style="font-size:0.63rem">
+    <label style="font-size:0.6rem;color:var(--text-dim)">P<input type="number" name="adv_prob" value="{{ hyp.default_probability }}" min="0" max="1" step="0.05" style="width:100%;font-size:0.63rem" title="Likelihood this action happens [0,1]; weights expected value"></label>
+    <label style="font-size:0.6rem;color:var(--text-dim)">Conf<input type="number" name="adv_conf" value="0.7" min="0" max="1" step="0.05" style="width:100%;font-size:0.63rem" title="How sure the intelligence behind P is [0,1]; moves no figure"></label>
+    <label style="font-size:0.6rem;color:var(--text-dim)">Gap<input type="number" name="adv_gap" value="{{ hyp.default_gap }}" min="0" max="1" step="0.05" style="width:100%;font-size:0.63rem" title="Share of the horizon custody is lost after an unanswered manoeuvre [0,1]; rule of thumb"></label>
+    <button type="button" data-action="removeRow" data-row-class="adv-row" aria-label="Remove adversary action" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>
+    {{ hypothesis_fields(hyp) }}
+  </div>
+</template>
+<template id="fr-row-template">
+  <div class="fr-row" style="display:grid;grid-template-columns:1.5fr 1.5fr 0.7fr 0.7fr 0.7fr 0.4fr;gap:0.3rem;margin-bottom:0.25rem;align-items:end">
+    <input type="hidden" name="fr_id" value="R__ROW__">
+    <input type="text" name="fr_name" placeholder="Friendly response name" aria-label="Friendly response name" style="font-size:0.63rem">
     <select name="fr_type" style="font-size:0.63rem">
       <option value="manoeuvre">Manoeuvre</option>
       <option value="sensor_retask">Sensor Retask</option>
@@ -197,13 +429,9 @@ function addFrRow() {
     </select>
     <input type="number" name="fr_cost" value="0.3" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Normalised cost [0,1]">
     <input type="number" name="fr_rev" value="0.8" min="0" max="1" step="0.05" style="font-size:0.63rem" title="Reversibility [0,1]">
-    <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.5" style="font-size:0.63rem" title="Time to execute (h)">
-    <button type="button" onclick="removeRow(this,'fr-row')" aria-label="Remove friendly response" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>`;
-  document.getElementById('fr-rows').appendChild(div);
-}
-
-function removeRow(btn, cls) {
-  var row = btn.closest('.' + cls);
-  if (row) row.remove();
-}
-</script>
+    <input type="number" name="fr_time" value="6" min="0.1" max="720" step="0.1" aria-label="Time to execute, hours" style="font-size:0.63rem" title="Time to execute (h)">
+    <button type="button" data-action="removeRow" data-row-class="fr-row" aria-label="Remove friendly response" style="font-size:0.65rem;padding:0.1rem 0.3rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim)">✕</button>
+    {{ response_burn_fields(hyp) }}
+    {{ response_veto_fields(hyp, "R__ROW__") }}
+  </div>
+</template>

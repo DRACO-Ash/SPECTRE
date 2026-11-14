@@ -15,6 +15,16 @@
 # the proxy's CA and the script trusts it for the build only; the shipped
 # Dockerfile is never modified.
 #   PROXY_CA_BUNDLE=/path/to/ca.crt scripts/verify-container.sh
+#
+# The image is then scanned with Grype, and the check fails on any High or
+# Critical finding that has a fix, which is what the App Store's Container Scan
+# stops on. Grype reads the CPython interpreter in /usr/local, which Trivy does
+# not: Python 3.12.15 failed the Container Scan on CVE-2026-115557 while a Trivy
+# run called the image clean. The database comes from grype.anchore.io and is
+# kept in the named volume spectre-grype-db, so only the first run downloads
+# it; PROXY_CA_BUNDLE is trusted for that download too. A database that cannot
+# be fetched is reported SKIPPED, never passed, and so is SKIP_IMAGE_SCAN=1:
+#   SKIP_IMAGE_SCAN=1 scripts/verify-container.sh
 
 set -eu
 
@@ -23,16 +33,60 @@ CONTAINER="spectre-verify-$$"
 HOST_PORT="${HOST_PORT:-18099}"
 BUILD_FILE="Dockerfile"
 WORK=""
+# Pinned by digest, as the base image is: v0.104.0, the release that matched the
+# App Store's findings on the 3.12.15 image. GRYPE_IMAGE overrides it.
+GRYPE_IMAGE="${GRYPE_IMAGE:-anchore/grype:v0.104.0@sha256:e4e8ddb34f01da61a7b25155dcd71a1851802077a564b624c61f2f534d9c9c0b}"
+SCAN_STATE=""
 
 pass() { printf '  PASS  %s\n' "$1"; }
 fail() { printf '  FAIL  %s\n' "$1"; exit 1; }
 
+# The proxy CA copy and the patched Dockerfile go on every exit: a build that
+# failed used to leave the host's proxy certificate in the repository root.
 cleanup() {
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
     [ -n "$WORK" ] && rm -rf "$WORK"
+    rm -f ./.verify-proxy-ca.crt ./.Dockerfile.verify
     return 0
 }
 trap cleanup EXIT INT TERM
+
+# Fixable High and Critical findings, by Grype. Sets SCAN_STATE to PASS or
+# SKIPPED; a finding fails the run. A scan that did not run is never a pass.
+scan_image() {
+    printf '\n== Fixable High and Critical findings (Grype) ==\n'
+    if [ "${SKIP_IMAGE_SCAN:-0}" = "1" ]; then
+        SCAN_STATE=SKIPPED
+        printf '  SKIPPED  SKIP_IMAGE_SCAN=1: the image was not scanned, which is not a pass\n'
+        return 0
+    fi
+    set -- --rm -v /var/run/docker.sock:/var/run/docker.sock -v spectre-grype-db:/db \
+        -e GRYPE_DB_CACHE_DIR=/db -e GRYPE_CHECK_FOR_APP_UPDATE=false
+    if [ -n "${PROXY_CA_BUNDLE:-}" ]; then
+        # Docker reads a relative -v source as a named volume, so mount the CA by its full path.
+        case "$PROXY_CA_BUNDLE" in /*) ca="$PROXY_CA_BUNDLE" ;; *) ca="$PWD/$PROXY_CA_BUNDLE" ;; esac
+        set -- "$@" --network host -v "$ca:/etc/ssl/certs/ca-certificates.crt:ro" \
+            -e HTTPS_PROXY="${HTTPS_PROXY:-}" -e HTTP_PROXY="${HTTP_PROXY:-}" -e NO_PROXY="${NO_PROXY:-}"
+    fi
+    if ! docker run "$@" "$GRYPE_IMAGE" db update >/dev/null 2>&1; then
+        SCAN_STATE=SKIPPED
+        printf '  SKIPPED  no Grype database: the download failed (grype.anchore.io unreachable, or the proxy CA not accepted), which is not a pass\n'
+        return 0
+    fi
+    findings="$(docker run -i "$@" -e GRYPE_DB_AUTO_UPDATE=false "$GRYPE_IMAGE" "docker:$IMAGE" --only-fixed -q \
+        -o template -t /dev/stdin <<'TEMPLATE'
+{{- range .Matches }}{{ if or (eq .Vulnerability.Severity "High") (eq .Vulnerability.Severity "Critical") }}
+    {{ .Vulnerability.Severity }} {{ .Vulnerability.ID }} {{ .Artifact.Name }} {{ .Artifact.Version }} -> {{ join "," .Vulnerability.Fix.Versions }}
+{{- end }}{{ end }}
+TEMPLATE
+)" || fail "the Grype scan did not run"
+    if [ -n "$findings" ]; then
+        printf '  findings with a fix available:%s\n' "$findings"
+        fail "the Container Scan stops on these: take the fix, usually by bumping the base digest"
+    fi
+    SCAN_STATE=PASS
+    pass "no High or Critical finding has a fix available"
+}
 
 printf '\n== Build ==\n'
 if [ -n "${PROXY_CA_BUNDLE:-}" ]; then
@@ -160,4 +214,10 @@ done
 [ "$i" -lt 45 ] || { docker logs "$CONTAINER"; fail "injected PORT was not honoured"; }
 pass "honours an injected PORT"
 
-printf '\nAll container contract checks passed.\n\n'
+scan_image
+
+if [ "$SCAN_STATE" = SKIPPED ]; then
+    printf '\nAll container contract checks passed, but the image scan was SKIPPED: not a pass.\n\n'
+else
+    printf '\nAll container contract checks passed.\n\n'
+fi

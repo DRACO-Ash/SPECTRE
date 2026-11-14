@@ -13,6 +13,13 @@ from spectre.domain.models import AccessInterval, RunConfig
 # The data directory, where the NOTSO cache is seeded on first use (audit
 # F-062), is a scratch directory for the suite rather than ./data in the tree.
 os.environ.setdefault("SPECTRE_DATA_DIR", tempfile.mkdtemp(prefix="spectre-test-data-"))
+# The suite's database is a file of its own, as the server's is, not one in-memory connection every session shares
+# (SPC-192). A decision job writes its record in the background while requests run; on the shared connection a
+# request's rollback undid that write, and the connection's lock, bound to the first event loop that waited on it,
+# refused every later module's loop. Set here, before either directory's conftest sets its own default.
+os.environ.setdefault(
+    "DATABASE_URL", f"sqlite+aiosqlite:///{tempfile.mkdtemp(prefix='spectre-test-db-')}/spectre-test.db",
+)
 
 
 @pytest.fixture()
@@ -49,3 +56,32 @@ def csrf_headers(session: str | dict[str, str]) -> dict[str, str]:
 
     cookie = session if isinstance(session, str) else session.get("spectre_session", "")
     return {"X-CSRF-Token": make_csrf_token(cookie)}
+
+
+def keep_each_connection_on_its_own_loop() -> None:
+    """On a networked database, open a connection per checkout instead of pooling them (SPC-070).
+
+    The suite runs the app on more than one event loop: init_db on the test's
+    loop, each module's TestClient on a loop of its own, and async tests on
+    theirs. asyncpg binds a connection to the loop that opened it, so a pooled
+    connection handed to a second loop fails with "attached to a different
+    loop". The server runs one loop and never meets this; aiosqlite does not
+    bind connections to a loop, so on SQLite the suite never met it either.
+
+    Only the pool's class changes. Pre-ping and recycle are carried over, so
+    the pool contract test still reads the engine's real settings, and the
+    engine object every module imported is the same one. A no-op on SQLite.
+    """
+    from sqlalchemy.pool import NullPool
+
+    from spectre.web import database
+
+    sync_engine = database.engine.sync_engine
+    if sync_engine.dialect.name == "sqlite" or isinstance(sync_engine.pool, NullPool):
+        return
+    pooled = sync_engine.pool
+    # The engine's listeners, the one that reads the server version on first connect among them, live on the pool.
+    sync_engine.pool = NullPool(
+        pooled._creator, recycle=pooled._recycle, pre_ping=pooled._pre_ping, dialect=pooled._dialect,
+        reset_on_return=pooled._reset_on_return, _dispatch=pooled.dispatch,
+    )

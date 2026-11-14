@@ -9,9 +9,14 @@
   <link rel="stylesheet" href="/static/spectre-theme/css/spectre-icons.css" />
   <link rel="stylesheet" href="/static/style.css" />
   <link rel="stylesheet" href="/static/themes.css" />
-  <!-- Apply saved theme before first paint to prevent flash -->
-  <script>(function(){var t=localStorage.getItem('spectre-theme');var valid=['ops','steel'];if(t&&valid.indexOf(t)!==-1){document.documentElement.setAttribute('data-theme',t);document.documentElement.setAttribute('data-spectre-theme',t==='steel'?'light':'dark');}else if(t){localStorage.removeItem('spectre-theme');}})();</script>
+  {# Saved theme applied before first paint, so the console does not flash the default. Not deferred, for that
+     reason; a first-party file, so the policy needs no 'unsafe-inline' for it (SPC-199). #}
+  <script src="/static/js/theme-boot.js"></script>
   {% if csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}" />{% endif %}
+  {# htmx never evaluates: hx-on, trigger filters, js: values and hx-vars all need eval, which the policy refuses, so
+     a feature that needs it fails here as htmx:evalDisallowedError rather than as a policy violation. Scripts in a
+     swapped fragment are not run either: every behaviour a fragment needs is in /static/js (SPC-199). #}
+  <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false}' />
   <script src="/static/htmx.min.js"></script>
   {# chart.js 4.4.7, hammerjs 2.0.8 and chartjs-plugin-zoom 2.0.1 load from the vendored
      copies in spectre/web/static and from nowhere else. Each used to carry an onerror
@@ -26,36 +31,11 @@
   <script src="/static/chart.umd.min.js"></script>
   <script src="/static/hammer.min.js"></script>
   <script src="/static/chartjs-plugin-zoom.min.js"></script>
-  {# Keyboard equivalent for the sortable headers and expandable rows.
-
-     A table header or row that only answers to onclick is unreachable without
-     a mouse, which is a real barrier in an operations room where a console may
-     be driven from the keyboard, and a Sonar finding
-     (Web:MouseEventWithoutKeyboardEquivalentCheck) besides.
-
-     Defined once here rather than inline per element: an inline handler
-     repeated across forty headers is forty copies of the same logic to get
-     wrong. Elements opt in with tabindex="0" onkeydown="spectreActivate(event)".
-     Space is included because a control that behaves like a button must answer
-     to both keys, and its default scroll is suppressed. #}
-  <script>
-    function spectreActivate(e) {
-      // Only when the opted-in element ITSELF has focus.
-      //
-      // keydown bubbles. Without this guard, a key press on a control nested
-      // inside an activatable row reaches the row's handler, which calls
-      // preventDefault() and clicks the ROW, so the nested control never
-      // fires. That shipped once: the Load button in the All-Intercepts panel
-      // staged nothing for a keyboard operator while working perfectly with a
-      // mouse, because the mouse path had a stopPropagation guard and the key
-      // path had none.
-      if (e.target !== e.currentTarget) { return; }
-      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
-        e.preventDefault();
-        e.currentTarget.click();
-      }
-    }
-  </script>
+  {# The console's own behaviour, every listener the templates used to carry inline (SPC-199). core.js holds the
+     delegated listeners and the registries the page files add to; a page names its own files in the scripts
+     block. Deferred, so each runs once the document is parsed, in order, before htmx initialises the page. #}
+  <script src="/static/js/core.js" defer></script>
+  {% block scripts %}{% endblock %}
 </head>
 <body{% if csrf_token %} hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'{% endif %}>
   <div class="app-chrome">

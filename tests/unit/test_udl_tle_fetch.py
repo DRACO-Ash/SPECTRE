@@ -74,10 +74,15 @@ class TestParseTleEpoch:
 # FastAPI's test client so we stay purely unit-level.
 
 
+def _with_checksum(body: str) -> str:
+    """*body*, 68 columns, with its modulo-10 checksum in column 69."""
+    return body + str(sum(int(c) if c.isdigit() else int(c == "-") for c in body) % 10)
+
+
 def _make_udl_record(satno: int, epoch_str: str = "26025.79842163") -> dict:
-    """Build a minimal UDL elset record dict."""
-    line1 = f"1 {satno:05d}U 12075A   {epoch_str}  .00000000  00000 0  10000-2 0  9999 0"
-    line2 = f"2 {satno:05d}   0.0678 359.1324 0003806 313.0884 153.0596 1.00261563 00000 6"
+    """Build a minimal UDL elset record dict: a sound element set, as the acceptance check requires (SPC-201)."""
+    line1 = _with_checksum(f"1 {satno:05d}U 12075A   {epoch_str}  .00000000  00000-0  10000-2 0  999")
+    line2 = _with_checksum(f"2 {satno:05d}   0.0678 359.1324 0003806 313.0884 153.0596  1.00261563    0")
     return {
         "objectName": f"SAT-{satno}",
         "line1": line1,
@@ -116,11 +121,11 @@ def _make_user():
 
 
 class TestFetchTleLatestMode:
-    """Tests for mode='latest' (GET /udl/elset/current per UDL API spec)."""
+    """Tests for mode='latest': the /elset archive over the last 72 hours first, then /elset/current."""
 
     @pytest.mark.asyncio
-    async def test_latest_calls_elset_current(self, mock_state) -> None:
-        """latest mode must use /elset/current (UDL spec: no epoch required)."""
+    async def test_latest_asks_the_archive_over_72_hours_first(self, mock_state) -> None:
+        """latest mode asks /elset with an epoch window; /elset/current answered for 18th SPCS alone."""
         record = _make_udl_record(39034)
 
         with (
@@ -149,10 +154,10 @@ class TestFetchTleLatestMode:
 
             call_args = mock_client.get.call_args
             url = call_args[0][0]
-            assert "/elset/current" in url
-            # Confirm no epoch query parameter is sent
+            assert url.endswith("/elset"), "the current catalogue was asked although the archive held a set"
+            assert mock_client.get.call_count == 1
             params = call_args[1].get("params", {})
-            assert "epoch" not in params
+            assert str(params["epoch"]).startswith(">")
 
     @pytest.mark.asyncio
     async def test_latest_no_udl_creds_returns_error(self, mock_state) -> None:

@@ -17,11 +17,12 @@ from spectre.web.auth import (
     hash_password,
     password_too_long,
     require_admin,
+    username_taken,
 )
 from spectre.web.database import get_db
 from spectre.web.deps import get_templates, render
 from spectre.web.log_safety import log_safe
-from spectre.web.models import User
+from spectre.web.models import DecisionRecord, User
 from spectre.web.planning_state import clear_account_state
 
 logger = logging.getLogger(__name__)
@@ -163,10 +164,8 @@ async def create_user(
         error = "Password is required."
     elif password_too_long(password):
         error = PASSWORD_TOO_LONG
-    else:
-        existing = await db.execute(select(User).where(User.username == username))
-        if existing.scalar_one_or_none():
-            error = f"Username '{username}' is already taken."
+    elif await username_taken(db, username):
+        error = f"Username '{username}' is already taken. Usernames ignore letter case."
 
     users = await _all_users(db)
     if error:
@@ -353,6 +352,13 @@ async def delete_user(
     # pass to the next account created.
     for table in TRAINING_TABLES:
         await db.execute(delete(table).where(table.user_id == user.id))
+    # Its decision records stay (SPC-192): they are the account of what was
+    # decided, and how long they are kept is the owner's decision. They are
+    # let go of the account id, for the same reused-id reason, and keep the
+    # username they were made under for an admin reading them.
+    await db.execute(
+        update(DecisionRecord).where(DecisionRecord.user_id == user.id).values(user_id=None)
+    )
     await db.commit()
     # The account's planning state goes with it, UDL password included, so a
     # later account of the same name starts clean (audit F-148).

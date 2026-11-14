@@ -3,7 +3,11 @@
 {% else %}
 
 {% set ok_items = items | selectattr('result') | list %}
-{% set best = ok_items | first %}
+{# The worst case is the first red approach that counts: it reaches the target and is not beyond the NOTSO record.
+   A plan nothing has ever spent, or one that never arrives, cannot set it; both stay listed and labelled
+   (SPC-234, owner ruling 2026-11-12). #}
+{% set counted = items | selectattr('counts') | list %}
+{% set best = counted[0] if counted else none %}
 
 {# ── Summary header ── #}
 <div class="threat-sweep-summary" style="margin-bottom:0.5rem">
@@ -11,12 +15,18 @@
   {% if intercept_data_mode %}
   {# The element sets' provenance, not the mode requested (F-133). #}
   <span class="{{ 'badge-ok' if intercept_data_mode == 'REAL' else 'badge-warn' }}" style="font-size:0.68rem">Data Mode: {{ intercept_data_mode }}</span>
+  {#- Beside the badge, not in it: a newer set refused before a live one was taken (SPC-243). -#}
+  {% for note in (elset_notes if elset_notes is defined else []) %}
+  <p class="field-meta elset-passed-over"><span class="badge-warn">Newer set refused</span> {{ note }}</p>
+  {% endfor %}
   {% endif %}
   {% if best %}
   <span class="intercept-detail" style="color:{{ best.intel.threat_color }}; font-weight:700">
     Worst-case: {{ best.intel.threat_level }} &mdash; {{ best.result.method.value | upper }}
     &mdash; {{ best.result.total_delta_v_m_s | m_s }} m/s
   </span>
+  {% elif ok_items %}
+  <span class="intercept-detail">No red approach both reaches the target and is within the NOTSO record.</span>
   {% endif %}
   <span class="intercept-detail">
     <span style="color:var(--red)">{{ red_name }}</span>
@@ -36,6 +46,28 @@
   {% endif %}
 </div>
 
+{% if most_likely %}
+{% set ml = most_likely.targeting %}
+<p class="callout callout-gold" role="note" style="margin:0 0 0.5rem; font-size:0.7rem">
+  <strong>Most likely course of action:</strong>
+  {{ most_likely.result.method.value | upper }}, burning at {{ ml.burn_point | lower }}
+  ({{ ml.burn_at.strftime('%d %b %H:%M UTC') }}),
+  {{ most_likely.result.total_delta_v_m_s | m_s }} m/s, closest approach
+  {{ ml.closest_text }}{% if ml.closest_after %} {{ ml.closest_after }} after the burn{% endif %}.
+  {{ most_likely.realism.band }}: {{ most_likely.realism.reason }}
+</p>
+{% endif %}
+{% if evidence %}
+<p class="label-dim" style="margin:0 0 0.5rem; font-size:0.62rem">
+  {% if searched %}Each red approach was searched for its cheapest plan that comes within {{ "%g" | format(approach_km) }} km and flown to measure its closest approach.{% else %}Each red approach was solved once with the typed values and flown to measure its closest approach.{% endif %}
+  Flown: two-body for red between burns, SGP4 for the target; the V-bar and H-bar hops keep their own estimate.
+  Realism is judged against the shipped record of {{ evidence.burns }} on-station burns by {{ evidence.satellites }} satellites in JCO NOTSOs,
+  {{ evidence.first_report }} to {{ evidence.last_report }}, with each satellite's figures raised by any NOTSO cache records received since;
+  the most any satellite spent comes from the shipped record alone. It is a floor on what satellites can do, not a ceiling.
+  {% if searched and fastest_budget %}Minimum-time was given {{ fastest_budget[0] | m_s }} m/s, {{ fastest_budget[1] }}.{% endif %}
+</p>
+{% endif %}
+
 {# ── Results table ── #}
 <div class="mnv-scroll" style="max-height:72vh; overflow-y:auto">
 <table class="hrr-table threat-table" id="all-intercepts-table" style="table-layout:fixed; width:100%">
@@ -49,6 +81,7 @@
     <col style="width:7rem">
     <col style="width:6rem">
     <col style="width:5rem">
+    <col style="width:7rem">
   </colgroup>
   <thead>
     <tr>
@@ -57,13 +90,14 @@
          markup, not script: it says the column can be sorted before anyone has
          clicked, and it gives aiSort a selector that cannot touch the two
          columns that do not sort. #}
-      <th onclick="aiSort(1,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Method / Intent <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(2,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Threat <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(3,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Type <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(4,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none; text-align:right">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(5,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">TOF <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(6,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Direction <span class="hrr-sort-ind"></span></th>
-      <th onclick="aiSort(7,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Observability <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="1" data-kind="str" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Method / Intent <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="2" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Threat <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="3" data-kind="str" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Type <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="4" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none; text-align:right">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="5" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">TOF <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="6" data-kind="str" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Direction <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="7" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Observability <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="8" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none" title="Red approaches: Seen before, Possible or Unrealistic against the NOTSO record, or No approach when the flown plan never comes within the approach distance. Other rows: their group.">Realism <span class="hrr-sort-ind"></span></th>
       <th>Action</th>
     </tr>
   </thead>
@@ -71,6 +105,7 @@
   {# Threat/obs numeric encodings for correct sort ordering #}
   {%- set _tord = {'CRITICAL':0,'HIGH':1,'MEDIUM':2,'LOW':3,'ASSESSMENT':4} -%}
   {%- set _oord = {'HIGH':0,'MEDIUM':1,'LOW':2,'VERY LOW':3} -%}
+  {%- set _rord = {'Seen before':0,'Possible':1,'Unrealistic':2} -%}
   {% for item in items %}
   {% if item.result %}
   {# ── Parent (summary) row ── #}
@@ -79,8 +114,8 @@
      resolves here, unlike in the sweep. #}
   <tr class="threat-parent{% if item.intel.threat_level == 'CRITICAL' %} threat-high{% elif item.intel.threat_level == 'HIGH' %} threat-med{% endif %}"
       id="ai-row-{{ loop.index0 }}"
-      onclick="aiToggle({{ loop.index0 }})"
-      tabindex="0" onkeydown="spectreActivate(event)"
+      data-action="aiToggle" data-idx="{{ loop.index0 }}"
+      tabindex="0" data-activate
       aria-expanded="false"
       aria-controls="ai-detail-{{ loop.index0 }}"
       style="cursor:pointer; border-left:3px solid {{ item.intel.threat_color }}"
@@ -90,11 +125,13 @@
       data-sort-4="{{ item.result.total_delta_v_m_s }}"
       data-sort-5="{{ item.intel.tof_hours }}"
       data-sort-6="{{ item.intel.burn_intel[0].direction if item.intel.burn_intel else '' }}"
-      data-sort-7="{{ _oord.get(item.intel.obs_level, 4) }}">
+      data-sort-7="{{ _oord.get(item.intel.obs_level, 4) }}"
+      data-sort-8="{{ (3 if not item.targeting.approach else _rord.get(item.realism.band, 4)) if item.realism else 5 }}">
     <td class="threat-chevron-cell">
       <span class="threat-chevron" id="ai-chevron-{{ loop.index0 }}">&#9654;</span>
     </td>
-    <td>
+    {% set _dim = item.realism and not item.counts %}
+    <td style="{{ 'opacity:0.55' if _dim else '' }}" title="{{ 'Discounted: see Realism' if _dim else '' }}">
       <div style="font-size:0.73rem; font-weight:700; color:var(--text-bright); white-space:nowrap">
         {{ item.result.method.value | upper }}
       </div>
@@ -124,6 +161,17 @@
         {{ item.intel.obs_level }}
       </span>
     </td>
+    <td style="font-size:0.62rem">
+      {% if item.realism and item.targeting.already_within %}
+      <span style="color:var(--text-dim); font-weight:700" title="The target is within the approach distance with no burn at all over this plan's window: burning reaches nothing.">Already within</span>
+      {% elif item.realism and not item.targeting.approach %}
+      <span style="color:var(--text-dim); font-weight:700">No approach</span>
+      {% elif item.realism %}
+      <span class="{{ {'Seen before': 'badge-ok', 'Possible': 'badge-warn'}.get(item.realism.band, 'badge-red') }}">{{ item.realism.band }}</span>
+      {% else %}
+      <span style="color:var(--text-dim)">{{ item.group }}</span>
+      {% endif %}
+    </td>
     <td class="col-actions">
       {# The row above opts into spectreActivate, which calls preventDefault()
          on Enter and Space. keydown bubbles, so without this guard a key press
@@ -133,12 +181,11 @@
          in onclick. #}
       <button class="btn-secondary btn-sm"
               type="button"
-              onkeydown="event.stopPropagation()"
               data-red="{{ item.result.red_name }}" data-blue="{{ item.result.blue_name }}"
               {# The engine field is the manoeuvre start, so the first burn
                  epoch goes in, not the arrival (audit F-242). #}
               data-epoch="{{ (item.result.burns[0].burn_epoch if item.result.burns else item.result.arrival_epoch).strftime('%Y-%m-%dT%H:%M') }}"
-              onclick="event.stopPropagation(); aiLoadEngine(this.dataset.red, this.dataset.blue, this.dataset.epoch)"
+              data-action="aiLoadEngine"
               title="Pre-fill the intercept engine with these objects and start epoch (method and TOF are not set)">Load</button>
     </td>
   </tr>
@@ -146,7 +193,7 @@
   {# ── Expandable detail row ── #}
   <tr id="ai-detail-{{ loop.index0 }}" style="display:none">
     <td></td>
-    <td colspan="8" style="padding:0.6rem 0.5rem 0.8rem 0.5rem;
+    <td colspan="9" style="padding:0.6rem 0.5rem 0.8rem 0.5rem;
                             background:{{ item.intel.threat_bg }};
                             border-bottom:2px solid {{ item.intel.threat_color }}">
 
@@ -170,6 +217,33 @@
           {{ item.intel.summary }}
         </p>
       </div>
+
+      {# §A2: Targeting, the choice the search kept and how it was measured (SPC-234) #}
+      {% if item.targeting %}
+      {% set t = item.targeting %}
+      <div style="border:1px solid var(--border); border-radius:5px; padding:0.45rem 0.7rem; margin-bottom:0.55rem">
+        <div style="font-size:0.55rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.3rem">
+          Targeting{% if t.tried > 1 %}: cheapest of {{ t.tried }} options{% if t.refused %}, {{ t.refused }} refused{% endif %}{% endif %}
+        </div>
+        <dl style="display:grid; grid-template-columns:max-content 1fr max-content 1fr; gap:0.15rem 0.8rem; margin:0; font-size:0.66rem">
+          <dt>Burn point</dt><dd style="margin:0">{{ t.burn_point }}, {{ t.burn_at.strftime('%d %b %H:%M UTC') }}</dd>
+          <dt>Coast</dt><dd style="margin:0">{{ t.coast }}</dd>
+          {% if t.tof %}<dt>Time of flight</dt><dd style="margin:0">{{ t.tof }}</dd>{% endif %}
+          {% if t.revolutions %}<dt>Revolutions</dt><dd style="margin:0">{{ t.revolutions }}</dd>{% endif %}
+          {% if t.hops %}<dt>Hops</dt><dd style="margin:0">{{ t.hops }}</dd>{% endif %}
+          <dt>Closest approach</dt>
+          <dd style="margin:0">{{ t.closest_text }}{% if t.closest_after %}, {{ t.closest_after }} after the burn{% endif %}</dd>
+        </dl>
+        {% if t.band %}
+        <p class="elset-band" style="margin:0.3rem 0 0; font-size:0.6rem; color:var(--text-dim)">Beside it, {{ t.band.note }}.</p>
+        {% endif %}
+        <p style="margin:0.35rem 0 0; font-size:0.64rem; color:var(--text-dim)">
+          {% if t.already_within %}Already within: with no burn at all the target comes within {{ "%g" | format(approach_km) }} km over this plan's window, so burning reaches nothing and the row does not count.
+          {% elif not t.approach %}Not an approach: {% if t.closest_km | computed %}it never comes within {{ "%g" | format(approach_km) }} km of the target.{% else %}its closest approach was not computed, so it is not read as arriving.{% endif %}{% endif %}
+          {{ item.realism.band }}: {{ item.realism.reason }}
+        </p>
+      </div>
+      {% endif %}
 
       {# §B — Stat cards #}
       <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:0.35rem; margin-bottom:0.55rem">
@@ -202,12 +276,14 @@
           <div style="font-size:1rem; font-weight:700; color:var(--text-bright)">
             {% if item.result.score is not none %}
               {{ item.result.score | round(0) | int }}
-            {% else %}
+            {% elif item.result.intercept_range_km | computed %}
               {{ "%.1f" | format(item.result.intercept_range_km) }}
+            {% else %}
+              not computed
             {% endif %}
           </div>
           <div style="font-size:0.55rem; color:var(--text-dim)">
-            {% if item.result.score is none %}km{% elif item.result.provenance == "heuristic" %}/100 · heuristic{% endif %}
+            {% if item.result.score is none and item.result.intercept_range_km | computed %}km{% elif item.result.provenance == "heuristic" %}/100 · heuristic{% endif %}
           </div>
         </div>
         <div style="background:var(--surface); border:1px solid var(--border); border-radius:5px;
@@ -359,7 +435,7 @@
     <td></td>
     <td style="font-size:0.67rem; color:var(--text-dim)">{{ item.method.value | upper }}</td>
     <td><span style="font-size:0.58rem; color:var(--text-dim)">FAILED</span></td>
-    <td colspan="6" style="font-size:0.6rem; color:var(--text-dim)">{{ item.error | truncate(80) }}</td>
+    <td colspan="7" style="font-size:0.6rem; color:var(--text-dim)">{{ item.error | truncate(80) }}</td>
   </tr>
   {% endif %}
   {% endfor %}
@@ -367,115 +443,10 @@
 </table>
 </div>
 
-<script>
-/* ── Toggle detail row ── */
-function aiToggle(idx) {
-  var det  = document.getElementById('ai-detail-' + idx);
-  var chev = document.getElementById('ai-chevron-' + idx);
-  if (!det) return;
-  var open = det.style.display !== 'none';
-  det.style.display = open ? 'none' : '';
-  if (chev) chev.innerHTML = open ? '&#9654;' : '&#9660;';
-  /* Same fact as the chevron, for an operator who cannot see it. */
-  var row = document.querySelector('[aria-controls="ai-detail-' + idx + '"]');
-  if (row) row.setAttribute('aria-expanded', open ? 'false' : 'true');
-}
-
-/* ── Pre-fill the intercept engine ── */
-function aiLoadEngine(redSat, blueSat, epoch) {
-  if (typeof switchToEngine === 'function') switchToEngine();
-  var redSel  = document.getElementById('ie-red-sat');
-  var blueSel = document.getElementById('ie-blue-sat');
-  var startIn = document.querySelector('input[name="manoeuvre_start"]');
-  if (redSel)  redSel.value  = redSat;
-  if (blueSel) blueSel.value = blueSat;
-  if (startIn) startIn.value = epoch;
-  var engine = document.getElementById('intercept-engine-form');
-  if (engine) engine.scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
-/* ── Column sort ── */
-var _aiSortCol = -1, _aiSortAsc = true;
-
-function aiSort(col, type) {
-  var table = document.getElementById('all-intercepts-table');
-  if (!table) return;
-  var tbody = table.tBodies[0];
-
-  /* Toggle direction if same column, else reset to ascending */
-  if (_aiSortCol === col) { _aiSortAsc = !_aiSortAsc; }
-  else { _aiSortCol = col; _aiSortAsc = true; }
-
-  _aiMarkSortHeader(table, col);
-  var grouped = _aiPairRows(Array.from(tbody.rows));
-  grouped.pairs.sort(_aiCompare(col, type));
-
-  /* Re-insert: sorted pairs first, failed rows last */
-  grouped.pairs.forEach(function(pair) {
-    tbody.appendChild(pair[0]);
-    if (pair[1]) tbody.appendChild(pair[1]);
-  });
-  grouped.orphans.forEach(function(r) { tbody.appendChild(r); });
-}
-
-/* Sort indicators in the header. The glyph and aria-sort are the same fact
-   for two different operators, so they are written together and can never
-   drift apart. */
-function _aiMarkSortHeader(table, col) {
-  table.querySelectorAll('thead .hrr-sort-ind').forEach(function(s) { s.textContent = ''; });
-  table.querySelectorAll('thead th[aria-sort]').forEach(function(h) { h.setAttribute('aria-sort', 'none'); });
-  var th = table.querySelectorAll('thead th')[col];
-  if (!th) return;
-  var ind = th.querySelector('.hrr-sort-ind');
-  if (ind) ind.textContent = _aiSortAsc ? ' ▲' : ' ▼';
-  th.setAttribute('aria-sort', _aiSortAsc ? 'ascending' : 'descending');
-}
-
-/* Parent rows paired with the detail row that follows each; rows that are
-   neither (failed methods) are kept apart to go last. */
-function _aiPairRows(rows) {
-  var pairs = [];
-  var orphans = [];
-  var i = 0;
-  while (i < rows.length) {
-    var row = rows[i];
-    if (!row.classList.contains('threat-parent')) {
-      orphans.push(row);
-      i++;
-      continue;
-    }
-    var next = rows[i + 1];
-    var detail = (next && !next.classList.contains('threat-parent')) ? next : null;
-    pairs.push([row, detail]);
-    i += detail ? 2 : 1;
-  }
-  return { pairs: pairs, orphans: orphans };
-}
-
-/* Orders pairs by the parent row's data-sort-<col>; a numeric column reads an
-   unparseable value as Infinity, so it sorts last ascending. */
-function _aiSortKey(row, col, type) {
-  var v = row.getAttribute('data-sort-' + col) || '';
-  if (type !== 'num') return v;
-  var n = Number.parseFloat(v);
-  return Number.isNaN(n) ? Infinity : n;
-}
-
-function _aiCompare(col, type) {
-  return function(a, b) {
-    var av = _aiSortKey(a[0], col, type);
-    var bv = _aiSortKey(b[0], col, type);
-    if (av < bv) return _aiSortAsc ? -1 : 1;
-    if (av > bv) return _aiSortAsc ?  1 : -1;
-    return 0;
-  };
-}
-</script>
+{# Toggle, load and sort are in /static/js/intercepts.js (SPC-199). #}
 
 {% if intercept_history and intercept_history | length > 1 %}
-<script>
-if (typeof _spectreRenderTradeSpace === 'function') _spectreRenderTradeSpace();
-</script>
+<span hidden data-init="trade-space-render"></span>
 {% endif %}
 
 {% endif %}

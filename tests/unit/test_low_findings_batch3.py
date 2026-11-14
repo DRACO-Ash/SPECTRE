@@ -61,7 +61,9 @@ class TestF270CspCommentCountsAreTrue:
         styles = sum(t.read_text("utf-8").count("<style") for t in templates)
         words = {3: "three", 4: "four", 5: "five", 6: "six", 7: "Seven", 8: "eight"}
         comment = (_WEB / "app.py").read_text("utf-8")
-        assert f"{words[hx_on]} of them" in comment, hx_on
+        # The hx-on attributes the comment used to count are gone, and with them 'unsafe-eval' (SPC-199).
+        assert hx_on == 0, hx_on
+        assert "'unsafe-eval'" not in comment[comment.index("_CSP = ("):]
         assert f"{words[styles]}\n#     inline <style> blocks" in comment, styles
 
 

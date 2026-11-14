@@ -42,6 +42,7 @@ import contextlib
 from dataclasses import dataclass, field
 from enum import IntEnum
 
+from spectre.domain.custody import Custody
 from spectre.domain.manoeuvre_calibration import (
     ManoeuvreKind,
     Posture,
@@ -55,14 +56,22 @@ from spectre.domain.provenance import Provenance, provenance, value_input
 
 __all__ = [
     "AccessEvidence",
+    "ActorRange",
     "ActorVerdict",
     "Band",
     "CapabilityEvidence",
+    "ConfidenceContext",
     "ScreeningResult",
     "ThreatAssessment",
+    "VerdictReading",
+    "WIDE_RANGE_BANDS",
     "assess_threat",
+    "range_verdict",
     "rank_actors",
+    "read_verdict",
     "warning_time_rank",
+    "NON_ARRIVING_METHODS",
+    "arrives_at_target",
 ]
 
 
@@ -122,7 +131,8 @@ _IMPAIRED_STATUS_MARKERS: tuple[str, ...] = (
 # the band could then never fire at all. It now reads the fraction of the
 # PROPELLANT LOAD, which is reachable: about 1.57 km/s for a LEO smallsat and
 # 0.85 km/s for a chemical GEO comsat, both inside Table 2's envelopes.
-_PROPELLANT_SPENT_PCT: float = 95.0
+PROPELLANT_SPENT_PCT: float = 95.0
+_PROPELLANT_SPENT_PCT: float = PROPELLANT_SPENT_PCT
 # Propellant remaining at or above this grades capability HIGH; below it, LOW,
 # so a scarce reserve cannot raise an assessed LOW (it graded MEDIUM, audit
 # F-120). Tuned, not sourced.
@@ -139,9 +149,80 @@ _DISCRETIONARY_AMPLE_SHARE: float = 0.5
 # a capability verdict is actually asking.
 _DISCRETIONARY_EXHAUSTED_M_S: float = 0.0
 
-# Geometry plus three capability inputs. Fewer than this and the verdict rests
-# on an assessed label with little behaviour behind it.
-_EVIDENCE_FOR_HIGH_CONFIDENCE: int = 4
+# ── Confidence: how well founded the verdict is (SPC-160) ───────────────────
+#
+# Confidence was a count of inputs: four or more read HIGH, and orbital
+# geometry was one of the four. So an object with no intel record and a
+# history showing no burns read HIGH on geometry, a regime-assumed full tank
+# counted twice (propellant used and discretionary reserve) and "0 burns".
+# The four figures a history gives come from one source chain, and agreement
+# among copies is not corroboration (Dong, Berti-Equille and Srivastava,
+# PVLDB 2(1), 2009). Geometry is the question being asked, not evidence about
+# the satellite. Confidence now counts what is known about the satellite, by
+# independent source, once each: the interim rule the Threat Understanding
+# concept (docs/threat_confidence_concept.md, section 6) replaces in full at
+# SPC-162 to SPC-164.
+
+
+class _Level(IntEnum):
+    """Confidence, ordered so the weakest limit can be taken with ``min``.
+
+    MODERATE, not MEDIUM, as UK assessment practice names its middle level,
+    so a confidence never reads like a threat band.
+    """
+
+    LOW = 0
+    MODERATE = 1
+    HIGH = 2
+
+
+#: The independent sources the six capability inputs come from.
+_RECORD = "the assessed record"
+_HISTORY = "the element-set history"
+
+#: What a source tells us about the satellite, in the concept's dimensions.
+_IDENTITY, _CAPABILITY, _BEHAVIOUR = "identity", "capability", "behaviour"
+_DIMENSIONS: tuple[str, ...] = (_IDENTITY, _CAPABILITY, _BEHAVIOUR)
+
+# All three dimensions held reads HIGH, two read MODERATE, after the concept's
+# Information Base criteria (section 6.1). Tuned, not sourced.
+_DIMENSIONS_FOR_HIGH: int = 3
+_DIMENSIONS_FOR_MODERATE: int = 2
+
+# The interceptor's custody caps confidence: a picture that cannot be kept
+# current is not a well-founded one (section 6.1, Complexity and Volatility).
+# Not assessed reads as not HIGH. Tuned, not sourced.
+_CUSTODY_CAP: dict[Custody | None, _Level] = {
+    Custody.HELD: _Level.HIGH,
+    Custody.DEGRADED: _Level.MODERATE,
+    Custody.LOST: _Level.LOW,
+    None: _Level.MODERATE,
+}
+_CUSTODY_REASON: dict[Custody | None, str] = {
+    Custody.DEGRADED: "custody of the interceptor is degraded",
+    Custody.LOST: "custody of the interceptor is lost",
+    None: "custody was not assessed",
+}
+
+# Live tracking is the only data mode that does not cap. A set entered by hand
+# caps at the operator's stated confidence; one with none stated, and a mode
+# not recorded, cap at MODERATE; every other mode (SYNTHETIC, TEST, EXERCISE,
+# SIMULATED) describes the exercise, not the satellite, and reads LOW
+# (section 6.2). Tuned, not sourced.
+_LIVE_MODE = "REAL"
+_MANUAL_MODE = "MANUAL"
+_UNRECORDED_MODES: frozenset[str] = frozenset({"", "UNKNOWN"})
+_MANUAL_CAP: dict[str, _Level] = {
+    "CONFIRMED": _Level.HIGH,
+    "HIGH": _Level.HIGH,
+    "MEDIUM": _Level.MODERATE,
+    "LOW": _Level.LOW,
+    "UNCONFIRMED": _Level.LOW,
+}
+
+# Two readings that contradict each other leave the picture unsettled, so a
+# conflict caps confidence (section 4.7). Tuned, not sourced.
+_CONFLICT_CAP: _Level = _Level.MODERATE
 
 # The behavioural anomaly score is graded through the Pattern of Life ladder
 # (pol_assessment._RISK_LADDER), so one score reads one band in both panels.
@@ -219,6 +300,9 @@ class CapabilityEvidence:
     """
 
     intel_threat_level: str | None = None      # from the assessed record
+    #: True when the assessed record carries a date. None of the 44 bundled
+    #: records does, so nothing sets it yet (concept section 5, SPC-165).
+    intel_record_dated: bool = False
     operational_status: str | None = None      # "Operational", "Degraded", ...
     #: Fraction of the PROPELLANT LOAD consumed, from PropellantAssessment.
     #: Not the fraction of total spacecraft mass, which is what the field used
@@ -256,31 +340,50 @@ class CapabilityEvidence:
         """MINIMAL when something says this object cannot act, else None.
 
         A stated inability to manoeuvre, or a spent tank, dominates every other
-        signal: whatever the geometry permits, this object is not flying it.
+        signal in the legacy verdict: whatever the geometry permits, this
+        object is not flying it. That verdict is unchanged until SPC-175, but
+        it no longer silences decide-by on its own (SPC-167): see
+        :meth:`incapacity_evidence`.
+        """
+        return Band.MINIMAL if self.incapacity_evidence() else None
+
+    def incapacity_evidence(self) -> str:
+        """What says this object cannot act, in words, or "" when nothing does.
+
+        A recorded status is evidence like any other, declared by the
+        object's operator, not observed; a spent tank is computed from the
+        history. The two are told apart because only computed evidence, once
+        earned, may withhold decide-by (concept section 7.4, SPC-167).
         """
         if self.is_impaired():
-            return Band.MINIMAL
-        if (
-            self.propellant_used_pct is not None
-            and self.propellant_used_pct >= _PROPELLANT_SPENT_PCT
-        ):
-            return Band.MINIMAL
-        if (
-            self.discretionary_remaining_m_s is not None
-            and self.discretionary_remaining_m_s <= _DISCRETIONARY_EXHAUSTED_M_S
-        ):
-            return Band.MINIMAL
+            return f"the recorded status '{self.operational_status}', declared, not observed"
+        if self.propellant_used_pct is not None and self.propellant_used_pct >= _PROPELLANT_SPENT_PCT:
+            return (f"a spent tank, {self.propellant_used_pct:.0f} per cent of the propellant load used, "
+                    "computed from its history")
+        if (self.discretionary_remaining_m_s is not None
+                and self.discretionary_remaining_m_s <= _DISCRETIONARY_EXHAUSTED_M_S):
+            return "a spent discretionary reserve, computed from its history"
+        return ""
+
+    def recognised_threat_level(self) -> Band | None:
+        """The assessed threat level as a band, or None when absent or unrecognised.
+
+        An unrecognised label is NO evidence, not low evidence, so a typo or a
+        new label cannot quietly downgrade an object.
+        """
+        if not self.intel_threat_level:
+            return None
+        with contextlib.suppress(KeyError):
+            return Band[self.intel_threat_level.strip().upper()]
         return None
 
     def _signals(self) -> list[Band]:
         """Every capability signal this object offers, as a severity each."""
         candidates: list[Band] = []
 
-        if self.intel_threat_level:
-            # An unrecognised label is NO evidence, not low evidence, so a typo
-            # or a new label cannot quietly downgrade an object.
-            with contextlib.suppress(KeyError):
-                candidates.append(Band[self.intel_threat_level.strip().upper()])
+        assessed = self.recognised_threat_level()
+        if assessed is not None:
+            candidates.append(assessed)
 
         if self.anomaly_score is not None:
             candidates.append(Band[anomaly_risk_level(self.anomaly_score)])
@@ -353,6 +456,13 @@ class ThreatAssessment:
     undeliverable_reason: str = ""
     #: The code, calibration and evidence behind this verdict (audit F-121).
     provenance: Provenance | None = None
+    #: What ``confidence`` rests on, source by source, and what holds it down.
+    confidence_basis: str = ""
+    #: Two readings that contradict each other, named; empty when none do.
+    confidence_conflict: str = ""
+    #: What set capability MINIMAL, in words, a declared status or a computed
+    #: spent tank; empty when nothing did (SPC-167).
+    incapacity: str = ""
 
     @property
     def verdict_label(self) -> str:
@@ -365,6 +475,151 @@ class ThreatAssessment:
     @property
     def capability_label(self) -> str:
         return self.capability.label if self.capability is not None else "UNASSESSED"
+
+
+@dataclass(frozen=True)
+class ConfidenceContext:
+    """What bears on confidence without being evidence about the satellite.
+
+    *data_mode* is the UDL dataMode of the interceptor's element set, MANUAL
+    for one entered by hand, ``None`` when not recorded. *manual_confidence*
+    is the operator's stated confidence in a hand-entered set. *custody* is
+    the interceptor's custody by the shared rule, ``None`` when not assessed.
+    """
+
+    data_mode: str | None = None
+    custody: Custody | None = None
+    manual_confidence: str | None = None
+
+
+def _dimensions_by_source(capability: CapabilityEvidence) -> dict[str, list[str]]:
+    """What each independent source tells us about the satellite, counted once per dimension.
+
+    The operational status is declared by the object's operator and is not
+    counted; nor is "no burns observed", an absence rather than a reading.
+    An undated record is not counted either: taken as one half-life old, a
+    single-source record scores 0.09, below the 0.25 an item needs to
+    establish a dimension (concept sections 4.3 and 4.12, row 1).
+    """
+    held: dict[str, list[str]] = {}
+    if capability.recognised_threat_level() is not None and capability.intel_record_dated:
+        held[_RECORD] = [_IDENTITY]
+    history: list[str] = []
+    if capability.propellant_used_pct is not None or capability.discretionary_remaining_m_s is not None:
+        history.append(_CAPABILITY)
+    if capability.anomaly_score is not None or (capability.manoeuvres_observed or 0) > 0:
+        history.append(_BEHAVIOUR)
+    if history:
+        held[_HISTORY] = history
+    return held
+
+
+def _not_counted(capability: CapabilityEvidence) -> list[str]:
+    """The inputs present that add nothing to confidence, each with the reason."""
+    reasons: list[str] = []
+    if capability.intel_threat_level and capability.recognised_threat_level() is None:
+        reasons.append(_unrecognised_label(capability.intel_threat_level))
+    elif capability.intel_threat_level and not capability.intel_record_dated:
+        reasons.append("the assessed record, which carries no date, so cannot establish identity")
+    if capability.operational_status:
+        reasons.append(f"the recorded status '{capability.operational_status}', which is declared, not observed")
+    if capability.manoeuvres_observed == 0:
+        reasons.append("no burns observed, an absence rather than a reading")
+    return reasons
+
+
+def _unrecognised_label(label: str) -> str:
+    return f"assessed threat level ('{label}' is not a recognised band)"
+
+
+def _conflict(capability: CapabilityEvidence) -> str:
+    """A status saying the object cannot manoeuvre, against a history showing it does."""
+    burns = capability.manoeuvres_observed or 0
+    if not (capability.is_impaired() and burns > 0):
+        return ""
+    plural = "burn" if burns == 1 else "burns"
+    return (f"the record says {capability.operational_status}, but the history shows {burns} {plural}: "
+            "possible deception")
+
+
+def _information_base(held: dict[str, list[str]]) -> tuple[_Level, str]:
+    """The level the dimensions held support, and what is missing when it is not HIGH."""
+    dimensions = [d for d in _DIMENSIONS if any(d in found for found in held.values())]
+    missing = ", ".join(d for d in _DIMENSIONS if d not in dimensions)
+    if len(dimensions) >= _DIMENSIONS_FOR_HIGH:
+        return _Level.HIGH, ""
+    if len(dimensions) >= _DIMENSIONS_FOR_MODERATE:
+        return _Level.MODERATE, f"{missing} not held"
+    return _Level.LOW, f"{missing} not held"
+
+
+def _data_mode_limit(context: ConfidenceContext) -> tuple[_Level, str]:
+    """The cap the interceptor's element set's provenance puts on confidence."""
+    mode = (context.data_mode or "").strip().upper()
+    if mode == _LIVE_MODE:
+        return _Level.HIGH, ""
+    if mode in _UNRECORDED_MODES:
+        return _Level.MODERATE, "the element set's data mode is not recorded"
+    if mode == _MANUAL_MODE:
+        stated = (context.manual_confidence or "").strip().upper()
+        if stated not in _MANUAL_CAP:
+            return _Level.MODERATE, "the element set was entered by hand with no stated confidence"
+        return _MANUAL_CAP[stated], f"the element set was entered by hand at {stated} confidence"
+    return _Level.LOW, f"computed from {mode} element sets: describes the exercise, not the satellite"
+
+
+def _confidence(capability: CapabilityEvidence, context: ConfidenceContext) -> tuple[str, str, str]:
+    """The confidence level, the sentence saying what it rests on, and any conflict.
+
+    The level is the weakest of what the evidence supports, the data mode,
+    custody and any conflict. Orbital geometry is not counted: it is the
+    question being asked, not evidence about the satellite.
+    """
+    held = _dimensions_by_source(capability)
+    conflict = _conflict(capability)
+    limits = [
+        _information_base(held),
+        _data_mode_limit(context),
+        (_CUSTODY_CAP[context.custody], _CUSTODY_REASON.get(context.custody, "")),
+        (_CONFLICT_CAP, conflict) if conflict else (_Level.HIGH, ""),
+    ]
+    level = min(cap for cap, _ in limits)
+    sentence = f"Confidence {level.name}. {_sources_clause(held)} Orbital geometry is not counted."
+    not_counted = _not_counted(capability)
+    if not_counted:
+        sentence += f" Not counted: {'; '.join(not_counted)}."
+    reasons = [reason for cap, reason in limits if cap < _Level.HIGH]
+    if reasons:
+        sentence += f" Not higher because: {'; '.join(reasons)}."
+    return level.name, sentence, conflict
+
+
+def _sources_clause(held: dict[str, list[str]]) -> str:
+    """The independent sources confidence rests on, each named once with what it tells us."""
+    if not held:
+        return "Rests on 0 independent sources: nothing is held about the satellite itself."
+    noun = "source" if len(held) == 1 else "sources"
+    sources = "; ".join(f"{source} ({', '.join(dims)})" for source, dims in held.items())
+    return f"Rests on {len(held)} independent {noun}, each counted once: {sources}."
+
+
+def _inputs(capability: CapabilityEvidence) -> tuple[list[str], list[str]]:
+    """The capability inputs used and missing; an unrecognised label is missing, with the reason."""
+    used: list[str] = ["orbital geometry"]
+    missing: list[str] = []
+    for label, value in (
+        ("assessed threat level", capability.recognised_threat_level()),
+        ("operational status", capability.operational_status),
+        ("propellant budget", capability.propellant_used_pct),
+        # _signals reads it, so the verdict must list it (audit F-228).
+        ("discretionary reserve", capability.discretionary_remaining_m_s),
+        ("behavioural anomaly score", capability.anomaly_score),
+        ("observed manoeuvre history", capability.manoeuvres_observed),
+    ):
+        (used if value is not None else missing).append(label)
+    if capability.intel_threat_level and capability.recognised_threat_level() is None:
+        missing[missing.index("assessed threat level")] = _unrecognised_label(capability.intel_threat_level)
+    return used, missing
 
 
 def _impairment_clause(capability: CapabilityEvidence) -> str:
@@ -380,7 +635,8 @@ def _impairment_clause(capability: CapabilityEvidence) -> str:
     return ""
 
 
-def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> ThreatAssessment:
+def assess_threat(access: AccessEvidence, capability: CapabilityEvidence,
+                  context: ConfidenceContext | None = None) -> ThreatAssessment:
     """Compose the two into one verdict, showing the working.
 
     The rule is that the weaker of the two governs, because a threat needs both
@@ -390,27 +646,19 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
     Where no capability evidence exists the verdict falls back to geometry
     alone and says so, with low confidence, rather than quietly scoring an
     unknown object as harmless.
+
+    *context* carries what bears on confidence without being evidence about
+    the satellite: the element set's data mode and the interceptor's custody.
+    It never moves the verdict.
     """
+    context = context or ConfidenceContext()
     access_band = access.band()
     capability_band = capability.band()
-
-    used: list[str] = ["orbital geometry"]
-    missing: list[str] = []
-
-    for label, value in (
-        ("assessed threat level", capability.intel_threat_level),
-        ("operational status", capability.operational_status),
-        ("propellant budget", capability.propellant_used_pct),
-        # _signals reads it, so the verdict must list it (audit F-228).
-        ("discretionary reserve", capability.discretionary_remaining_m_s),
-        ("behavioural anomaly score", capability.anomaly_score),
-        ("observed manoeuvre history", capability.manoeuvres_observed),
-    ):
-        (used if value is not None else missing).append(label)
+    used, missing = _inputs(capability)
+    confidence, confidence_basis, conflict = _confidence(capability, context)
 
     if capability_band is None:
         verdict = access_band
-        confidence = "LOW"
         rationale = (
             f"Geometry permits an intercept at {access.best_delta_v_m_s:.0f} m/s "
             f"({access_band.label} accessibility). No capability evidence was available "
@@ -419,7 +667,6 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
         )
     else:
         verdict = Band(min(access_band, capability_band))
-        confidence = "HIGH" if len(used) >= _EVIDENCE_FOR_HIGH_CONFIDENCE else "MEDIUM"
         if capability_band < access_band:
             rationale = (
                 f"Geometry permits an intercept at {access.best_delta_v_m_s:.0f} m/s "
@@ -465,12 +712,30 @@ def assess_threat(access: AccessEvidence, capability: CapabilityEvidence) -> Thr
         posture_label=posture.posture_label,
         posture_rationale=posture.rationale,
         posture_basis=posture.basis,
-        provenance=provenance([value_input("access", access), value_input("capability", capability)]),
+        provenance=provenance([value_input("access", access), value_input("capability", capability),
+                               value_input("confidence context", context)]),
+        confidence_basis=confidence_basis,
+        confidence_conflict=conflict,
         undeliverable_reason=undeliverable_reason,
+        incapacity=capability.incapacity_evidence(),
     )
 
 
-def warning_time_rank(entry_delta_v_m_s: float, tof_hours: float, budget_m_s: float) -> tuple[float, float]:
+#: Methods whose solution aligns orbits without bringing the object to the
+#: target. A plane change "arrives" the moment it burns, so its zero flight
+#: time once ranked it the most dangerous course of action, arriving in under
+#: a minute, whenever it fitted the budget.
+NON_ARRIVING_METHODS: frozenset[str] = frozenset({"plane_change"})
+
+
+def arrives_at_target(method: str) -> bool:
+    """Whether a solution by *method* brings the object to the target."""
+    return method not in NON_ARRIVING_METHODS
+
+
+def warning_time_rank(
+    entry_delta_v_m_s: float, tof_hours: float, budget_m_s: float, arrives: bool = True,
+) -> tuple[float, float]:
     """Sort key that ranks on warning time, with feasibility as the filter.
 
     The sweep ranked on delta-V alone, so an intercept costing 120 m/s and
@@ -480,9 +745,10 @@ def warning_time_rank(entry_delta_v_m_s: float, tof_hours: float, budget_m_s: fl
 
     Delta-V keeps its role as the feasibility filter it already was. Anything
     outside the budget sorts last regardless of how quickly it would arrive,
-    because an intercept that cannot be flown buys no warning at all.
+    because an intercept that cannot be flown buys no warning at all. A
+    solution that never reaches the target sorts last for the same reason.
     """
-    feasible = 0 if entry_delta_v_m_s <= budget_m_s else 1
+    feasible = 0 if entry_delta_v_m_s <= budget_m_s and arrives else 1
     return (feasible, tof_hours)
 
 
@@ -492,12 +758,157 @@ def warning_time_rank(entry_delta_v_m_s: float, tof_hours: float, budget_m_s: fl
 
 
 @dataclass(frozen=True)
+class ActorRange:
+    """One actor's Threat range and Understanding, beside its legacy verdict (SPC-169, in shadow).
+
+    Read by Threat Understanding from what is already held, the intel record,
+    the GCAT row and a cached history; *history_held* says whether there was
+    one. *at_ceiling* is whether the new rule would read the ceiling, as it
+    does at Understanding LOW or across a range too wide to call. Every band
+    in the words below is labelled "Threat" or "Understanding" (I13).
+    """
+
+    floor: Band
+    ceiling: Band
+    understanding: str
+    history_held: bool
+    at_ceiling: bool
+    statement: str = ""
+    cue: str = ""
+
+    def __post_init__(self) -> None:
+        if self.floor > self.ceiling:
+            raise ValueError("a Threat range with its floor above its ceiling")
+        if self.understanding not in _UNDERSTANDING_LEVELS:
+            raise ValueError(f"Understanding must be one of {', '.join(_UNDERSTANDING_LEVELS)}")
+
+    @property
+    def span_text(self) -> str:
+        """The bands the range runs between, "HIGH to CRITICAL", or the one band it holds."""
+        if self.floor == self.ceiling:
+            return self.floor.label
+        return f"{self.floor.label} to {self.ceiling.label}"
+
+    @property
+    def range_label(self) -> str:
+        return f"Threat {self.span_text}"
+
+    @property
+    def understanding_label(self) -> str:
+        held = "" if self.history_held else ": no history held"
+        return f"Understanding {self.understanding}{held}"
+
+
+#: Understanding as Threat Understanding rates it, weakest first.
+_UNDERSTANDING_LEVELS: tuple[str, ...] = ("LOW", "MODERATE", "HIGH")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The verdict switch (SPC-175, concept section 4.8)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# One rule, read by Threat Understanding's verdict and by the switch alike, so
+# the band the switch would show and the band the shadow display reads cannot
+# disagree. The switch itself is a deployment setting the web layer reads; this
+# module only says what each verdict is and why.
+
+#: A Threat range spanning this many bands or more is too wide to call a point inside it, so the verdict reads its
+#: ceiling. Tuned, not sourced.
+WIDE_RANGE_BANDS: int = 4
+
+
+def range_verdict(legacy: Band, floor: Band, ceiling: Band, *, understanding_low: bool) -> tuple[Band, bool]:
+    """The current reading clamped into [floor, ceiling], and whether the verdict reads the ceiling instead.
+
+    It reads the ceiling when Understanding is LOW or the range spans WIDE_RANGE_BANDS or more bands.
+    """
+    assessed = Band(min(max(legacy, floor), ceiling))
+    at_ceiling = understanding_low or int(ceiling) - int(floor) + 1 >= WIDE_RANGE_BANDS
+    return assessed, at_ceiling
+
+
+@dataclass(frozen=True)
+class VerdictReading:
+    """One object's verdict by the current rule and by concept section 4.8, and why the new one is what it is.
+
+    *old* is the current rule's ``min(ACCESS, capability)``, or ACCESS with no
+    capability evidence. *new* is the Threat ceiling when *at_ceiling*, else
+    *assessed*, the old reading clamped into the range. *reason* is one plain
+    line, Threat and Understanding each in sentences of their own (I13).
+    """
+
+    old: Band
+    new: Band
+    assessed: Band
+    at_ceiling: bool
+    understanding: str
+    reason: str
+
+    def shown(self, *, switch_on: bool) -> Band:
+        """The verdict the operator sees: the new one only with the switch on."""
+        return self.new if switch_on else self.old
+
+
+def _span_words(floor: Band, ceiling: Band) -> str:
+    return floor.label if floor == ceiling else f"{floor.label} to {ceiling.label}"
+
+
+def _ceiling_words(ceiling: Band, access: Band) -> str:
+    if ceiling == access:
+        return f"set by access at {access.label}"
+    return f"set by the evidence at {ceiling.label}, below access at {access.label}"
+
+
+def _threat_reason(old: Band, access: Band, span: tuple[Band, Band], understanding_low: bool) -> str:
+    """The Threat sentence of the reason: why the new verdict is the band it is."""
+    floor, ceiling = span
+    assessed, at_ceiling = range_verdict(old, floor, ceiling, understanding_low=understanding_low)
+    range_words = f"Threat range {_span_words(floor, ceiling)}"
+    if at_ceiling:
+        reads = f"Threat reads its ceiling, {_ceiling_words(ceiling, access)}"
+        if understanding_low:
+            return f"{reads}."
+        bands = int(ceiling) - int(floor) + 1
+        return f"{range_words} spans {bands} bands, too wide to call a point, so {reads}."
+    if floor <= old <= ceiling:
+        return f"{range_words} holds the current rule's reading, so Threat stays {assessed.label}."
+    if old < floor:
+        return f"{range_words} sits above the current rule's reading, so Threat rises to its floor, {assessed.label}."
+    return f"{range_words} sits below the current rule's reading, so Threat falls to its ceiling, {assessed.label}."
+
+
+def read_verdict(old: Band, access: Band, span: tuple[Band, Band], understanding: str) -> VerdictReading:
+    """The verdict by the current rule and by concept section 4.8, side by side, with the reason in one line.
+
+    *span* is the Threat range (floor, ceiling) the evidence earns, which never
+    exceeds *access*; *understanding* is LOW, MODERATE or HIGH.
+    """
+    floor, ceiling = span
+    if floor > ceiling:
+        raise ValueError("a Threat range with its floor above its ceiling")
+    if ceiling > access:
+        raise ValueError("a Threat ceiling above access, which no evidence can raise")
+    if understanding not in _UNDERSTANDING_LEVELS:
+        raise ValueError(f"Understanding must be one of {', '.join(_UNDERSTANDING_LEVELS)}")
+    low = understanding == _UNDERSTANDING_LEVELS[0]
+    assessed, at_ceiling = range_verdict(old, floor, ceiling, understanding_low=low)
+    reason = (f"Understanding {understanding}. {_threat_reason(old, access, span, low)} "
+              f"The current rule reads Threat {old.label}.")
+    return VerdictReading(old=old, new=ceiling if at_ceiling else assessed, assessed=assessed, at_ceiling=at_ceiling,
+                          understanding=understanding, reason=reason)
+
+
+@dataclass(frozen=True)
 class ActorVerdict:
     """One candidate actor's assessment against the asset being screened.
 
     ``assessment`` is the composed verdict. ``warning_hours`` and
     ``delta_v_m_s`` describe the entry that produced it, so the screen can show
-    what the verdict was built from without re-deriving it.
+    what the verdict was built from without re-deriving it. ``understanding``
+    is its Threat range and Understanding, when they could be read (SPC-169).
+    ``switched`` is set only with the verdict switch on (SPC-175): the
+    verdict is then concept section 4.8's, and the assessment keeps the
+    current rule's.
     """
 
     actor_name: str
@@ -507,14 +918,16 @@ class ActorVerdict:
     delta_v_m_s: float
     method: str = ""
     country: str = ""
+    understanding: ActorRange | None = None
+    switched: VerdictReading | None = None
 
     @property
     def verdict(self) -> Band:
-        return self.assessment.verdict
+        return self.assessment.verdict if self.switched is None else self.switched.new
 
     @property
     def verdict_label(self) -> str:
-        return self.assessment.verdict_label
+        return self.verdict.label
 
 
 @dataclass(frozen=True)
@@ -532,6 +945,9 @@ class ScreeningResult:
     earliest_arrival: ActorVerdict | None
     #: Set when those two are different objects.
     disagreement: str = ""
+    #: Set when an actor's legacy verdict sits outside the Threat range its
+    #: evidence earns, or below a ceiling the range would be read at (SPC-169).
+    understanding_disagreement: str = ""
 
 
 def _actor_rank_key(v: ActorVerdict) -> tuple[int, float, float]:
@@ -585,4 +1001,32 @@ def rank_actors(verdicts: list[ActorVerdict]) -> ScreeningResult:
         most_dangerous=most_dangerous,
         earliest_arrival=earliest_arrival,
         disagreement=disagreement,
+        understanding_disagreement=_understanding_disagreement(verdicts),
     )
+
+
+def _range_disagreement(v: ActorVerdict) -> str:
+    """The new case for one actor, in words, or "" when its verdict and its range agree.
+
+    The legacy verdict outside the range comes first; then a range read at
+    its ceiling, at Understanding LOW or too wide to call, above the verdict.
+    Threat and Understanding each take a sentence of their own (I13).
+    """
+    span = v.understanding
+    if span is None:
+        return ""
+    arrives = f"it could arrive in {v.warning_hours:.1f} h"
+    if not span.floor <= v.verdict <= span.ceiling:
+        return (f"{v.actor_name}'s Threat is assessed {v.verdict_label} by the current rule, outside the Threat "
+                f"range its evidence earns, {span.span_text}, and {arrives}.")
+    if span.at_ceiling and span.ceiling > v.verdict:
+        held = "" if span.history_held else ": no history held"
+        return (f"{v.actor_name}'s Threat is assessed {v.verdict_label}, but its Threat ceiling is "
+                f"{span.ceiling.label} and {arrives}. {v.actor_name} reads Understanding {span.understanding}{held}.")
+    return ""
+
+
+def _understanding_disagreement(verdicts: list[ActorVerdict]) -> str:
+    """Concept section 7.2: the soonest actor whose verdict its own Threat range does not bear out."""
+    flagged = sorted((v for v in verdicts if _range_disagreement(v)), key=lambda v: (v.warning_hours, v.delta_v_m_s))
+    return _range_disagreement(flagged[0]) if flagged else ""

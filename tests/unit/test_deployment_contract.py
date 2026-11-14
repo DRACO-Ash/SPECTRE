@@ -792,11 +792,71 @@ class TestClusteringPackageTravels:
         assert ClusteringConfig is not None
 
     def test_clustering_is_not_silently_disabled(self, dockerfile: str) -> None:
-        """The image must copy the package, or the import fails at runtime."""
-        assert "tle_clustering" in dockerfile, (
+        """The image must copy the package, or the import fails at runtime.
+
+        This read ``"tle_clustering" in dockerfile``, which a comment naming
+        the package satisfied as well as a COPY of it (SPC-074).
+        """
+        assert _copies_the_package(dockerfile, "tle_clustering"), (
             "the Dockerfile must COPY tle_clustering, otherwise the guarded import "
             "fails inside the container and clustering is skipped without error"
         )
+
+    def test_the_guard_sees_a_dockerfile_that_only_mentions_the_package(self) -> None:
+        """SPC-074: the committed red case. A mention is not a copy, and a later stage's copy is not local."""
+        mentioned = "# tle_clustering is optional, the import is guarded\nCOPY spectre/ /app/spectre/\n"
+        staged = "COPY --from=build /src/tle_clustering/ /app/tle_clustering/\n"
+        copied = "COPY --chown=1001:0 tle_clustering/ /app/tle_clustering/\n"
+        assert not _copies_the_package(mentioned, "tle_clustering")
+        assert not _copies_the_package(staged, "tle_clustering")
+        assert _copies_the_package(copied, "tle_clustering")
+
+
+def _copy_sources(body: str) -> list[str]:
+    """Local COPY sources only. --from=<stage> reads from an earlier stage."""
+    sources = []
+    for match in re.finditer(r"^\s*COPY\s+(.*)$", body, re.MULTILINE):
+        parts = match.group(1).split()
+        if any(part.startswith("--from=") for part in parts):
+            continue
+        parts = [part for part in parts if not part.startswith("--")]
+        if len(parts) < 2:
+            continue
+        sources.extend(parts[:-1])
+    return sources
+
+
+def _copies_the_package(dockerfile: str, package: str) -> bool:
+    """Whether *dockerfile* copies *package* from the build context."""
+    return any(source.rstrip("/").split("/", 1)[0] == package for source in _copy_sources(dockerfile))
+
+
+def _dockerignore_exclusions(body: str) -> list[str]:
+    """Directory and exact-name exclusions, ignoring negations and globs.
+
+    Only the pattern forms this project actually uses are interpreted. A
+    pattern we cannot evaluate is skipped rather than guessed at, so the
+    test never invents a failure it cannot justify.
+    """
+    patterns = []
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("#", "!")):
+            continue
+        if "*" in line or "?" in line:
+            continue
+        patterns.append(line.rstrip("/"))
+    return patterns
+
+
+def _excluded_copies(dockerfiles: dict[str, str], excluded: list[str]) -> list[str]:
+    """Each COPY in *dockerfiles* whose source the build context leaves out."""
+    return [
+        f"{name}: COPY {source} is excluded by .dockerignore"
+        for name, body in dockerfiles.items()
+        for source in _copy_sources(body)
+        if source.rstrip("/").split("/", 1)[0] in excluded
+    ]
 
 
 class TestBuildContextContract:
@@ -818,52 +878,32 @@ class TestBuildContextContract:
 
     _DOCKERFILES = ("Dockerfile", "Dockerfile.docker-only")
 
-    def _exclusions(self) -> list[str]:
-        """Directory and exact-name exclusions, ignoring negations and globs.
-
-        Only the pattern forms this project actually uses are interpreted. A
-        pattern we cannot evaluate is skipped rather than guessed at, so the
-        test never invents a failure it cannot justify.
-        """
-        body = _repo_only(_DOCKERIGNORE).read_text(encoding="utf-8")
-        patterns = []
-        for raw in body.splitlines():
-            line = raw.strip()
-            if not line or line.startswith(("#", "!")):
-                continue
-            if "*" in line or "?" in line:
-                continue
-            patterns.append(line.rstrip("/"))
-        return patterns
-
-    def _copy_sources(self, body: str) -> list[str]:
-        """Local COPY sources only. --from=<stage> reads from an earlier stage."""
-        sources = []
-        for match in re.finditer(r"^\s*COPY\s+(.*)$", body, re.MULTILINE):
-            parts = match.group(1).split()
-            if any(part.startswith("--from=") for part in parts):
-                continue
-            parts = [part for part in parts if not part.startswith("--")]
-            if len(parts) < 2:
-                continue
-            sources.extend(parts[:-1])
-        return sources
-
     def test_no_copy_source_is_excluded_from_the_build_context(self) -> None:
-        excluded = self._exclusions()
-        offenders = []
-        for name in self._DOCKERFILES:
-            path = _REPO_ROOT / name
-            if not path.is_file():
-                continue
-            for source in self._copy_sources(path.read_text(encoding="utf-8")):
-                head = source.rstrip("/").split("/", 1)[0]
-                if head in excluded:
-                    offenders.append(f"{name}: COPY {source} is excluded by .dockerignore")
+        excluded = _dockerignore_exclusions(_repo_only(_DOCKERIGNORE).read_text(encoding="utf-8"))
+        dockerfiles = {
+            name: (_REPO_ROOT / name).read_text(encoding="utf-8")
+            for name in self._DOCKERFILES if (_REPO_ROOT / name).is_file()
+        }
+        offenders = _excluded_copies(dockerfiles, excluded)
         assert not offenders, (
             "the build context cannot supply these, so the build fails at that "
             f"COPY: {offenders}"
         )
+
+    def test_the_guard_sees_an_excluded_copy_in_both_dockerfiles(self) -> None:
+        """SPC-074: the state this class was written for, committed rather than watched by hand.
+
+        tle_clustering/ was listed under "development tooling" in .dockerignore
+        while both Dockerfiles copied it; re-adding the exclusion was seen to
+        fail naming both, and that failing state is now in the tree.
+        """
+        ignore = "# development tooling\ntle_clustering/\n*.pyc\n!spectre/\n"
+        copy = "COPY spectre/ /app/spectre/\nCOPY tle_clustering/ /app/tle_clustering/\n"
+        assert _dockerignore_exclusions(ignore) == ["tle_clustering"]
+        assert _excluded_copies({"Dockerfile": copy, "Dockerfile.docker-only": copy}, ["tle_clustering"]) == [
+            "Dockerfile: COPY tle_clustering/ is excluded by .dockerignore",
+            "Dockerfile.docker-only: COPY tle_clustering/ is excluded by .dockerignore",
+        ]
 
     def test_every_copy_source_exists(self) -> None:
         """A COPY of a path that is not in the repository fails the same way."""
@@ -872,7 +912,7 @@ class TestBuildContextContract:
             path = _REPO_ROOT / name
             if not path.is_file():
                 continue
-            for source in self._copy_sources(path.read_text(encoding="utf-8")):
+            for source in _copy_sources(path.read_text(encoding="utf-8")):
                 if source in (".", "./"):
                     continue
                 if not (_REPO_ROOT / source.rstrip("/")).exists():
@@ -971,13 +1011,16 @@ class TestEveryClickableTableElementAnswersTheKeyboard:
     other forty-three were invisible only because their lines had not changed.
     This pins the whole population rather than the sample.
 
-    The shared handler lives in base.html as spectreActivate(event); an element
-    opts in with tabindex="0" onkeydown="spectreActivate(event)".
+    The shared handler is the keydown listener in static/js/core.js; an element
+    opts in with tabindex="0" data-activate. It was spectreActivate(event) in
+    base.html, called from an onkeydown attribute, until the policy stopped
+    allowing inline handlers (SPC-199); a click is data-action now.
     """
 
     _TEMPLATES = _REPO_ROOT / "spectre" / "web" / "templates"
-    _CLICKABLE = re.compile(r"<(tr|th)\b[^>]*\bonclick\b[^>]*>", re.IGNORECASE | re.DOTALL)
-    _KEYBOARD = re.compile(r"\bon(keydown|keypress|keyup)\b", re.IGNORECASE)
+    _CORE = _REPO_ROOT / "spectre" / "web" / "static" / "js" / "core.js"
+    _CLICKABLE = re.compile(r"<(tr|th)\b[^>]*\bdata-action=[^>]*>", re.IGNORECASE | re.DOTALL)
+    _KEYBOARD = re.compile(r"\bdata-activate\b", re.IGNORECASE)
     _TABINDEX = re.compile(r'\btabindex\s*=\s*"(-?\d+)"', re.IGNORECASE)
 
     def _answers_the_keyboard(self, element: str) -> bool:
@@ -986,7 +1029,7 @@ class TestEveryClickableTableElementAnswersTheKeyboard:
         Neither <tr> nor <th> is focusable by default, and those two tags
         are the whole population this class matches, so nothing natively
         focusable is dragged in by requiring the attribute. Until this was
-        added the test accepted an onkeydown with no tabindex, which is the
+        added the test accepted a key opt-in with no tabindex, which is the
         exact shape its own failure message tells the author to fix: the
         element never receives the key event, so the keyboard equivalent is
         dead while the test reports green.
@@ -1012,15 +1055,26 @@ class TestEveryClickableTableElementAnswersTheKeyboard:
         assert not offenders, (
             f"{len(offenders)} clickable <tr>/<th> are unreachable from the "
             f"keyboard, for want of a handler or of a focusable tabindex: "
-            f'{offenders[:8]}. Add tabindex="0" onkeydown="spectreActivate(event)".'
+            f'{offenders[:8]}. Add tabindex="0" data-activate.'
         )
 
+    def test_the_population_is_where_we_think_it_is(self) -> None:
+        """Fifty-odd headers and rows opt in; if the scan found none, the check above would pass vacuously."""
+        found = sum(len(self._CLICKABLE.findall(p.read_text(encoding="utf-8")))
+                    for p in self._TEMPLATES.rglob("*.html"))
+        assert found >= 50
+
+    def _keydown_listener(self) -> str:
+        core = self._CORE.read_text(encoding="utf-8")
+        start = core.index("document.addEventListener('keydown'")
+        return core[start:core.index("});", start)]
+
     def test_the_shared_handler_exists(self) -> None:
-        """Every opt-in above calls it, so its absence breaks all of them at once."""
-        base = (self._TEMPLATES / "base.html").read_text(encoding="utf-8")
-        assert "function spectreActivate" in base, (
-            "spectreActivate is gone from base.html, so every onkeydown that "
-            "calls it is now a silent no-op"
+        """Every opt-in above relies on it, so its absence breaks all of them at once."""
+        handler = self._keydown_listener()
+        assert "dataset.activate" in handler and "el.click()" in handler, (
+            "the keydown listener in core.js no longer clicks an opted-in element, "
+            "so every data-activate is now a silent no-op"
         )
 
     def test_the_handler_ignores_events_from_nested_controls(self) -> None:
@@ -1033,13 +1087,13 @@ class TestEveryClickableTableElementAnswersTheKeyboard:
         while working perfectly with a mouse, because the mouse path had a
         stopPropagation guard and the key path had none.
         """
-        base = (self._TEMPLATES / "base.html").read_text(encoding="utf-8")
-        handler = base.split("function spectreActivate", 1)[1].split("</script>", 1)[0]
-        assert "e.target !== e.currentTarget" in handler, (
-            "spectreActivate no longer checks that the opted-in element is the "
+        handler = self._keydown_listener()
+        assert "var el = event.target;" in handler and "el.dataset.activate === undefined" in handler, (
+            "the keydown listener no longer checks that the opted-in element is the "
             "one with focus, so every nested button, link and input inside an "
             "activatable row is now unreachable from the keyboard"
         )
+        assert "closest(" not in handler, "an ancestor's opt-in must not answer a nested control's key"
 
 
 class TestThePackagerShipsWhatTheGatesRead:
@@ -1372,10 +1426,13 @@ class TestHtmxSwapFragmentsMatchTheirTable:
         # The child data row in the parent table is the one carrying the burn
         # location cell, which is unique to it.
         # The header row names burn_location too, in its headers= wiring, so
-        # require actual data cells rather than just the mention.
+        # require actual data cells rather than just the mention. "entry."
+        # because the worst case card above the table shows
+        # worst_coa.burn_location, and a table placed before that card (the
+        # 0.9.0 warning-change table) would otherwise run on into it.
         child_rows = [
             block for block in re.split(r"<tr\b", table)
-            if "burn_location" in block and block.count("<td") > 0
+            if "entry.burn_location" in block and block.count("<td") > 0
         ]
         assert child_rows, "the sweep table no longer has a child row to compare against"
         table_cells = child_rows[0].count("<td")
@@ -1392,7 +1449,7 @@ class TestHtmxSwapFragmentsMatchTheirTable:
         table = (self._PARTIALS / "threat_sweep.html").read_text(encoding="utf-8")
         child_rows = [
             b for b in re.split(r"<tr\b", table)
-            if "burn_location" in b and b.count("<td") > 0
+            if "entry.burn_location" in b and b.count("<td") > 0
         ]
         assert child_rows
         width = child_rows[0].count("<td")
@@ -1448,32 +1505,34 @@ class TestHtmxSwapFragmentsMatchTheirTable:
         args.append(current.strip())
         return [a for a in args if a]
 
+    _SWEEP_JS = _REPO_ROOT / "spectre" / "web" / "static" / "js" / "sweep.js"
+
+    @classmethod
+    def _registered_arguments(cls) -> list[str]:
+        """The data-* names the loadInEngine action passes, in order, from its registration in sweep.js.
+
+        The call moved from an onclick attribute in each template to one listener (SPC-199); each argument is
+        still read from the Load button's own data-* attribute (audit F-038).
+        """
+        script = cls._SWEEP_JS.read_text(encoding="utf-8")
+        start = script.index("SPECTRE.action('loadInEngine'")
+        call = script[start:script.index("});", start)]
+        inner = call[call.index("loadInEngine(", len("SPECTRE.action('loadInEngine'")) + len("loadInEngine("):]
+        args = cls._split_arguments(inner, 0)
+        names = [re.fullmatch(r"el\.dataset\.(\w+)", a.strip()) for a in args]
+        assert all(names), f"loadInEngine is called with something other than the button's data-*: {args}"
+        return [n.group(1) for n in names if n]
+
     @classmethod
     def _load_call(cls, markup: str) -> list[str]:
-        """The arguments of the one loadInEngine CALL in ``markup``.
-
-        Anchored on the onclick= attribute, which keeps the function's own
-        declaration and any prose about it out of the match. threat_sweep.html
-        holds the declaration as well as a call.
-        """
-        calls = [
-            (m.start(), cls._split_arguments(markup, m.end()))
-            for m in re.finditer(r'onclick="[^"]*?\bloadInEngine\(', markup)
-        ]
-        assert len(calls) == 1, (
-            f"expected exactly one loadInEngine call site, found {len(calls)}"
-        )
-        start, args = calls[0]
-        # Arguments read as this.dataset.x come from the data-x attribute on
-        # the same element, which precedes the handler (audit F-038).
+        """The arguments the one Load button in ``markup`` passes to loadInEngine, resolved from its data-*."""
+        sites = [m.start() for m in re.finditer(r'data-action="loadInEngine"', markup)]
+        assert len(sites) == 1, f"expected exactly one loadInEngine control, found {len(sites)}"
+        tag = markup[markup.rfind("<button", 0, sites[0]):markup.find(">", sites[0])]
         resolved = []
-        for arg in args:
-            ref = re.fullmatch(r"this\.dataset\.(\w+)", arg.strip())
-            if not ref:
-                resolved.append(arg)
-                continue
-            attrs = re.findall(rf'data-{ref.group(1)}="([^"]*)"', markup[:start])
-            assert attrs, f"{arg} has no data-{ref.group(1)} attribute before the handler"
+        for name in cls._registered_arguments():
+            attrs = re.findall(rf'data-{name}="([^"]*)"', tag)
+            assert attrs, f"the Load button has no data-{name} attribute for loadInEngine"
             resolved.append(attrs[-1])
         return resolved
 
@@ -1485,7 +1544,7 @@ class TestHtmxSwapFragmentsMatchTheirTable:
     def _child_row_of_table(cls, table: str) -> str:
         rows = [
             b for b in re.split(r"<tr\b", table)
-            if "burn_location" in b and b.count("<td") > 0
+            if "entry.burn_location" in b and b.count("<td") > 0
         ]
         assert rows, "the sweep table no longer has a child row to compare against"
         return rows[0]
@@ -1494,8 +1553,8 @@ class TestHtmxSwapFragmentsMatchTheirTable:
         fragment = (self._PARTIALS / "threat_sweep_row.html").read_text(encoding="utf-8")
         table = (self._PARTIALS / "threat_sweep.html").read_text(encoding="utf-8")
 
-        declared = re.search(r"function\s+loadInEngine\(([^)]*)\)", table)
-        assert declared, "threat_sweep.html no longer declares loadInEngine"
+        declared = re.search(r"function\s+loadInEngine\(([^)]*)\)", self._SWEEP_JS.read_text(encoding="utf-8"))
+        assert declared, "sweep.js no longer declares loadInEngine"
         params = [p.strip() for p in declared.group(1).split(",") if p.strip()]
         assert params == ["redSat", "blueSat", "epoch", "method"], (
             f"loadInEngine's signature changed to {params}; this test's "
@@ -1563,10 +1622,28 @@ class TestContinuousIntegrationCanRun:
 
     _PIN = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s\\]+)", re.MULTILINE)
 
-    def test_the_threat_routes_keep_their_coverage_floor(self) -> None:
-        """Audit F-042: the sweep routes were untested at 48 per cent."""
+    @pytest.mark.parametrize(("route", "floor"), [("threat", 95), ("pol", 100), ("udl", 95)])
+    def test_the_routes_keep_their_coverage_floors(self, route: str, floor: int) -> None:
+        """Audit F-042 and SPC-014: a floor far under the measured figure guards nothing.
+
+        threat.py measured 91.8 at 74d1105 against a floor of 75, and 98.2 with
+        the SPC-010 refusal and fallback tests; pol.py and udl.py had none.
+        Each floor is the figure reached, rounded down to 5.
+        """
         ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
-        assert "--include=spectre/web/routes/threat.py --fail-under=" in ci
+        assert f"--include=spectre/web/routes/{route}.py --fail-under={floor}\n" in ci
+
+    def test_the_whole_repository_ratchet_sits_near_what_is_measured(self) -> None:
+        """SPC-014: 74 against 95.9 measured let twenty points of tests go unnoticed."""
+        pyproject = _repo_only("pyproject.toml").read_text(encoding="utf-8")
+        assert re.search(r"^fail_under = 90$", pyproject, re.MULTILINE)
+
+    def test_the_quality_gate_accepts_a_ratchet_above_the_house_standard(self) -> None:
+        """The gate refused any floor over 80, so raising the ratchet (SPC-014) failed it."""
+        gate = _repo_only("scripts/check-quality.sh").read_text(encoding="utf-8")
+        refusal = re.search(r'-gt "\$HOUSE_COVERAGE_STANDARD".*?\nfi\n', gate, re.DOTALL)
+        assert refusal is not None, "the comparison with the house standard has moved"
+        assert "fail " not in refusal.group(0), "a floor above the house standard fails the gate"
 
     def test_no_test_runs_only_where_the_suite_is_absent(self) -> None:
         """Audit F-179: a test skipped unless in the docker-only archive never
@@ -1582,6 +1659,20 @@ class TestContinuousIntegrationCanRun:
         """Audit F-122: the selectors were tested only for returning a response."""
         ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
         assert "--include=spectre/domain/decision.py --fail-under=100" in ci
+
+    @pytest.mark.parametrize(
+        "module",
+        ["domain/decision_tree.py", "domain/tree_selectors.py", "domain/turn_update.py", "web/tree_view.py"],
+    )
+    def test_the_game_tree_keeps_its_coverage_floor(self, module: str) -> None:
+        """SPC-140 to SPC-142: the tree, its selectors, the update after turn 1 and its view, each at every line."""
+        ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        assert f"--include=spectre/{module} --fail-under=100\n" in ci
+
+    def test_threat_understanding_keeps_its_coverage_floor(self) -> None:
+        """SPC-162 to SPC-164: the pure Threat Understanding model is held at every line by its own tests."""
+        ci = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        assert "--include=spectre/domain/threat_understanding.py --fail-under=100" in ci
 
     def test_ci_installs_the_locked_sets_not_an_undeclared_extra(self) -> None:
         workflow = _repo_only(".github/workflows/ci.yml").read_text(encoding="utf-8")

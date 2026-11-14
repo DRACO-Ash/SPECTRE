@@ -15,7 +15,9 @@ window flag and an ``<img>`` element appeared in the dropdown; against the
 current block the name renders as text, no element appears and the flag stays
 false. That run needs a browser, which the Test stage has no reason to carry,
 so what travels with the suite is this: a reading of the shipped block that
-fails if the string-building habit comes back.
+fails if the string-building habit comes back. The block moved from an inline
+<script> in operator.html to static/js/operator.js (SPC-199); the browser tests
+in tests/browser now drive the search under the console's policy as well.
 
 The search term in that browser run is worth recording, because the first
 attempt proved nothing. Searching for ``img`` against a name of ``<img ...>``
@@ -31,22 +33,20 @@ from pathlib import Path
 
 import pytest
 
-_TEMPLATE = (
-    Path(__file__).resolve().parents[2]
-    / "spectre" / "web" / "templates" / "operator.html"
-)
+_SCRIPTS = Path(__file__).resolve().parents[2] / "spectre" / "web" / "static" / "js"
+_START = "/* ── HRR search controller"
 
 
 def _hrr_controller() -> str:
-    """The one <script> block holding the HRR search controller."""
-    source = _TEMPLATE.read_text(encoding="utf-8")
-    blocks = re.findall(r"<script>(.*?)</script>", source, re.S)
-    owning = [b for b in blocks if "_hrrGatherRows" in b]
+    """The one section of the first-party scripts holding the HRR search controller."""
+    owning = [p for p in sorted(_SCRIPTS.glob("*.js")) if "function _hrrGatherRows" in p.read_text(encoding="utf-8")]
     assert len(owning) == 1, (
-        f"expected exactly one HRR controller block, found {len(owning)}; "
+        f"expected exactly one HRR controller, found {len(owning)}; "
         "the guards below address one block and would silently skip the rest"
     )
-    return owning[0]
+    source = owning[0].read_text(encoding="utf-8")
+    start = source.index(_START)
+    return source[start:source.index("/* ── ", start + len(_START))]
 
 
 class TestTheDropdownIsBuiltFromNodes:

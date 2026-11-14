@@ -32,7 +32,7 @@
                 hx-target="#blue-tle-fields"
                 hx-swap="innerHTML"
                 hx-disabled-elt="this"
-                hx-on::after-request="document.querySelector('.panel-blue details').setAttribute('open', '')"
+                data-after-request="openSideDetails" data-side="blue"
                 title="Fetch the newest UDL elset for {{ obj.name }} ({{ obj.satno }}) and pre-fill the Blue Asset form. Ignores Epoch mode"
                 class="btn-secondary btn-sm">&rarr; Blue</button>
         <button hx-get="/udl/tle"
@@ -40,7 +40,7 @@
                 hx-target="#red-tle-fields"
                 hx-swap="innerHTML"
                 hx-disabled-elt="this"
-                hx-on::after-request="document.querySelector('.panel-red details').setAttribute('open', '')"
+                data-after-request="openSideDetails" data-side="red"
                 title="Fetch the newest UDL elset for {{ obj.name }} ({{ obj.satno }}) and pre-fill the Red Track form. Ignores Epoch mode"
                 class="btn-secondary btn-sm">&rarr; Red</button>
       </td>

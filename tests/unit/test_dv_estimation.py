@@ -16,6 +16,7 @@ harness has to be right before the assertions mean anything.
 
 from __future__ import annotations
 
+import calendar
 import math
 from datetime import timedelta
 from typing import NamedTuple
@@ -85,9 +86,20 @@ class _Elements(NamedTuple):
     epoch: float
 
 
+def _epoch_field(epoch: float) -> str:
+    """*epoch*, YYDDD.DDDDDDDD counted on from the start of its year, written as an element set writes it: a day past
+    the last of the year rolls into the next, so 25366.0 is written 26001.0, the same instant. The acceptance check
+    refuses a day past the year's end (SPC-201)."""
+    year, day = 2000 + int(epoch // 1000), epoch % 1000
+    while day >= (367 if calendar.isleap(year) else 366):
+        day -= 366 if calendar.isleap(year) else 365
+        year += 1
+    return f"{year % 100:02d}{day:012.8f}"
+
+
 def _tle(el: _Elements) -> str:
     """A well-formed two-line element set from mean elements."""
-    l1 = f"1 62902U 25001A   {el.epoch:14.8f}  .00000000  00000-0  00000-0 0  999"
+    l1 = f"1 62902U 25001A   {_epoch_field(el.epoch)}  .00000000  00000-0  00000-0 0  999"
     l1 += str(_checksum(l1))
     l2 = (f"2 62902 {el.i % 360:8.4f} {el.raan % 360:8.4f} {f'{abs(el.e):.7f}'[2:9]} "
           f"{el.argp % 360:8.4f} {el.ma % 360:8.4f} {el.n:11.8f}    1")

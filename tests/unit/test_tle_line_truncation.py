@@ -13,7 +13,7 @@ from __future__ import annotations
 from spectre.astro.pattern_of_life import _TLE_LINE_COLUMNS, parse_tle_history
 
 # A well-formed element set, both lines exactly 69 columns wide.
-_LINE1 = "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9005"
+_LINE1 = "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9009"
 _LINE2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537"
 
 _PAYLOAD = "<img src=x onerror=alert(document.cookie)>"

@@ -356,3 +356,94 @@ class TestTheGateActuallySeesWhatItClaims:
             f"file; stdout was:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
         assert "spectre/added_by_this_branch.py:6" in result.stdout
+
+
+def _gate_functions(*names: str) -> str:
+    """The gate's own definitions of the shell functions *names*, as text to run (SPC-234).
+
+    The whole gate needs a coverage report, sonar_rules.py and the network for jscpd, none of which a throwaway
+    repository has, so the guard is run on its own from the gate's own text: a change to it is what is tested.
+    """
+    from tests.unit.test_deployment_contract import _repo_only
+
+    text = _repo_only("scripts/check-quality.sh").read_text(encoding="utf-8")
+    bodies = []
+    for name in names:
+        found = re.search(rf"^{name}\(\) \{{\n.*?^\}}\n", text, re.M | re.S)
+        assert found is not None, f"check-quality.sh no longer defines {name}()"
+        bodies.append(found.group(0))
+    return "\n".join(bodies)
+
+
+def _coverage_guard(repo: Path) -> subprocess.CompletedProcess[str]:
+    """Run the gate's stale-report guard inside *repo*, against master."""
+    sh = shutil.which("sh")
+    if sh is None:  # pragma: no cover - every platform the suite runs on has sh
+        pytest.skip("the guard needs a POSIX shell")
+    program = "\n".join((
+        'fail() { printf "  FAIL  %s\\n" "$1"; exit 1; }',
+        'SOURCE_DIRS="spectre tle_clustering"',
+        'TEST_DIRS="tests"',
+        'COVERAGE_XML="coverage.xml"',
+        "ANCHOR=master",
+        _gate_functions("changed_in", "coverage_is_current"),
+        "coverage_is_current",
+        'printf "current\\n"',
+    ))
+    return subprocess.run(  # noqa: S603
+        [sh, "-c", program], cwd=repo, capture_output=True, text=True, check=False,
+    )
+
+
+class TestACoverageReportOlderThanTheCodeIsRefused:
+    """diff-cover skips a file its report does not hold, so a report from before the change passed it (d3447e2)."""
+
+    def _branch_adds_a_module(self, repo: Path) -> Path:
+        report = repo / "coverage.xml"
+        report.write_text("<coverage/>\n", encoding="utf-8")
+        added = repo / "spectre" / "added.py"
+        added.write_text('"""New on this branch."""\n', encoding="utf-8")
+        return report
+
+    def test_a_report_older_than_a_changed_test_fails(self, repo: Path) -> None:
+        """A test edited after the run changes what the report measured as surely as the code does (review)."""
+        import os
+
+        report = self._branch_adds_a_module(repo)
+        later = (repo / "spectre" / "added.py").stat().st_mtime + 60
+        os.utime(report, (later, later))
+        (repo / "tests").mkdir()
+        probe = repo / "tests" / "test_added.py"
+        probe.write_text("def test_it() -> None:\n    assert True\n", encoding="utf-8")
+        os.utime(probe, (later + 60, later + 60))
+        result = _coverage_guard(repo)
+        assert result.returncode == 1
+        assert "coverage.xml is older than tests/test_added.py" in result.stdout
+
+    def test_the_guard_runs_before_the_whole_repository_ratchet(self) -> None:
+        """The ratchet read the stale report first and passed or failed on figures the code no longer had."""
+        from tests.unit.test_deployment_contract import _repo_only
+
+        executable = [line for line in _repo_only("scripts/check-quality.sh").read_text(encoding="utf-8").splitlines()
+                      if not line.lstrip().startswith("#")]
+        call = next(i for i, line in enumerate(executable) if line.strip() == "coverage_is_current")
+        ratchet = next(i for i, line in enumerate(executable) if "Whole-repository coverage" in line)
+        assert call < ratchet
+
+    def test_a_report_older_than_a_changed_module_fails(self, repo: Path) -> None:
+        import os
+
+        report = self._branch_adds_a_module(repo)
+        os.utime(report, (1_000_000_000, 1_000_000_000))
+        result = _coverage_guard(repo)
+        assert result.returncode == 1
+        assert "coverage.xml is older than spectre/added.py" in result.stdout
+
+    def test_a_report_newer_than_every_changed_module_passes(self, repo: Path) -> None:
+        import os
+
+        report = self._branch_adds_a_module(repo)
+        later = (repo / "spectre" / "added.py").stat().st_mtime + 60
+        os.utime(report, (later, later))
+        result = _coverage_guard(repo)
+        assert (result.returncode, result.stdout.strip()) == (0, "current")

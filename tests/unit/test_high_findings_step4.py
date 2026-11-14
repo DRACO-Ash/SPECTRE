@@ -122,7 +122,7 @@ class TestLosingCustodyCostsSomething:
         )
 
         adversary = AdversaryAction(id="A1", name="manoeuvre", action_type=ActionType.MANOEUVRE,
-                                    probability=0.6, confidence=0.8)
+                                    probability=0.6, confidence=0.8, custody_gap_fraction=0.8)
         # Equal in every input that has its own term; only the action type differs.
         keeps = FriendlyResponse(id="K", name="retask", action_type=ActionType.SENSOR_RETASK,
                                  cost=0.0, reversibility=1.0, time_to_execute_hours=0.0)

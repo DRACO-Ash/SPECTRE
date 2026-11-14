@@ -17,9 +17,11 @@ very manoeuvres the proximity band exists to describe.
 
 from __future__ import annotations
 
+import math
+
 from spectre.domain.manoeuvre_calibration import from_km_s
 
-__all__ = ["format_m_s", "format_tof_label", "to_m_s"]
+__all__ = ["format_m_s", "format_tof_label", "is_computed", "to_m_s"]
 
 #: Below this, a burn is small enough that the decimals carry the meaning.
 _SMALL_BURN_M_S: float = 10.0
@@ -91,3 +93,9 @@ def format_tof_label(tof_hours: float) -> str:
     d = int(tof_s // _SECONDS_PER_DAY)
     h = int((tof_s % _SECONDS_PER_DAY) // _SECONDS_PER_HOUR)
     return f"{d}d {h}h" if h else f"{d}d"
+
+
+def is_computed(value: object) -> bool:
+    """Whether *value* is a figure to print: a finite number. A flown miss the search could not compute is NaN, and
+    is written "not computed", never "nan" (SPC-238)."""
+    return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value)

@@ -77,6 +77,21 @@ class TestZeroBurn:
         assert (row["pro_pct"], row["rad_pct"]) == pytest.approx((60.0, 80.0))
 
 
+class TestTcaUncertaintyAtNoClosingSpeed:
+    def test_a_closing_speed_of_rounding_noise_gives_no_sigma_not_a_division(self) -> None:
+        """SPC-118: a TCA uncertainty is position error over closing speed, so a speed of noise must not divide."""
+        from spectre.domain.decision_figures import tca_uncertainty
+
+        tca = tca_uncertainty(1.5, _NOISE, 3600.0, at_edge=False)
+        assert tca.sigma_s is None
+        assert tca.title.startswith("TCA not known to better than the 1.0 h searched")
+
+    def test_a_real_closing_speed_still_gives_one(self) -> None:
+        from spectre.domain.decision_figures import tca_uncertainty
+
+        assert tca_uncertainty(1.5, 0.5, 3600.0, at_edge=False).sigma_s == pytest.approx(3.0)
+
+
 class TestMigrationIdentifiersStayAscii:
     """python:S6353 asked for ``\\w``; in Python 3 that matches any Unicode
     letter unless the pattern is ASCII-only, which would widen the allow-list

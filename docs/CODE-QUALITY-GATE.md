@@ -18,9 +18,17 @@ more than 57 instances of those same rules. Examples measured directly:
 
 The difference is not an oversight by the scanner. Sonar reports a rule against
 a function or a line only when that code is inside the new-code window, which
-for this project tracks the diff against the default branch. Every file in the
-report had changed; no unchanged file appeared, and `udl.py:fetch_tle` scores 67
-without being reported because nobody has touched its lines.
+for this project runs from master. Every file in the report had changed; no
+unchanged file appeared, and `udl.py:fetch_tle` scores 67 without being
+reported because nobody has touched its lines.
+
+Master has not moved with the releases. It has stood at 0.6.4 (`77a1088`)
+since that release was merged for the App Store, so every line changed since
+then is new code to the platform, not only the latest release's lines. A run
+of `scripts/check-quality.sh` against the previous release shows what one
+release adds; a run against master shows what the next submission is scored
+on. `docs/SONAR-RULES.md` has both, and the owner's ruling that latent issues
+are converted as they are touched.
 
 Two consequences follow, and they pull in opposite directions.
 
@@ -82,6 +90,12 @@ function in `scripts/` does not fail a loop over code the gate never sees.
 
 ## How each rule class was cleared
 
+The rules the gate has actually raised on this project, from 0.6.0 on, are each
+a check in `scripts/sonar_rules.py`, which `scripts/check-quality.sh` and the
+packager run on changed lines. Their ledger, with the evidence and the limits
+of each check, is `docs/SONAR-RULES.md`. What follows is how to fix each rule
+class once a check or a report names it.
+
 ● **S3776** cognitive complexity over 15. Extract the deepest nested block whole
   into a module-private helper that takes exactly what it needs. Guard clauses
   and early returns. An if/elif ladder over a value becomes a module-level dict
@@ -109,8 +123,9 @@ function in `scripts/` does not fail a loop over code the gate never sees.
   strips line breaks and control characters so a newline in a username cannot
   forge an audit record.
 ● **Web:MouseEventWithoutKeyboardEquivalentCheck** and friends. A shared
-  `spectreActivate(event)` handler in `base.html`; elements opt in with
-  `tabindex="0" onkeydown="spectreActivate(event)"`. A console that answers only
+  keydown listener in `spectre/web/static/js/core.js`; elements opt in with
+  `tabindex="0" data-activate` beside the `data-action` that names their click
+  (SPC-199: the policy allows no inline handler). A console that answers only
   to a mouse is unusable from a keyboard, which in an operations room is a real
   barrier and not a formality.
 ● **css:S7924** contrast. The caution amber `#EF9F27` is 9.00:1 on the dark
@@ -162,7 +177,10 @@ tree.
   than a comment Sonar dislikes. Neither line is currently in scope; if one ever
   is, the honest answer is the project-wide skip with the rationale recorded
   here, not a silent deletion of the bandit directive.
-● **The remaining 104 `Depends(...)` defaults.** Converting them is mechanical
+● **The remaining `Depends(...)` defaults** (104 when this was written;
+  `scripts/sonar_rules.py --all` counted 85 route parameters with a FastAPI
+  default on 12 November 2026, and `tests/unit/test_routes_use_annotated_depends.py`
+  holds each routes file's count from rising). Converting them is mechanical
   but not free: `Annotated` removes the default, which forces parameter
   reordering across a hundred route signatures, and a mistake there is a 500 on
   a live route rather than a scanner finding. They convert file by file as those
@@ -171,12 +189,15 @@ tree.
 ## Before you upload
 
 ```
-scripts/check-quality.sh                       includes the scoped complexity leg
+scripts/check-quality.sh                       includes the scoped complexity and rule legs
+scripts/sonar_rules.py                         the raised rules against master, the window the gate scores
 scripts/cognitive_complexity.py --calibrate    the meter still agrees with Sonar
 scripts/preflight-gate.py .                    the package contract
 ```
 
 A green local loop is necessary and never sufficient: the Sonar ruleset is
-server-side and reveals rule classes progressively. Expect the next scan to
+server-side and reveals rule classes progressively. When it reveals one, add
+it to `docs/SONAR-RULES.md` and the checker by the steps at the end of that
+page. Expect the next scan to
 surface something these three checks cannot see, and read the report as a sample
 of a population rather than as the work list.

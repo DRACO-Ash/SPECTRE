@@ -38,13 +38,13 @@ from fastapi import Response
 #: The policy as app.py declares it, written out rather than imported.
 #:
 #: Importing ``_CSP`` would make this test agree with any value the constant
-#: ever takes, which is the one thing it must not do. Every token below is
-#: forced by something already in the tree and recorded as a known gap in the
-#: comment above ``_CSP``; a future edit that drops one of those gaps, or opens
-#: a new one, has to come here and say so.
+#: ever takes, which is the one thing it must not do. Every loosening below is
+#: forced by something already in the tree and recorded in the comment above
+#: ``_CSP``; a future edit that drops one, or opens a new one, has to come here
+#: and say so. script-src is 'self' alone since SPC-199 (evaluation F-08).
 _EXPECTED_CSP = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+    "script-src 'self'; "
     "style-src 'self' 'unsafe-inline'; "
     "font-src 'self'; "
     "img-src 'self' data:; "
@@ -59,13 +59,14 @@ _EXPECTED_CSP = (
 #: One year, covering the host's own subdomains.
 _EXPECTED_HSTS = "max-age=31536000; includeSubDomains"
 
-#: The only two directives whose 'unsafe-inline' is a recorded known gap.
+#: The only directive whose 'unsafe-inline' is a recorded known gap: inline style.
 #:
 #: Pinned separately from the full policy string because the two assertions
 #: fail for different reasons. The string equality above says the policy
 #: changed; this says the change widened the set of places an injected inline
-#: script or style may run, which is the loosening that costs the most.
-_UNSAFE_INLINE_IS_RECORDED_IN = {"script-src", "style-src"}
+#: script or style may run, which is the loosening that costs the most. Script
+#: left this set with SPC-199.
+_UNSAFE_INLINE_IS_RECORDED_IN = {"style-src"}
 
 #: The headers sent on every response, whatever the scheme or the status.
 _ALWAYS_ON = {
@@ -170,12 +171,12 @@ class TestThePolicyIsPinned:
         assert resp.status_code == 200
         assert resp.headers.get("content-security-policy") == _EXPECTED_CSP
 
-    def test_unsafe_inline_is_confined_to_the_two_recorded_directives(self, client: Any) -> None:
+    def test_unsafe_inline_is_confined_to_the_recorded_directive(self, client: Any) -> None:
         """Naming where inline code may run, independently of the pinned string.
 
-        'unsafe-inline' in script-src or style-src is a gap the branch records
-        and costs. The same token reached by any other directive is a new gap,
-        and this fails whether or not somebody also edited the string above.
+        'unsafe-inline' in style-src is a gap the branch records and costs. The
+        same token reached by any other directive is a new gap, and this fails
+        whether or not somebody also edited the string above.
         """
         resp = client.get("/")
         policy = resp.headers.get("content-security-policy", "")
@@ -183,6 +184,19 @@ class TestThePolicyIsPinned:
             name for name, sources in _directives(policy).items() if "'unsafe-inline'" in sources
         }
         assert relaxed == _UNSAFE_INLINE_IS_RECORDED_IN
+
+    def test_script_runs_only_from_the_consoles_own_files(self, client: Any) -> None:
+        """Evaluation finding F-08 (SPC-199): no inline script, no handler attribute and no eval, anywhere.
+
+        Read from the parsed policy, so the keywords cannot come back through script-src, through a script-src-elem
+        or script-src-attr added beside it, or through default-src.
+        """
+        policy = _directives(client.get("/").headers.get("content-security-policy", ""))
+        assert policy["script-src"] == ["'self'"]
+        for name, sources in policy.items():
+            assert "'unsafe-eval'" not in sources, name
+            if name.startswith(("script-src", "default-src")):
+                assert "'unsafe-inline'" not in sources, name
 
     def test_no_directive_lists_the_same_source_twice(self, client: Any) -> None:
         """A duplicated source is how a token gets added to a directive unnoticed.

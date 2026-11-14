@@ -1,0 +1,16 @@
+{#- The UDL data mode for one fetch (SPC-030). It sits inside the fetch
+    controls, so their hx-include sends it, and outside the asset form, so the
+    add never does. Blank means the session mode. data_mode_status.html swaps
+    the default option's text out of band when the session mode is set, so it
+    names the mode the server holds; only the text, so a choice the operator
+    already made here survives. -#}
+{% set _session_mode = udl_data_mode if udl_data_mode is defined and udl_data_mode else "REAL" %}
+<label for="{{ dm_side }}-tle-data-mode" class="visually-hidden">UDL data mode for this fetch</label>
+<select id="{{ dm_side }}-tle-data-mode" name="data_mode" style="width:auto; font-size:0.75rem"
+        title="UDL data mode for this fetch only. Session mode uses the mode set in the Intel panel; any other choice applies to this fetch and leaves the session mode unchanged">
+  <option id="{{ dm_side }}-tle-data-mode-session" value="">Session mode ({{ _session_mode }})</option>
+  <option value="REAL">REAL</option>
+  <option value="SIMULATED">SIMULATED</option>
+  <option value="EXERCISE">EXERCISE</option>
+  <option value="TEST">TEST</option>
+</select>

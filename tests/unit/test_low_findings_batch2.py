@@ -75,11 +75,13 @@ class TestF245UnknownRegimeIsNotCalledFiltered:
     def test_a_none_regime_says_the_list_is_unfiltered(self) -> None:
         out = _render(
             "partials/sweep_target_config.html",
-            has_hrr=True, has_udl=False, blue_hrr={1: 1}, red_hrr={}, interceptor_regime=None,
+            has_hrr=True, has_udl=False, blue_hrr=[(1, 1)], red_hrr=[], interceptor_regime=None,
             interceptor_name="RED_X", manual_tles=[],
         )
         assert "Regime unknown" in out
         assert "Regime: <strong" not in out
+        # Unfiltered is not empty: the groups are still offered (SPC-010).
+        assert '<option value="blue:1">' in out
 
 
 class TestF246AndF256HxValsAreJson:

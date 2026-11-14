@@ -24,24 +24,27 @@ from spectre.config.settings import (
     validate_secret_key,
     validate_sqlite_support,
 )
+from spectre.data.intel import satno_from_tle
 from spectre.web.csrf import require_csrf
 from spectre.web.database import init_db
-from spectre.web.format_units import format_m_s, format_tof_label
+from spectre.web.decision_job import jobs_ended, server_starting, server_stopping
+from spectre.web.format_units import format_m_s, format_tof_label, is_computed
 from spectre.web.health import router as health_router
 from spectre.web.log_safety import log_safe
-from spectre.web.planning_state import set_default_hrr_objects, set_default_hrr_tles
+from spectre.web.planning_state import set_default_elset_refusals, set_default_hrr_objects, set_default_hrr_tles
 from spectre.web.routes.admin import router as admin_router
 from spectre.web.routes.decision import router as decision_router
 from spectre.web.routes.gcat import router as gcat_router
 from spectre.web.routes.geometry import router as geometry_router
 from spectre.web.routes.login import router as login_router
+from spectre.web.routes.maneuver import ENGINE_BUDGET_HOLDER, ENGINE_DEFAULT_BUDGET_M_S
 from spectre.web.routes.maneuver import router as maneuver_router
 from spectre.web.routes.operator import router as operator_router
 from spectre.web.routes.plan import router as plan_router
 from spectre.web.routes.pol import router as pol_router
 from spectre.web.routes.threat import router as threat_router
 from spectre.web.routes.training import router as training_router
-from spectre.web.routes.udl import _parse_created_at, parse_hrr_notification
+from spectre.web.routes.udl import _parse_created_at, elset_refusals, parse_hrr_notification
 from spectre.web.routes.udl import router as udl_router
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -55,6 +58,8 @@ templates.env.filters["urlquote"] = quote_plus  # {{ value | urlquote }} → URL
 templates.env.filters["enumerate"] = enumerate   # {{ list | enumerate }} → (0, item) pairs
 templates.env.filters["m_s"] = format_m_s        # {{ dv | m_s }} → delta-v in m/s, honestly rounded
 templates.env.filters["tof"] = format_tof_label  # {{ hours | tof }} → "6h 30m", one definition
+templates.env.filters["computed"] = is_computed    # {% if miss | computed %}: a finite figure, not NaN (SPC-238)
+templates.env.filters["satno"] = satno_from_tle  # {{ tle | satno }} is the catalogue number or None, Alpha-5 read
 
 
 def banner_class(marking: str) -> str:
@@ -76,6 +81,10 @@ def banner_class(marking: str) -> str:
 templates.env.globals["spectre_version"] = __version__
 templates.env.globals["classification_marking"] = get_settings().classification_marking
 templates.env.globals["classification_class"] = banner_class(get_settings().classification_marking)
+# The Intercept Engine's default Max delta-V: the most any satellite in the NOTSO record spent on station in 14 days,
+# 171.8 m/s, in place of 500 (owner ruling 2026-11-12, SPC-234).
+templates.env.globals["engine_budget_m_s"] = ENGINE_DEFAULT_BUDGET_M_S
+templates.env.globals["engine_budget_holder"] = ENGINE_BUDGET_HOLDER
 
 
 logger = logging.getLogger(__name__)
@@ -148,10 +157,15 @@ def _load_hrr_from_disk() -> None:
 
         # Element sets, where the list carried them. A real JCO notification
         # does not, so this is empty for an operator-supplied file and the
-        # sweep still needs a UDL fetch, exactly as before.
-        tles = {o["satno"]: o["tle"] for o in objects if o.get("tle")}
-        modes = {o["satno"]: o.get("tle_data_mode", "REAL") for o in objects if o.get("tle")}
+        # sweep still needs a UDL fetch, exactly as before. A set the
+        # acceptance check refused was not carried by the parser, and the log
+        # names it and what failed; no operator is signed in yet, so each new
+        # session's run log says it too (SPC-201).
+        carried = [o for o in objects if o.get("tle")]
+        tles = {o["satno"]: o["tle"] for o in carried}
+        modes = {o["satno"]: o.get("tle_data_mode", "REAL") for o in carried}
         set_default_hrr_tles(tles, modes)
+        set_default_elset_refusals(elset_refusals(objects))
 
         logger.info(
             "HRR pre-load: %d Blue + %d Red = %d satellites from %s (%s)",
@@ -233,9 +247,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     await init_db()
     _load_hrr_from_disk()
+    server_starting()
     logger.info("SPECTRE %s ready — listening for requests", __version__)
     yield
+    # A sampled evaluation's worker thread stops at its next sample, so the exit does not wait out its budget.
+    server_stopping()
     logger.info("SPECTRE %s shutting down", __version__)
+    # Then wait for the jobs sampling or writing a record, so one writing its decision record finishes it (SPC-242).
+    await jobs_ended()
 
 
 # ── Security response headers ─────────────────────────────────────────────────
@@ -246,50 +265,48 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 # /admin/users. These headers are that second line.
 #
 # The policy is as tight as the shipped templates allow and no tighter, because
-# a policy that blanks a panel is worse than no policy. Every loosening below is
-# forced by something already in the tree, and each is a KNOWN GAP recorded with
-# the work needed to close it:
+# a policy that blanks a panel is worse than no policy.
 #
-#   script-src 'unsafe-inline'. 17 templates carry inline <script>; base.html
-#     holds two of them, the pre-paint theme bootstrap and the shared
-#     spectreActivate keyboard handler, and 158 inline onclick and onkeydown
-#     attributes drive the panels. A nonce does not cover event handler
-#     attributes at all, and hashes would need 'unsafe-hashes' and a hash per
-#     handler. To close: move the base.html blocks into /static and convert the
-#     handlers to delegated listeners, then drop the token.
-#   script-src 'unsafe-eval'. htmx 1.9.12 compiles hx-on::* attributes with
-#     new Function (static/htmx.min.js). Seven of them clear forms and open
-#     panels in catalog_results, sweep_target_config, admin/users, operator and
-#     training_scenario_list. Without the token htmx raises
-#     htmx:evalDisallowedError and those seven stop working. To close: replace
-#     the seven attributes with listeners in a static file, then drop the token.
+#   script-src 'self', and nothing else (SPC-199, evaluation finding F-08).
+#     Every script is a file under /static: the vendored libraries and the
+#     console's own files in static/js. No template carries an inline <script>
+#     (a <script type="application/json"> block is data the browser never
+#     runs), an inline event handler or an hx-on attribute; each is a listener
+#     in static/js, attached through data-* attributes that hold no code. htmx
+#     is configured with allowEval false and allowScriptTags false (base.html),
+#     so it never compiles a string and never runs a script that arrives in a
+#     fragment. tests/unit/test_no_inline_script_or_handler.py keeps all of it
+#     out of the templates, and the browser tests in tests/browser drive every
+#     moved behaviour under this policy and fail on any violation.
+#
+# So an injected inline script, event handler or javascript: URL does NOT run.
+# Injected script also cannot load external code, exfiltrate over fetch or XHR
+# to another origin, submit a form off-site, load a plugin, or rewrite the
+# document base.
+#
+# What it does NOT stop is injected markup. An element that got past the
+# escaping and carries hx-get or hx-post with hx-trigger="load" still sends a
+# same-origin request when it lands, with the CSRF token it inherits from
+# hx-headers on <body>, and one carrying data-init or data-action still runs
+# that registered behaviour. The output escaping in the templates therefore
+# remains the control against the stored cross-site scripting class; this
+# policy narrows what an escaping defect gives an attacker. The gap is T9 in
+# docs/threat-model-decision-engine.md.
+#
+# Two loosenings remain, each forced by something in the tree and recorded:
+#
 #   style-src 'unsafe-inline'. Roughly 1500 inline style attributes and three
 #     inline <style> blocks (splash_overlay, intercept_geometry, training).
-#     To close: move them into the stylesheet. Counts rechecked for F-270.
+#     Injected style can restyle the page but not run script. To close: move
+#     them into the stylesheet. Counts rechecked for F-270.
 #   frame-src and frame-ancestors 'self'. The training Console tab embeds the
-#     console itself: templates/training.html sets an iframe src of '/'.
+#     console itself: static/js/training.js sets an iframe src of '/'.
 #     'none', or X-Frame-Options: DENY, blanks that tab. 'self' still refuses
 #     the cross-origin framing the clickjacking finding describes.
-#
-# BE PRECISE ABOUT WHAT THIS DOES NOT STOP. With 'unsafe-inline' in script-src,
-# an injected inline script or event handler EXECUTES. This policy is therefore
-# not a mitigation for the stored-XSS class that the escaping in the templates
-# addresses; it is a second perimeter around it. Treating it as the control
-# would be exactly the mistake that let one `| safe` reach the DOM.
-#
-# What it does buy, and these are real: injected script cannot load external
-# code, exfiltrate over fetch or XHR to another origin, submit a form off-site,
-# load a plugin, or rewrite the document base.
-#
-# KNOWN GAP, with the work it needs. Dropping 'unsafe-inline' requires the two
-# inline <script> blocks in base.html to move to a file under static/ or carry
-# a per-response nonce, and the inline onclick/onkeydown attributes across the
-# partials to become delegated listeners. That is a large, separately testable
-# change; until it lands, script-src is a perimeter and not a shield, and it is
-# recorded here rather than implied away.
+
 _CSP = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+    "script-src 'self'; "
     "style-src 'self' 'unsafe-inline'; "
     "font-src 'self'; "
     "img-src 'self' data:; "

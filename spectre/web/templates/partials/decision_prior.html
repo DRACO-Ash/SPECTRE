@@ -1,0 +1,31 @@
+{# The NOTSO suggestion beside each adversary row (SPC-130), swapped into the panel's .adv-priors region.
+   Context: note (str), why no row can be offered anything yet, or blank; rows (list of decision_prior.RowView),
+   each with its number, id, name, action, its prior (NotsoPrior|None) or the reason none is offered, and whether
+   its apply control is ticked. Every row's suggestion shows as the panel opens (SPC-185). Nothing here fills P or
+   Conf: showing is not applying, a ticked control is applied at Evaluate, and only while the suggestion is still
+   the one shown (concept section 7.5, items 2 and 3).
+   edited (list of row ids) is the record of the rows whose P the operator edited (SPC-183), carried in a hidden
+   field per row whatever else the region says, so the next change and Evaluate send it back. #}
+{% for row_id in edited %}<input type="hidden" name="adv_p_edited" value="{{ row_id }}">
+{% endfor %}{% if note %}
+<p class="adv-prior-note">{{ note }}</p>
+{% else %}
+<p class="adv-prior-note" style="margin:0 0 0.2rem">Each row's NOTSO suggestion is shown as the panel opens. It fills neither P nor Conf: tick it to apply it at Evaluate.</p>
+{% for r in rows %}
+<div class="adv-prior" style="margin:0 0 0.3rem">
+  <div style="font-weight:600">Row {{ r.row }}{% if r.name %}, {{ r.name }}{% endif %} ({{ r.action }})</div>
+  {% if r.prior is not none %}
+  <p style="margin:0.1rem 0 0">{{ r.prior.suggestion }}</p>
+  <p style="margin:0.1rem 0 0">{{ r.prior.basis_line }}</p>
+  <p class="adv-prior-interval" style="margin:0.1rem 0 0">{{ r.prior.interval_line }}</p>
+  <p style="margin:0.1rem 0 0">{{ r.prior.confidence_line }}</p>
+  <label style="display:block; margin-top:0.15rem">
+    <input type="checkbox" name="adv_prior" value="{{ r.row_id }}|{{ r.prior.token }}"{% if r.ticked %} checked{% endif %}>
+    Apply this suggestion to row {{ r.row }}'s P{% if r.prior.confidence is not none %} and Conf{% endif %} at Evaluate, in place of the values typed
+  </label>
+  {% else %}
+  <p style="margin:0.1rem 0 0">{{ r.reason }}</p>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}

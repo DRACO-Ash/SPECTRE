@@ -1,0 +1,263 @@
+{
+ "board": {
+  "title": "How to use me",
+  "intro": "I keep one list of everything to build and split it into releases. Each release is sized to take about {floor} to {cap} hours to build and ship. Find the job you came to do below and follow the steps.",
+  "who": [
+   "You decide what goes in a release and how urgent each item is.",
+   "Claude prices new work, checks it against the code, keeps the times up to date and re-reads {source}'s record regularly.",
+   "The development threads build the work and report back."
+  ],
+  "jobs": [
+   {
+    "id": "status",
+    "title": "See where things stand",
+    "steps": [
+     "Look at the card at the top. It shows the release being built and how many of its checks have passed.",
+     "Read the line under the card. It says when Claude last read {source}'s record. If it warns that the read is old, press Refresh from {source}.",
+     "Each tab below the charts is one release. Open a tab to see what is planned in it and how long it should take."
+    ],
+    "controls": [
+     "Refresh from {source}"
+    ]
+   },
+   {
+    "id": "add",
+    "title": "Add something to the backlog",
+    "steps": [
+     "Press Add to backlog.",
+     "Write a short title, then say what you want in your own words. You do not need to price it or pick a release.",
+     "Press Send to triage.",
+     "It shows under Intake and triage as waiting. Claude checks it against the code and the list, prices it and logs it, usually within the hour.",
+     "Once it is logged it leaves that list and appears as a numbered item, like {ref}318. Set its priority and release yourself."
+    ],
+    "controls": [
+     "Add to backlog",
+     "Send to triage",
+     "Intake and triage"
+    ]
+   },
+   {
+    "id": "decide",
+    "title": "Answer a decision",
+    "steps": [
+     "Press Decisions for action. The number on the button is how many are waiting.",
+     "Read the question and pick one answer. Press Skip for now if you are not ready.",
+     "Press Confirm and next. Your answer goes to Claude and the item moves on. On the last question the button just says Confirm."
+    ],
+    "controls": [
+     "Decisions for action",
+     "Skip for now",
+     "Confirm and next",
+     "Confirm"
+    ]
+   },
+   {
+    "id": "approve",
+    "title": "Approve something, screenshots included",
+    "steps": [
+     "When something is waiting for you, a panel called Waiting for your approval appears at the top of the page.",
+     "Read the question. A screenshot approval shows small pictures. Press one to see it large, then use Previous and Next to step through.",
+     "Press the big button for your answer. The green one is what Claude recommends. That one press saves your answer.",
+     "To ask for a change instead, press Changes needed, write what should change, then press Send.",
+     "You have 10 seconds to press Undo. After that Claude is told and acts on it."
+    ],
+    "controls": [
+     "Changes needed",
+     "Undo",
+     "Previous",
+     "Next"
+    ]
+   },
+   {
+    "id": "move",
+    "title": "Change a priority or move work to another release",
+    "steps": [
+     "Open the release tab that holds the item. Each row has three priority buttons: High, Med and Low.",
+     "Use the Move to menu on the row to send the item to another release, or back to Backlog.",
+     "Check the release totals afterwards. If one goes over {cap} hours, move something out.",
+     "Items in a release that has already shipped are archived and cannot be changed."
+    ],
+    "controls": [
+     "High",
+     "Med",
+     "Low",
+     "Backlog"
+    ]
+   },
+   {
+    "id": "remove",
+    "title": "Remove a task",
+    "steps": [
+     "Open the release tab that holds the task and press Remove on its row. Tasks in a release that has shipped are archived and cannot be removed.",
+     "Check the name in the box. Press Remove to go ahead, or Cancel if it is the wrong one.",
+     "A removed task leaves its release and every total. It waits in the Removed tab, which appears once you have removed something.",
+     "To bring a task back, open the Removed tab and press Restore. It returns to the release it came from.",
+     "To get rid of a task for good, press Delete for good in the Removed tab and confirm. This cannot be undone."
+    ],
+    "controls": [
+     "Remove",
+     "Cancel",
+     "Restore",
+     "Delete for good"
+    ]
+   },
+   {
+    "id": "merge",
+    "title": "Merge a task into another",
+    "steps": [
+     "When two tasks are the same job, open the release tab that holds the one to fold away and press Merge into on its row.",
+     "Type the ref of the task to keep, such as {ref}123, or pick it from the list. The box shows that task and its price.",
+     "Press Merge. The task you folded away leaves its release and waits in the Removed tab, marked with the task it went into.",
+     "The task you kept gains one dated line naming the other. Its price stays as it was: minutes are never added together.",
+     "To undo a merge, open the Removed tab and press Restore. The dated line comes off the task you kept."
+    ],
+    "controls": [
+     "Merge into",
+     "Merge"
+    ]
+   },
+   {
+    "id": "release",
+    "title": "Add or remove a release",
+    "steps": [
+     "Press Add release.",
+     "Give it a name and a focus in three words, choose where it sits in the order, then press Create.",
+     "To remove a release, move everything out of it first. Then use Remove this empty release."
+    ],
+    "controls": [
+     "Add release",
+     "Create",
+     "Remove this empty release"
+    ]
+   },
+   {
+    "id": "times",
+    "title": "Read the times",
+    "steps": [
+     "Each row shows how long Claude expects the work to take. The price it was given sits under that in small type.",
+     "A release forecast is the build time plus {overhead}.",
+     "The target is {floor} to {cap} hours. Under {floor} means there is room to add work. Over {cap} means something should move.",
+     "Claude corrects these figures as finished work shows how long things really took."
+    ],
+    "controls": []
+   },
+   {
+    "id": "threads",
+    "title": "Keep the Claude threads straight",
+    "steps": [
+     "Open the Threads card and press Add a thread. Give it a name, a link and a role.",
+     "To have Claude start a new thread for you, tick Start this thread in Claude Code and leave the link empty.",
+     "To set how threads work together, press Describe in words and write it as you would tell a colleague. Press Interpret, check what Claude proposes, then press Save. Nothing is saved before that.",
+     "If you would rather pick from lists, press Add a relationship."
+    ],
+    "controls": [
+     "Add a thread",
+     "Start this thread in Claude Code",
+     "Describe in words",
+     "Interpret",
+     "Save",
+     "Add a relationship"
+    ]
+   },
+   {
+    "id": "upload",
+    "title": "Record the store's answer",
+    "when": "store",
+    "steps": [
+     "Only do this once the store has actually answered. Press the Upload step on the pipeline card. A small panel opens.",
+     "Press Upload passed or Upload failed. Either choice tells Claude straight away.",
+     "After a pass, Claude moves the plan on to the next release.",
+     "After a fail, paste the store's message into your chat with Claude so the fix can be planned."
+    ],
+    "controls": [
+     "Upload passed",
+     "Upload failed"
+    ]
+   },
+   {
+    "id": "wrong",
+    "title": "When something looks wrong",
+    "steps": [
+     "Say so in your chat with Claude and quote the item number, for example {ref}318.",
+     "A release over {cap} hours, a warning on the read line, or a decision that will not open are all worth a message.",
+     "Do not change a time to make a release fit. Move work out, or ask Claude to re-plan it."
+    ],
+    "controls": []
+   }
+  ]
+ },
+ "pack": {
+  "title": "How to use Backlog Brain",
+  "intro": "Backlog Brain is a folder you copy into a project. It reads your list of work, plans releases to the length you set, and tells you how long each should take. It needs Python 3 and nothing else.",
+  "who": [],
+  "jobs": [
+   {
+    "id": "install",
+    "title": "Put it in a project",
+    "steps": [
+     "Copy the backlog-brain folder into the project's .claude/skills/ folder.",
+     "Check it runs: python3 scripts/brain.py selftest. It should finish with OK."
+    ]
+   },
+   {
+    "id": "settings",
+    "title": "Tell it about your project",
+    "steps": [
+     "Copy assets/config.example.json to .board/config.json in your project.",
+     "Set the project name and the prefix your items use, for example PRJ-.",
+     "Set the shortest and longest a release should take, in minutes (floor_min and cap_min). The overhead_min setting is the fixed time every release costs, such as checks and packaging.",
+     "List your checks under gates, each with a cost in minutes and the file patterns that trigger it. List the people who will do work, with their hours per week.",
+     "If anything is wrong, the whole file is refused and every problem is listed. Nothing is half applied."
+    ]
+   },
+   {
+    "id": "items",
+    "title": "List your work",
+    "steps": [
+     "Make an items.json file. Each item needs a ref and its price in minutes.",
+     "Add what you know: priority (high, med or low), deps (refs it needs first), files it touches, and lock (a release name) if a person has fixed it to a release.",
+     "Name the files or the checks. An item with neither is assumed to need every check, because guessing low is the costly mistake.",
+     "Set needs_owner to true for anything waiting on an answer from you. It takes no release capacity until it is answered."
+    ]
+   },
+   {
+    "id": "plan",
+    "title": "Plan the releases",
+    "steps": [
+     "Run: python3 scripts/brain.py plan --config .board/config.json --items items.json",
+     "Read each release: its items, its time as a range, and a reason beside every placement.",
+     "Read the warnings at the end. They name anything that did not fit, anything waiting on a dependency, and anywhere people's time is the limit.",
+     "Add --json if another tool needs to read the result."
+    ]
+   },
+   {
+    "id": "pace",
+    "title": "Teach it your real pace",
+    "steps": [
+     "After work finishes, record how long each item was priced and how long it took.",
+     "Save those as rows.json, one entry per finished item with est and actual in minutes. Add who and kind if you want the pace worked out per person or type of work.",
+     "Run the plan again with --rows rows.json. With fewer than 3 finished items it says so and keeps using your settings."
+    ]
+   },
+   {
+    "id": "board",
+    "title": "Put the board page online",
+    "steps": [
+     "Ask Claude to publish assets/board/board.html as an artifact, with the capabilities in assets/board/capabilities.json.",
+     "Write the board's link into your settings record as board.url. Add board.store if you upload to a store.",
+     "From the project folder, run python3 .claude/skills/backlog-brain/scripts/brain.py board seed --config .board/config.json. Ask Claude to apply the batch it prints.",
+     "Ask the Claude session that runs the backlog to watch the board, so your answers reach someone.",
+     "Set up the hourly sync from assets/board/SYNC-TEMPLATE.md, with your own branch names and paths."
+    ]
+   },
+   {
+    "id": "limits",
+    "title": "What it does not do yet",
+    "steps": [
+     "It cannot publish the board or write to it from the command line. Claude does both, from the steps it prints.",
+     "It has run on one project so far. Treat anything new as unproven until it has run on yours."
+    ]
+   }
+  ]
+ }
+}

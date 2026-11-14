@@ -1,0 +1,122 @@
+{
+  "recommendation": "manoeuvre",
+  "strategy": "minimax",
+  "composite_scores": [
+    [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  ],
+  "closest_approach_km": [
+    [
+      400.0,
+      200.0,
+      360.0,
+      200.0
+    ],
+    [
+      20000.0,
+      10000.0,
+      18000.0,
+      10000.0
+    ],
+    [
+      6000.0,
+      3000.0,
+      5400.0,
+      3000.0
+    ],
+    [
+      10000.0,
+      5000.0,
+      9000.0,
+      5000.0
+    ]
+  ],
+  "bases": [
+    [
+      "lookup",
+      "lookup",
+      "lookup",
+      "lookup"
+    ],
+    [
+      "lookup",
+      "lookup",
+      "lookup",
+      "lookup"
+    ],
+    [
+      "lookup",
+      "lookup",
+      "lookup",
+      "lookup"
+    ],
+    [
+      "lookup",
+      "lookup",
+      "lookup",
+      "lookup"
+    ]
+  ],
+  "modelled_banner": true,
+  "basis_lines": [
+    "Every figure in every cell is a lookup."
+  ],
+  "row_notes": [],
+  "cell_refusals": [],
+  "binding_sentences": [],
+  "computed_caveat": null,
+  "searched_span_note": null,
+  "objective_guidance": null,
+  "recommendation_with_responses_reversed": "no_action",
+  "page_mentions": {
+    "all zero": false,
+    "every weight": false,
+    "weights are 0": false,
+    "no weight": false,
+    "a tie": false,
+    "tied": false
+  },
+  "normalised_all_zero_weights": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "form_default_weights_when_field_absent": {
+    "w_custody": "0.35",
+    "w_ca": "0.25",
+    "w_dv": "0.20",
+    "w_time": "0.10",
+    "w_rev": "0.10"
+  },
+  "blank_weight_field": "Enter a number for each scoring weight.",
+  "row_2_probability_when_form_sends_one_value": 0.5,
+  "row_2_confidence_when_form_sends_one_value": 0.5,
+  "row_1_and_2_custody_gap_when_form_sends_none": [
+    0.7,
+    0.7
+  ]
+}

@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 
+from spectre.web.routes.udl import FetchedElset
 from tests.conftest import csrf_headers
 from tests.integration.conftest import session_state
 
@@ -102,9 +103,9 @@ def udl_connected(monkeypatch: pytest.MonkeyPatch, auth_cookie: str) -> Iterator
     saved_blue, saved_red = list(state.blue_assets), list(state.red_tracks)
     state.udl_username, state.udl_password = "udl-user", "udl-pass"
 
-    async def _stub_fetch(*args: object, **kwargs: object) -> tuple[str, str]:
+    async def _stub_fetch(*args: object, **kwargs: object) -> FetchedElset:
         """Stand in for the UDL round trip: ``(tle_text, data_mode)``."""
-        return (_STUB_TLE, "REAL")
+        return FetchedElset(_STUB_TLE, "REAL", "18th SPCS")
 
     monkeypatch.setattr("spectre.web.routes.udl.fetch_tle_for_satno", _stub_fetch)
     yield state
@@ -131,6 +132,65 @@ class TestGeometryErrors:
             },
         )
         _assert_inert(resp)
+
+
+class TestTheDecisionGeometryContext:
+    """SPC-124: the decision context is allowlisted, never echoed (55)."""
+
+    def test_an_allowlisted_context_shows_its_caveat(
+        self, client: Any, auth_cookie: str, decision_pair: tuple[str, str],
+    ) -> None:
+        from tests.integration.test_decision_geometry_link import _RK45, _VIEW_NOTE, geometry
+
+        page = geometry(client, auth_cookie, decision_pair, context="decision-rk45")
+        assert _VIEW_NOTE.format(propagator=_RK45) in page
+
+    def test_a_hostile_context_shows_nothing_and_echoes_nothing(
+        self, client: Any, auth_cookie: str, decision_pair: tuple[str, str],
+    ) -> None:
+        from tests.integration.test_decision_geometry_link import geometry
+
+        page = geometry(client, auth_cookie, decision_pair, context=_PAYLOAD, red_epoch=_PAYLOAD)
+        assert "Clohessy-Wiltshire picture" not in page
+        assert "alert(" not in page and "&lt;script&gt;" not in page
+
+
+@pytest.fixture
+def decision_pair(auth_cookie: str) -> Iterator[tuple[str, str]]:
+    from spectre.domain.models import BlueAsset, RedTrack
+    from tests.unit._decision_reference import PLANE_CHANGE
+
+    state: Any = session_state(auth_cookie)
+    saved = (list(state.red_tracks), list(state.blue_assets))
+    state.red_tracks = [RedTrack("RED-PC", PLANE_CHANGE.red_tle, data_mode="REAL")]
+    state.blue_assets = [BlueAsset("BLUE-PC", PLANE_CHANGE.blue_tle, data_mode="REAL")]
+    yield state.red_tracks[0].stk_name, state.blue_assets[0].stk_name
+    state.red_tracks, state.blue_assets = saved
+
+
+class TestTheTcaHistogramData:
+    def test_a_hostile_scenario_name_never_reaches_the_histogram_json(self) -> None:
+        """59: the chart reads numbers only; the name is escaped where it is shown and absent from the data."""
+        import dataclasses
+        import json
+        import re
+
+        from spectre.domain.decision import evaluate_scenario
+        from tests.unit.test_decision_figure_basis import _render
+        from tests.unit.test_decision_sampled import _bound
+        from tests.unit.test_decision_tca_histogram import _WithSpeeds
+
+        scenario = _bound()
+        scenario.name = _PAYLOAD
+        scenario.adversary_actions[0] = dataclasses.replace(scenario.adversary_actions[0], name=_PAYLOAD)
+        page = _render(evaluate_scenario(scenario, sampler=_WithSpeeds()))
+        blocks = re.findall(r'<script type="application/json" id="tca-hist-data-[0-9-]+">(.*?)</script>', page, re.S)
+        assert blocks
+        for block in blocks:
+            assert "<" not in block and "alert" not in block
+            data = json.loads(block)
+            assert all(not isinstance(v, str) for v in data.values())
+        assert _LIVE not in page and _ESCAPED in page
 
 
 class TestGcatErrors:
@@ -209,7 +269,10 @@ class TestPatternOfLifeElementSets:
         )
         line1, line2 = _STUB_TLE.split("\n")
         # Same length in, same length out, so column positions downstream hold.
-        hot = line1[:7] + payload + line1[7 + len(payload):]
+        hot = line1[:7] + payload + line1[7 + len(payload):68]
+        # Its checksum made good, as an attacker would: the element-set acceptance check passes it (SPC-201), and the
+        # escaping is still what keeps it inert.
+        hot += str(sum(int(c) if c.isdigit() else int(c == "-") for c in hot) % 10)
         merged = f"{hot}\n{line2}\n{second}"
 
         async def _stub_history(

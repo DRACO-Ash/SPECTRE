@@ -143,3 +143,57 @@ def test_the_training_banner_is_a_note_not_a_live_status() -> None:
     source = (Path(__file__).resolve().parents[2] / "spectre" / "web" / "templates" / "training.html").read_text()
     banner = source[source.index('id="training-mode-banner"'):][:200]
     assert 'role="note"' in banner and 'role="status"' not in banner
+
+
+class TestTheSweepTargetConfig:
+    def test_the_response_time_per_target_is_labelled_and_shows_what_is_held(
+        self, client: Any, auth_cookie: str, udl_state: Any, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """SPC-022: the per-target response time is a labelled field on the sweep form, with the times held."""
+        monkeypatch.setattr(udl_state, "response_time_by_target", {"BLUE-1": 6.0, "BLUE-2": 1.5})
+        resp = client.get("/plan/threat/target-config?red_sat=RED-X", cookies={"spectre_session": auth_cookie})
+        assert resp.status_code == 200
+        assert 'name="target_response_name"' in resp.text and 'name="target_response_h"' in resp.text
+        assert _unlabelled(resp.text) == []
+        text = " ".join(re.sub(r"<[^>]+>", " ", resp.text).split())
+        assert "BLUE-1: 6 h" in text and "BLUE-2: 1.5 h" in text
+        # A held time can be changed but not removed, so the operator is told how long it lasts.
+        assert "A time held for a target can be changed, and is kept until you sign out." in text
+
+
+class TestTheDecisionResults:
+    """SPC-124 (49): the results carry a select, the histogram's cell, and a form per propagated cell."""
+
+    def test_every_field_in_the_results_is_labelled(self) -> None:
+        from spectre.domain.decision import evaluate_scenario
+        from tests.unit.test_decision_sampled import _bound
+        from tests.unit.test_decision_tca_histogram import _WithSpeeds
+        from tests.unit.test_decision_trajectory import _render_with_links
+
+        page = _render_with_links(evaluate_scenario(_bound(), sampler=_WithSpeeds()))
+        assert 'id="tca-hist-cell"' in page and '<label for="tca-hist-cell"' in page
+        assert "Show trajectory" in page
+        assert _unlabelled(page) == []
+        assert _duplicate_ids(page) == []
+
+
+class TestTheGuardSeesAnUnlabelledField:
+    """SPC-074: the scan, run on markup planted with each defect it exists to catch."""
+
+    def test_a_placeholder_or_a_title_is_not_a_label(self) -> None:
+        planted = '<input type="text" id="satno" placeholder="SATNO"><select name="mode"></select><textarea title="TLE"></textarea>'
+        assert [field.split()[0] for field in _unlabelled(planted)] == ["<input", "<select", "<textarea"]
+
+    def test_a_label_for_another_field_labels_nothing_here(self) -> None:
+        assert _unlabelled('<label for="other">X</label><input id="satno">') == ['<input id="satno">']
+
+    def test_a_closed_label_does_not_wrap_the_field_after_it(self) -> None:
+        assert _unlabelled('<label>SATNO</label><input name="satno">') == ['<input name="satno">']
+
+    def test_each_accepted_form_still_passes(self) -> None:
+        assert _unlabelled('<label for="satno">SATNO</label><input type="text" id="satno">') == []
+        assert _unlabelled('<label>SATNO <input type="text" name="satno"></label>') == []
+        assert _unlabelled('<input type="hidden" name="csrf_token"><input type="submit">') == []
+
+    def test_a_repeated_id_is_seen(self) -> None:
+        assert _duplicate_ids('<input id="a"><select id="a"></select><p id="b">') == ["a"]

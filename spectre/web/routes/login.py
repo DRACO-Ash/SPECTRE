@@ -8,7 +8,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
@@ -17,8 +16,10 @@ from spectre.web.auth import (
     _COOKIE_NAME,
     _SESSION_MAX_AGE,
     current_user_for,
+    find_user_by_name,
     hash_password,
     make_session_cookie,
+    username_key,
     verify_password,
 )
 from spectre.web.csrf import LOGIN_COOKIE, new_login_token
@@ -173,11 +174,14 @@ async def post_login(
     # 429 refused only wrong guesses and a brute force was bounded by bcrypt
     # throughput rather than by the limiter (audit F-008). Both tiers answer
     # alike for a real and an absent account, so this read leaks nothing.
-    if await _LOGIN_ADDRESS_LIMITER.is_blocked(address) or await _LOGIN_USERNAME_LIMITER.is_blocked(username):
+    # The username tier is keyed on the name as matched, case ignored: keyed
+    # on the typed spelling, "Ash", "ASH" and "aSh" would each carry a full
+    # budget against one account (SPC-020).
+    account_key = username_key(username)
+    if await _LOGIN_ADDRESS_LIMITER.is_blocked(address) or await _LOGIN_USERNAME_LIMITER.is_blocked(account_key):
         return _refuse_rate_limited(request, address, username)
 
-    result = await db.execute(select(User).where(User.username == username))
-    user = result.scalar_one_or_none()
+    user = await find_user_by_name(db, username)
 
     # One bcrypt comparison every time, whether or not the account exists, and
     # never on the event loop. bcrypt costs about 270 ms by design; run inline
@@ -193,7 +197,7 @@ async def post_login(
         # costs both budgets. Short-circuiting on the first would let a caller
         # who has exhausted the address tier keep probing a username for free.
         address_ok = await _LOGIN_ADDRESS_LIMITER.is_allowed(address)
-        username_ok = await _LOGIN_USERNAME_LIMITER.is_allowed(username)
+        username_ok = await _LOGIN_USERNAME_LIMITER.is_allowed(account_key)
         if not (address_ok and username_ok):
             return _refuse_rate_limited(request, address, username)
         # The only unauthenticated path that writes an operator-supplied value
@@ -203,9 +207,11 @@ async def post_login(
         logger.warning("Failed login attempt for username: %s", log_safe(username))
         return render_login(request, "Invalid username or password.", status_code=401)
 
-    logger.info("Successful login: %s (role=%s)", log_safe(username), log_safe(user.role))
+    logger.info("Successful login: %s (role=%s)", log_safe(user.username), log_safe(user.role))
+    # The stored spelling, not the typed one: require_login finds the account
+    # by the name in the token, exactly.
     token = make_session_cookie(
-        username, user.session_generation or 0, user_id=user.id, nonce=user.session_nonce or "",
+        user.username, user.session_generation or 0, user_id=user.id, nonce=user.session_nonce or "",
         session_id=secrets.token_urlsafe(16),
     )
     response = RedirectResponse(url="/", status_code=302)

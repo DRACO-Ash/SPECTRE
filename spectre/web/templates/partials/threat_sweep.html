@@ -19,6 +19,8 @@
     </span>
   </div>
 
+  {% if burn_watch is defined %}{% include "partials/burn_watch_note.html" %}{% endif %}
+
   {% if elset_ages is defined %}
   {# How old the orbits behind these figures are. STALE is past the regime's
      limit: 72 hours for GEO and deep space, 24 hours otherwise. #}
@@ -26,14 +28,105 @@
     <strong>Element set ages</strong> at sweep time:
     {% if elset_ages.red %}
     Interceptor <span class="{{ 'badge-warn' if elset_ages.red.stale else 'badge-ok' }}"
-      title="Epoch {{ elset_ages.red.epoch.strftime('%Y-%m-%d %H:%M UTC') }}">{{ elset_ages.red.label }}{% if elset_ages.red.stale %} STALE{% endif %}</span>.
+      title="Epoch {{ elset_ages.red.epoch.strftime('%Y-%m-%d %H:%M UTC') }}">{{ elset_ages.red.label }}{% if elset_ages.red.future is defined and elset_ages.red.future %} FUTURE EPOCH{% elif elset_ages.red.stale %} STALE{% endif %}</span>{% if red_elset_source is defined and red_elset_source %}, from {{ red_elset_source }}{% endif %}.{% if elset_ages.red.regime_line is defined and elset_ages.red.regime_line %} <span class="elset-regime">Interceptor regime {{ elset_ages.red.regime_line }}.</span>{% endif %}
+    {% endif %}
+    {% if elset_ages.future is defined and elset_ages.future %}
+    {# Dated after now (SPC-226): named apart, never read as an age in the range below. #}
+    <span class="badge-warn" title="Dated after now, so never current">{{ elset_ages.future | length }} FUTURE EPOCH</span>:
+    {{ elset_ages.future | join('; ') }}{% if elset_ages.count %};{% else %}.{% endif %}
     {% endif %}
     {% if elset_ages.count %}
     Targets {{ elset_ages.newest.label }} to {{ elset_ages.oldest.label }} old{% if elset_ages.stale %},
-    <span class="badge-warn" title="Past the regime limit: {{ elset_ages.stale | join(', ') }}">{{ elset_ages.stale | length }} stale</span>:
-    {{ elset_ages.stale | join(', ') }}{% endif %}.
+    <span class="badge-warn" title="Past the staleness limit applied to each one's regime: {{ elset_ages.stale | join('; ') }}">{{ elset_ages.stale | length }} stale</span>:
+    {{ elset_ages.stale | join('; ') }}{% endif %}.
     {% endif %}
   </div>
+  {% endif %}
+
+  {% if epoch_note is defined and epoch_note %}
+  <div class="field-meta" role="note" style="margin:0.3rem 0; font-size:0.75rem">{{ epoch_note }}</div>
+  {% endif %}
+
+  {% if red_history is defined and red_history %}
+  {# Is this normal? The operator's first question, for the interceptor's
+     latest burn against its own history (SPC-009). Band tokens, not hex, so
+     the light theme keeps its contrast. #}
+  {% set rn = red_history.normality %}
+  {% set rn_band = {"unprecedented":"critical","unusual":"high","routine":"minimal"}.get(rn.verdict.value, "unknown") if rn else "unknown" %}
+  {% set rc = red_history.custody %}
+  {% set rc_band = {"held":"minimal","degraded":"high","lost":"critical"}.get(rc.state.value, "unknown") %}
+  {# Custody first: it says whether the lines after it can be trusted (SPC-018). #}
+  <section class="sweep-custody" aria-label="Custody of the interceptor"
+           style="border-left:4px solid var(--spectre-status-{{ rc_band }}); background:rgba(var(--spectre-status-{{ rc_band }}-rgb), 0.06);
+                  border-radius:4px; padding:0.45rem 0.7rem; margin:0.3rem 0; font-size:0.75rem">
+    <strong>{{ rc.sentence }}</strong>
+    <div style="font-size:0.65rem; color:var(--text-muted); margin-top:0.15rem">{{ rc.basis }}</div>
+  </section>
+  {% if not (warning_change is defined and warning_change and warning_change.status.value == "figures") %}
+  <section class="sweep-normality" aria-label="Is the interceptor's latest burn normal for it"
+           style="border-left:4px solid var(--spectre-status-{{ rn_band }}); background:rgba(var(--spectre-status-{{ rn_band }}-rgb), 0.06);
+                  border-radius:4px; padding:0.45rem 0.7rem; margin:0.3rem 0; font-size:0.75rem">
+    {% if rn %}
+    <strong>Is this normal?</strong> Latest burn {{ rn.burn.epoch.strftime("%Y-%m-%d %H:%M UTC") }}:
+    <strong>{{ rn.sentence }}</strong>
+    {% for caveat in rn.caveats %}<span style="color:var(--text-muted)"> Caveat: {{ caveat }}.</span>{% endfor %}
+    <div style="font-size:0.65rem; color:var(--text-muted); margin-top:0.15rem">
+      From {{ red_history.elsets }} element sets over {{ red_history.span_days | round(0) | int }} days,
+      fetched {{ red_history.fetched_at.strftime("%H:%M UTC") }}. {{ rn.basis }}
+    </div>
+    {% else %}
+    <strong>Is this normal?</strong> Cannot say: {{ red_history.problem }}
+    {% endif %}
+  </section>
+  {% endif %}
+  {% endif %}
+
+  {% if warning_change is defined and warning_change %}
+  {# What the burn changed (SPC-007): the differential, not the state. Figures
+     only with a current orbit and a history; otherwise it says why. #}
+  {% set wc = warning_change %}
+  {% set wc_band = {"newly in reach":"critical","cut":"high","lengthened":"minimal","no longer in reach":"minimal"}.get(wc.worst.value, "unknown") if wc.worst else "unknown" %}
+  <section class="sweep-warning-change" aria-label="What the burn changed"
+           style="border-left:4px solid var(--spectre-status-{{ wc_band }}); background:rgba(var(--spectre-status-{{ wc_band }}-rgb), 0.06);
+                  border-radius:4px; padding:0.5rem 0.7rem; margin:0.3rem 0; font-size:0.78rem">
+    <div style="font-size:0.66rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-dim)">What the burn changed</div>
+    <div style="font-weight:700; margin-top:0.15rem">{{ wc.headline }}</div>
+    {% for line in wc.burns %}
+    <div style="margin-top:0.25rem">{{ line.when }} {{ line.verdict }}{% if line.caveat %} <span style="color:var(--text-dim)">{{ line.caveat }}</span>{% endif %}</div>
+    {% endfor %}
+    {% if wc.changed %}
+    <table class="hrr-table" style="font-size:0.7rem; margin-top:0.35rem">
+      <caption class="visually-hidden">Warning before and after the burn, for each target that changed</caption>
+      <thead><tr><th scope="col">Asset</th><th scope="col">Warning before</th><th scope="col">Warning after</th><th scope="col">Change</th></tr></thead>
+      <tbody>
+        {% for row in wc.changed %}
+        {% set row_band = {"newly in reach":"critical","cut":"high"}.get(row.change.value, "minimal") %}
+        <tr>
+          <td>{{ row.name }}</td>
+          <td>{{ (row.before_h | tof) if row.before_h is not none else "not in reach" }}</td>
+          <td>{{ (row.after_h | tof) if row.after_h is not none else "not in reach" }}</td>
+          <td style="color:var(--spectre-status-{{ row_band }}); font-weight:700">{% if row.change.value == "cut" and row.before_h is not none and row.after_h is not none %}cut by {{ (row.before_h - row.after_h) | tof }}{% else %}{{ row.change.value }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% if wc.footer %}<div style="font-size:0.68rem; color:var(--text-dim); margin-top:0.2rem">{{ wc.footer }}</div>{% endif %}
+    {% for note in wc.notes %}
+    <div style="font-size:0.68rem; color:var(--text-dim); margin-top:0.2rem">{{ note }}</div>
+    {% endfor %}
+    {% if wc.basis %}<div style="font-size:0.62rem; color:var(--text-dim); margin-top:0.25rem">{{ wc.basis }}</div>{% endif %}
+  </section>
+  {% endif %}
+
+  {% if decide_by is defined and decide_by %}
+  {# Decide-by (SPC-008): the soonest credible arrival minus the response time. #}
+  {% set db_band = {"passed":"critical","set":"high"}.get(decide_by.due.value, "unknown") %}
+  <section class="sweep-decide-by" aria-label="Decide-by time"
+           style="border-left:4px solid var(--spectre-status-{{ db_band }}); background:rgba(var(--spectre-status-{{ db_band }}-rgb), 0.06);
+                  border-radius:4px; padding:0.45rem 0.7rem; margin:0.3rem 0; font-size:0.78rem">
+    <strong>{{ decide_by.sentence }}</strong>
+  </section>
   {% endif %}
 
   {% if manual_red_confidence %}
@@ -56,10 +149,19 @@
       {# White on the band's own colour measured 2.15:1 for HIGH and 2.28:1
          for LOW. .spectre-band-badge carries the darkened fill token, which
          clears 4.5:1 in both themes. #}
-      <span class="spectre-band-badge spectre-band-{{ worst_coa.threat_level | lower }}">&#9888; {{ worst_coa.threat_level }} THREAT</span>
-      <span style="font-size:0.78rem; font-weight:600; color:var(--ops-gold)">MOST DANGEROUS COURSE OF ACTION</span>
-      <span style="font-size:0.75rem; color:var(--text-muted)">{{ worst_coa.intent_label }}</span>
+      {# Outlined, not filled, when Understanding is LOW (concept section 6.4):
+         the content advisory. The fill is earned: with no Understanding
+         computed, the badge is outlined too. The verdict it reads is the
+         legacy one, unchanged. #}
+      <span class="spectre-band-badge spectre-band-{{ worst_coa.threat_level | lower }}{% if worst_coa.understanding is not defined or worst_coa.understanding.outline %} spectre-band-outline{% endif %}">&#9888; {{ worst_coa.threat_level }} THREAT</span>
+      <span style="font-size:0.78rem; font-weight:600; color:var(--gold)">MOST DANGEROUS COURSE OF ACTION</span>
+      {% if worst_coa.behaviour_label is defined %}<span style="font-size:0.75rem; color:var(--text-muted)">{{ worst_coa.behaviour_label }}</span>{% endif %}
     </div>
+    {# Only with the verdict switch on (SPC-175): why the badge reads the band
+       it does, and what the current rule reads, in one line (I13). #}
+    {% if worst_coa.verdict_reason is defined %}
+    <div class="verdict-switch">{{ worst_coa.verdict_reason }}</div>
+    {% endif %}
 
     {# The two findings the single word used to conflate. Geometric access and
        assessed capability are different questions with different answers, and
@@ -78,6 +180,24 @@
       </span>
       {% endif %}
     </div>
+    {# What the confidence rests on (SPC-160): independent sources counted
+       once each, never the geometry, and what held it down. #}
+    <div style="font-size:0.68rem; color:var(--text-dim); margin:-0.25rem 0 0.5rem">{{ worst_coa.confidence_basis }}</div>
+
+    {% if worst_coa.understanding is defined %}
+    {# Threat Understanding (SPC-166), in shadow: the range the evidence has
+       earned and how well founded it is, beside the verdict above, which it
+       does not change until the switch is signed off (SPC-175). Threat and
+       Understanding each take a sentence of their own, every band is
+       labelled, no percentage is written, and the ledger is collapsed
+       (concept section 6.4, I13). A path propagated from a hostile seed
+       names the seed by name and catalogue number in the ledger and the
+       strip, since the seed list never becomes classified (SPC-180). #}
+    {% set tu = worst_coa.understanding %}
+    {% include "partials/threat_understanding.html" %}
+    {# The analyst's agree or disagree with it, logged and never applied (SPC-176). #}
+    {% if adjudication is defined and adjudication %}{% include "partials/adjudication.html" %}{% endif %}
+    {% endif %}
 
     {# What the cost says about how the actor would have to behave.
        A delta-v figure on its own means nothing to an operator: 50 m/s is one
@@ -114,7 +234,7 @@
         <div class="stat-lbl">Warning Time</div>
       </div>
       <div class="stat-card">
-        <div class="stat-val">{{ worst_coa.dv | m_s }} <span style="font-size:0.7rem; font-weight:400">m/s</span></div>
+        <div class="stat-val">{{ worst_coa.dv | m_s }}{% if worst_coa.dv_band is defined %} <span style="font-size:0.75rem; font-weight:600" title="{{ worst_coa.dv_band_basis }}">{{ worst_coa.dv_band }}</span>{% endif %} <span style="font-size:0.7rem; font-weight:400">m/s</span></div>
         <div class="stat-lbl">&#916;V Required</div>
       </div>
       <div class="stat-card">
@@ -125,11 +245,18 @@
         <div class="stat-val" style="font-size:0.82rem">{{ worst_coa.burn_location }}</div>
         <div class="stat-lbl">Burn Location</div>
       </div>
+      {% if worst_coa.phase_label is defined and worst_coa.phase_label %}
+      <div class="stat-card" title="The target's position relative to the interceptor at the burn, in the interceptor's orbital plane. In a co-orbital intercept this drives the cost more than where on the orbit the burn falls.">
+        <div class="stat-val" style="font-size:0.82rem">{{ worst_coa.phase_label }}</div>
+        <div class="stat-lbl">Target Phase at Burn</div>
+      </div>
+      {% endif %}
       <div class="stat-card">
         <div class="stat-val" style="font-size:0.82rem">{{ worst_coa.direction }}</div>
         <div class="stat-lbl">Burn Direction</div>
       </div>
     </div>
+    {% if worst_coa.dv_band_basis is defined %}<div class="field-meta" style="font-size:0.65rem; margin-top:0.2rem">{{ worst_coa.dv_band_basis }}</div>{% endif %}
 
     {# ── ΔV budget bar ── #}
     <div style="margin-bottom:0.5rem">
@@ -137,7 +264,7 @@
         <span>&#916;V Budget Utilisation</span>
         <span>{{ worst_coa.dv_budget_pct }}% of {{ worst_coa.budget_m_s | m_s }} m/s budget</span>
       </div>
-      <div style="height:6px; background:var(--bg-card); border-radius:3px; overflow:hidden">
+      <div style="height:6px; background:var(--bg); border-radius:3px; overflow:hidden">
         <div style="height:100%; width:{{ worst_coa.dv_budget_pct }}%; background:{{ worst_coa.threat_color }}; border-radius:3px"></div>
       </div>
     </div>
@@ -146,20 +273,37 @@
     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.4rem; margin-bottom:0.5rem">
       <div>
         <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.15rem">Prograde {{ worst_coa.pro_pct }}%</div>
-        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.pro_pct }}%; background:var(--spectre-status-medium); border-radius:2px"></div></div>
+        <div style="height:4px; background:var(--bg); border-radius:2px"><div style="height:100%; width:{{ worst_coa.pro_pct }}%; background:var(--spectre-status-medium); border-radius:2px"></div></div>
       </div>
       <div>
         <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.15rem">Normal {{ worst_coa.nor_pct }}%</div>
-        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.nor_pct }}%; background:var(--spectre-status-violet); border-radius:2px"></div></div>
+        <div style="height:4px; background:var(--bg); border-radius:2px"><div style="height:100%; width:{{ worst_coa.nor_pct }}%; background:var(--spectre-status-violet); border-radius:2px"></div></div>
       </div>
       <div>
         <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.15rem">Radial {{ worst_coa.rad_pct }}%</div>
-        <div style="height:4px; background:var(--bg-card); border-radius:2px"><div style="height:100%; width:{{ worst_coa.rad_pct }}%; background:var(--spectre-status-high); border-radius:2px"></div></div>
+        <div style="height:4px; background:var(--bg); border-radius:2px"><div style="height:100%; width:{{ worst_coa.rad_pct }}%; background:var(--spectre-status-high); border-radius:2px"></div></div>
       </div>
     </div>
 
     {# ── Summary text ── #}
     <p style="margin:0; font-size:0.77rem; color:var(--text-dim); font-style:italic">{{ worst_coa.summary }}</p>
+
+    {# Open this entry as a decision scenario (SPC-150). The server fills the panel from the sweep it holds, named
+       here by its epoch, so a newer sweep is refused rather than mistaken for this one. Nothing is evaluated.
+       worst_entry_index travels beside worst_coa, not in it: that dict is the pinned legacy verdict (SPC-175). #}
+    {% if worst_entry_index is defined and worst_entry_index is not none %}
+    <div style="margin-top:0.5rem; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap">
+      <button type="button" class="btn-secondary btn-sm"
+              hx-get="/plan/decision/from-sweep"
+              hx-vals='{"entry": {{ worst_entry_index }}, "sweep": "{{ assessment.sweep_epoch.isoformat() }}"}'
+              hx-target="#hero-decision" hx-swap="innerHTML"
+              data-opens-decision
+              aria-label="Open a decision scenario from the worst case: {{ worst_coa.target_name }}">Open a decision scenario</button>
+      <span class="field-meta" style="font-size:0.68rem">Fills the Decision Engine with this red track, the target
+        when it is held as a blue asset, and this transfer's departure burn. P and Conf are yours to set, and
+        nothing is evaluated until you press Evaluate.</span>
+    </div>
+    {% endif %}
   </div>
   {% endif %}
 
@@ -200,14 +344,15 @@
 
   {% if grouped %}
   <div style="margin:0.4rem 0; display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap">
+    <label for="threat-search" class="visually-hidden">Search the sweep results</label>
     <input type="text" id="threat-search" class="form-control"
            placeholder="Search targets, methods, locations…"
-           oninput="threatFilter(this.value)"
+           data-action-input="threatFilter"
            style="flex:1; min-width:140px; padding:0.35rem 0.5rem; font-size:0.8rem">
     <label style="font-size:0.72rem; font-weight:600; color:var(--text-dim); white-space:nowrap; display:flex; align-items:center; gap:0.3rem"
            title="Show only targets whose element set has the selected provenance: a UDL data mode, SYNTHETIC (bundled bootstrap) or MANUAL (entered by hand)">
       Data Mode
-      <select id="sweep-dm-filter" onchange="sweepDmFilter(this.value)"
+      <select id="sweep-dm-filter" data-action-change="sweepDmFilter"
               style="font-size:0.72rem; padding:0.15rem 0.3rem; border-radius:3px">
         <option value="">All</option>
         <option value="REAL">REAL</option>
@@ -218,8 +363,8 @@
         <option value="MANUAL">MANUAL</option>
       </select>
     </label>
-    <button class="btn-secondary btn-sm" onclick="threatExpandAll()" title="Expand all groups">Expand All</button>
-    <button class="btn-secondary btn-sm" onclick="threatCollapseAll()" title="Collapse all groups">Collapse All</button>
+    <button class="btn-secondary btn-sm" data-action="threatExpandAll" title="Expand all groups">Expand All</button>
+    <button class="btn-secondary btn-sm" data-action="threatCollapseAll" title="Collapse all groups">Collapse All</button>
   </div>
   <div class="threat-scroll">
     <table class="hrr-table threat-table" id="threat-sweep-table">
@@ -230,13 +375,13 @@
              headers had an indicator span that threatSort never wrote to, so
              the sort state was carried by row order alone — nothing to see and
              nothing to announce. #}
-          <th onclick="threatSort(1,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none">Target <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(2,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none">Source <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(3,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none">HRR <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(4,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none">Best &#916;V <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(5,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none">Best Method <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(6,'str')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none">Posture <span class="hrr-sort-ind"></span></th>
-          <th onclick="threatSort(7,'num')" tabindex="0" onkeydown="spectreActivate(event)" scope="col" aria-sort="none">Profiles <span class="hrr-sort-ind"></span></th>
+          <th data-action="threatSort" data-col="1" data-kind="str" tabindex="0" data-activate scope="col" aria-sort="none">Target <span class="hrr-sort-ind"></span></th>
+          <th data-action="threatSort" data-col="2" data-kind="str" tabindex="0" data-activate scope="col" aria-sort="none">Source <span class="hrr-sort-ind"></span></th>
+          <th data-action="threatSort" data-col="3" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none">HRR <span class="hrr-sort-ind"></span></th>
+          <th data-action="threatSort" data-col="4" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none">Best &#916;V <span class="hrr-sort-ind"></span></th>
+          <th data-action="threatSort" data-col="5" data-kind="str" tabindex="0" data-activate scope="col" aria-sort="none">Best Method <span class="hrr-sort-ind"></span></th>
+          <th data-action="threatSort" data-col="6" data-kind="str" tabindex="0" data-activate scope="col" aria-sort="none">Posture <span class="hrr-sort-ind"></span></th>
+          <th data-action="threatSort" data-col="7" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none">Profiles <span class="hrr-sort-ind"></span></th>
         </tr>
       </thead>
       <tbody>
@@ -275,8 +420,8 @@
             data-posture-band="{{ posture_bands.get(group.best_posture, 'unknown') }}"
             id="threat-group-{{ loop.index0 }}"
             data-dm="{{ group.data_mode }}"
-            onclick="threatToggle({{ loop.index0 }})"
-            tabindex="0" onkeydown="spectreActivate(event)"
+            data-action="threatToggle" data-idx="{{ loop.index0 }}"
+            tabindex="0" data-activate
             aria-expanded="false">
           <td class="threat-chevron-cell">
             <svg class="threat-chevron" id="chevron-{{ loop.index0 }}" role="img"
@@ -335,12 +480,12 @@
            just as scope does. #}
         <tr class="threat-child threat-child-header threat-children-{{ group_idx }}" style="display:none">
           <td></td>
-          <th onclick="childSort({{ group_idx }},1,'str')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-1" aria-sort="none">Location <span class="hrr-sort-ind"></span></th>
-          <th onclick="childSort({{ group_idx }},2,'str')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-2" aria-sort="none">Burn Epoch <span class="hrr-sort-ind"></span></th>
-          <th onclick="childSort({{ group_idx }},3,'num')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-3" aria-sort="none">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
-          <th onclick="childSort({{ group_idx }},4,'num')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-4" aria-sort="none">TOF <span class="hrr-sort-ind"></span></th>
-          <th onclick="childSort({{ group_idx }},5,'str')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-5" aria-sort="none">Method <span class="hrr-sort-ind"></span></th>
-          <th onclick="childSort({{ group_idx }},6,'str')" tabindex="0" onkeydown="spectreActivate(event)" id="tsw-child-{{ group_idx }}-6" aria-sort="none">Posture <span class="hrr-sort-ind"></span></th>
+          <th data-action="childSort" data-group="{{ group_idx }}" data-col="1" data-kind="str" tabindex="0" data-activate id="tsw-child-{{ group_idx }}-1" aria-sort="none">Location <span class="hrr-sort-ind"></span></th>
+          <th data-action="childSort" data-group="{{ group_idx }}" data-col="2" data-kind="str" tabindex="0" data-activate id="tsw-child-{{ group_idx }}-2" aria-sort="none">Burn Epoch <span class="hrr-sort-ind"></span></th>
+          <th data-action="childSort" data-group="{{ group_idx }}" data-col="3" data-kind="num" tabindex="0" data-activate id="tsw-child-{{ group_idx }}-3" aria-sort="none">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
+          <th data-action="childSort" data-group="{{ group_idx }}" data-col="4" data-kind="num" tabindex="0" data-activate id="tsw-child-{{ group_idx }}-4" aria-sort="none">TOF <span class="hrr-sort-ind"></span></th>
+          <th data-action="childSort" data-group="{{ group_idx }}" data-col="5" data-kind="str" tabindex="0" data-activate id="tsw-child-{{ group_idx }}-5" aria-sort="none">Method <span class="hrr-sort-ind"></span></th>
+          <th data-action="childSort" data-group="{{ group_idx }}" data-col="6" data-kind="str" tabindex="0" data-activate id="tsw-child-{{ group_idx }}-6" aria-sort="none">Posture <span class="hrr-sort-ind"></span></th>
           <th class="no-sort">Action</th>
         </tr>
         {% for child in group.children %}
@@ -352,7 +497,7 @@
           <td class="col-dim" headers="tsw-child-{{ group_idx }}-1">{{ child.entry.burn_location }}</td>
           <td class="col-dim" headers="tsw-child-{{ group_idx }}-2">{{ child.entry.burn_epoch.strftime('%Y-%m-%d %H:%M') }}</td>
           <td class="mnv-dv" headers="tsw-child-{{ group_idx }}-3">{{ child.entry.delta_v_m_s | m_s }}</td>
-          <td class="col-dim" headers="tsw-child-{{ group_idx }}-4">{{ "%.2f" | format(child.entry.tof_hours) }} hr</td>
+          <td class="col-dim" headers="tsw-child-{{ group_idx }}-4">{% if child.entry.arrives is defined and not child.entry.arrives %}aligns planes only{% else %}{{ "%.2f" | format(child.entry.tof_hours) }} hr{% endif %}</td>
           <td class="col-dim" headers="tsw-child-{{ group_idx }}-5" title="Pro {{ child.entry.dv_prograde | m_s }} m/s  Nor {{ child.entry.dv_normal | m_s }} m/s  Rad {{ child.entry.dv_radial | m_s }} m/s">
             {{ child.entry.method }}
           </td>
@@ -381,8 +526,18 @@
                     type="button"
                     data-red="{{ assessment.red_name }}" data-blue="{{ child.entry.target.target_name }}"
                     data-epoch="{{ child.entry.burn_epoch.strftime('%Y-%m-%dT%H:%M') }}" data-method="{{ child.entry.method }}"
-                    onclick="event.stopPropagation(); loadInEngine(this.dataset.red, this.dataset.blue, this.dataset.epoch, this.dataset.method)"
+                    data-action="loadInEngine"
                     title="Pre-fill the intercept engine with this row's objects, burn epoch and method (TOF is not carried)">Load</button>
+            {% if child.entry.arrives %}
+            <button class="btn-secondary btn-sm"
+                    type="button"
+                    hx-get="/plan/decision/from-sweep"
+                    hx-vals='{"entry": {{ child.flat_idx }}, "sweep": "{{ assessment.sweep_epoch.isoformat() }}"}'
+                    hx-target="#hero-decision" hx-swap="innerHTML"
+                    data-opens-decision
+                    aria-label="Decide from this entry in the Decision Engine: {{ child.entry.target.target_name }}, {{ child.entry.method }}, {{ child.entry.burn_location }}"
+                    title="Open a decision scenario filled from this entry; nothing is evaluated until you press Evaluate">Decide</button>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -391,205 +546,7 @@
     </table>
   </div>
 
-  <script>
-  /* ── Toggle a single target group ── */
-  function threatToggle(gIdx) {
-    var rows = document.querySelectorAll('.threat-children-' + gIdx);
-    var chevron = document.getElementById('chevron-' + gIdx);
-    var visible = rows.length > 0 && rows[0].style.display !== 'none';
-    rows.forEach(function(r) { r.style.display = visible ? 'none' : ''; });
-    if (chevron) chevron.classList.toggle('is-open', !visible);
-    /* The chevron's rotation carries the state for sighted operators
-       only. aria-expanded is the same fact for everyone else, and it has to
-       move with the rows rather than being set once in the markup. */
-    var parent = document.getElementById('threat-group-' + gIdx);
-    if (parent) parent.setAttribute('aria-expanded', visible ? 'false' : 'true');
-  }
-
-  /* ── Expand / Collapse all ── */
-  function threatExpandAll() {
-    document.querySelectorAll('.threat-child').forEach(function(r) { r.style.display = ''; });
-    document.querySelectorAll('svg.threat-chevron').forEach(function(c) { c.classList.add('is-open'); });
-    _threatSetAllExpanded(true);
-  }
-  function threatCollapseAll() {
-    document.querySelectorAll('.threat-child').forEach(function(r) { r.style.display = 'none'; });
-    document.querySelectorAll('svg.threat-chevron').forEach(function(c) { c.classList.remove('is-open'); });
-    _threatSetAllExpanded(false);
-  }
-  /* Expand-all and collapse-all move every row, so they have to move every
-     state with them. Setting it in threatToggle alone would leave the
-     announcement stale for every row these two touch. */
-  function _threatSetAllExpanded(expanded) {
-    document.querySelectorAll('.threat-parent').forEach(function(row) {
-      row.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    });
-  }
-
-  /* ── Search filter (matches parent target name + all child content) ── */
-  function threatFilter(q) {
-    var term = q.trim().toLowerCase();
-    /* Iterate parent rows */
-    document.querySelectorAll('.threat-parent').forEach(function(parent) {
-      var gIdx = parent.id.replace('threat-group-', '');
-      var children = document.querySelectorAll('.threat-children-' + gIdx);
-      var parentText = parent.textContent.toLowerCase();
-      var childTexts = Array.from(children).map(function(r) { return r.textContent.toLowerCase(); });
-      var allText = parentText + ' ' + childTexts.join(' ');
-      var match = term === '' || allText.indexOf(term) !== -1;
-      parent.style.display = match ? '' : 'none';
-      /* Hide children if parent is hidden; otherwise preserve their toggle state */
-      if (!match) {
-        children.forEach(function(r) { r.style.display = 'none'; });
-      }
-    });
-  }
-
-  /* ── Data Mode filter (show only rows matching a UDL dataMode tag) ── */
-  function sweepDmFilter(val) {
-    document.querySelectorAll('.threat-parent').forEach(function(parent) {
-      var dm = (parent.getAttribute('data-dm') || '').toUpperCase();
-      var match = val === '' || dm === val.toUpperCase();
-      parent.style.display = match ? '' : 'none';
-      var gIdx = parent.id.replace('threat-group-', '');
-      if (!match) {
-        document.querySelectorAll('.threat-children-' + gIdx).forEach(function(r) {
-          r.style.display = 'none';
-        });
-      }
-    });
-  }
-
-  /* ── Sort child rows within a single group ── */
-  var _childSortState = {};  /* { groupIdx: { col, asc } } */
-  function childSort(gIdx, col, type) {
-    var state = _childSortState[gIdx] || { col: -1, asc: true };
-    if (state.col === col) { state.asc = !state.asc; }
-    else { state.col = col; state.asc = true; }
-    _childSortState[gIdx] = state;
-
-    var tbody = document.getElementById('threat-sweep-table').tBodies[0];
-    /* Collect only data rows (skip the header row) for this group */
-    var all = document.querySelectorAll('.threat-children-' + gIdx);
-    var headerRow = null;
-    var dataRows = [];
-    all.forEach(function(r) {
-      if (r.classList.contains('threat-child-header')) { headerRow = r; }
-      /* Only the real child rows carry a threat-row- id. The PAIR intel row is
-         also .threat-children-N but it is a single cell with colspan="8", so
-         a.cells[col] came back undefined and the comparator threw on
-         .textContent: for every group that had target intel, child sort did
-         nothing at all, and an aria-sort written after the sort would never
-         have been reached. */
-      else if (r.id.indexOf('threat-row-') === 0) { dataRows.push(r); }
-    });
-
-    dataRows.sort(function(a, b) {
-      var av = a.cells[col].textContent.trim();
-      var bv = b.cells[col].textContent.trim();
-      if (type === 'num') { av = parseFloat(av) || 0; bv = parseFloat(bv) || 0; }
-      if (av < bv) return state.asc ? -1 : 1;
-      if (av > bv) return state.asc ? 1 : -1;
-      return 0;
-    });
-
-    /* Re-insert after the header row */
-    var ref = headerRow;
-    dataRows.forEach(function(r) {
-      ref.parentNode.insertBefore(r, ref.nextSibling);
-      ref = r;
-    });
-
-    /* Say which column is sorted and which way, to the eye and to the
-       accessibility tree, and only within THIS group's header row: each
-       expanded group sorts independently, so a shared reset would wipe the
-       state of a group the operator did not touch. */
-    if (headerRow) {
-      headerRow.querySelectorAll('th').forEach(function(h) {
-        if (h.hasAttribute('aria-sort')) { h.setAttribute('aria-sort', 'none'); }
-        var i = h.querySelector('.hrr-sort-ind');
-        if (i) { i.textContent = ''; }
-      });
-      var th = headerRow.querySelector('#tsw-child-' + gIdx + '-' + col);
-      if (th) {
-        th.setAttribute('aria-sort', state.asc ? 'ascending' : 'descending');
-        var ind = th.querySelector('.hrr-sort-ind');
-        if (ind) { ind.textContent = state.asc ? ' ▲' : ' ▼'; }
-      }
-    }
-  }
-
-  /* ── Sort parent rows (re-orders groups in the table) ── */
-  var _threatSortCol = -1, _threatSortAsc = true;
-  function threatSort(col, type) {
-    var table = document.getElementById('threat-sweep-table');
-    if (!table) return;
-    var tbody = table.tBodies[0];
-
-    if (_threatSortCol === col) { _threatSortAsc = !_threatSortAsc; }
-    else { _threatSortCol = col; _threatSortAsc = true; }
-
-    /* Which column is sorted and which way — glyph and aria-sort written
-       together, from one branch, so they cannot disagree. */
-    var ths = table.querySelectorAll('thead th');
-    ths.forEach(function(h) {
-      if (h.hasAttribute('aria-sort')) { h.setAttribute('aria-sort', 'none'); }
-      var i = h.querySelector('.hrr-sort-ind');
-      if (i) { i.textContent = ''; }
-    });
-    var sortedTh = ths[col];
-    if (sortedTh) {
-      sortedTh.setAttribute('aria-sort', _threatSortAsc ? 'ascending' : 'descending');
-      var sortedInd = sortedTh.querySelector('.hrr-sort-ind');
-      if (sortedInd) { sortedInd.textContent = _threatSortAsc ? ' ▲' : ' ▼'; }
-    }
-
-    /* Collect groups: each group = [parentRow, ...childRows] */
-    var groups = [];
-    var currentGroup = null;
-    Array.from(tbody.rows).forEach(function(row) {
-      if (row.classList.contains('threat-parent')) {
-        currentGroup = [row];
-        groups.push(currentGroup);
-      } else if (currentGroup) {
-        currentGroup.push(row);
-      }
-    });
-
-    /* Sort groups by the parent row's cell value */
-    groups.sort(function(a, b) {
-      var av = a[0].cells[col].textContent.trim();
-      var bv = b[0].cells[col].textContent.trim();
-      if (type === 'num') { av = parseFloat(av) || 0; bv = parseFloat(bv) || 0; }
-      if (av < bv) return _threatSortAsc ? -1 : 1;
-      if (av > bv) return _threatSortAsc ? 1 : -1;
-      return 0;
-    });
-
-    /* Re-append in sorted order */
-    groups.forEach(function(group) {
-      group.forEach(function(row) { tbody.appendChild(row); });
-    });
-  }
-
-  /* ── Load solution into the intercept engine ── */
-  function loadInEngine(redSat, blueSat, epoch, method) {
-    if (typeof switchToEngine === 'function') switchToEngine();
-    var redSel = document.getElementById('ie-red-sat');
-    var blueSel = document.getElementById('ie-blue-sat');
-    var methodSel = document.getElementById('ie-method');
-    var startInput = document.querySelector('input[name="manoeuvre_start"]');
-    if (redSel) { redSel.value = redSat; }
-    if (blueSel) { blueSel.value = blueSat; }
-    if (methodSel) {
-      methodSel.value = method;
-      if (typeof ieUpdate === 'function') ieUpdate();
-    }
-    if (startInput) { startInput.value = epoch; }
-    var engine = document.getElementById('intercept-engine-form');
-    if (engine) engine.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
-  </script>
+  {# Toggle, filter, sort and load are in /static/js/sweep.js (SPC-199). #}
   {% else %}
   <p class="empty-msg">No intercept solutions found within the &#916;V budget.</p>
   {% endif %}

@@ -56,7 +56,9 @@ def changed_lines(base: str) -> dict[str, set[int]]:
 
     changed: dict[str, set[int]] = {}
     path = ""
-    for line in _git("diff", "-U0", anchor).splitlines():
+    # Prefixes set here, not read from the caller's config (diff.noprefix would hide every path).
+    for line in _git("diff", "-U0", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
+                     anchor, "--").splitlines():
         if line.startswith("+++ b/"):
             path = line[6:]
             changed.setdefault(path, set())

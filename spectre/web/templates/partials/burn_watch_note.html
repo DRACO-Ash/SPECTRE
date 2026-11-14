@@ -1,0 +1,45 @@
+{#- The burn watch (spectre/web/burn_watch.py, SPC-006). The note is one
+    element, always present, so it can replace itself: it polls while the watch
+    runs and stops once the watch has stopped. The live region is the wrapper
+    round it, which the poll never replaces, because a live region swapped out
+    every 60 s is not reliably announced: the poll takes only the note from the
+    response. The note passes nothing down (hx-disinherit="*"), so the Sweep
+    again button inside takes neither that selection nor the note's outerHTML
+    swap, which would replace #threat-sweep-results itself. Every
+    value is guarded, because the template tests render with StrictUndefined. -#}
+{% set bw = burn_watch if burn_watch is defined else none %}
+{% set ba = burn_alert if burn_alert is defined else none %}
+{% set ends = watch_ends_at if watch_ends_at is defined else none %}
+<div id="burn-watch-live" aria-live="polite">
+{% if bw is not none and not bw.stopped %}
+<div id="burn-watch-note" class="field-meta" style="margin:0.3rem 0; font-size:0.75rem"
+     hx-get="/plan/threat/burn-watch" hx-trigger="every 60s" hx-select="#burn-watch-note"
+     hx-disinherit="*" hx-swap="outerHTML">
+{% else %}
+<div id="burn-watch-note" class="field-meta" style="margin:0.3rem 0; font-size:0.75rem">
+{% endif %}
+  {% if ba is not none %}
+  <div class="burn-alert" style="border-left:4px solid var(--spectre-status-high); background:rgba(var(--spectre-status-high-rgb), 0.06); border-radius:4px; padding:0.4rem 0.6rem; margin-bottom:0.3rem">
+    <strong>{{ ba.red_name }} burned {{ ba.burn_when }}</strong> (seen {{ ba.seen_at.strftime('%H:%M UTC') }}):
+    {% if ba.change.status.value == "figures" %}{{ ba.change.headline }}{% else %}the change in your warning is not computed: {{ ba.change.headline }}{% endif %}
+    <button class="btn-secondary btn-sm" type="button" hx-post="/plan/threat/sweep" hx-include="#threat-sweep-form"
+            hx-target="#threat-sweep-results" hx-swap="innerHTML" title="Run the sweep again to see the full change">Sweep again</button>
+  </div>
+  {% endif %}
+  {% if bw is none %}
+  Not watching for burns: a sweep with UDL connected starts a watch on the object swept.
+  {% elif bw.stopped %}
+  Not watching {{ bw.red_name }} for burns: {{ bw.stopped }}.
+  {% else %}
+  Watching <strong>{{ bw.red_name }}</strong> for burns while you are signed in:
+  last checked {{ bw.checked_at.strftime('%H:%M UTC') if bw.checked_at else "not yet" }},
+  next by {{ bw.next_check_at.strftime('%H:%M UTC') }}.
+  A burn shows once UDL holds an element set from after it and 2 estimators confirm it.
+  Only {{ bw.red_name }} is watched; burns on other objects show when you sweep them.
+  This watch ends {% if ends %}at {{ ends.strftime('%H:%M UTC') }}, when this sign-in expires,{% else %}when this sign-in expires{% endif %} or if UDL disconnects.
+  {% if bw.problem %}<div style="color:var(--spectre-status-high)">{{ bw.problem }}</div>{% endif %}
+  {#- A newer set refused before the set the watch read was taken (SPC-243): a note, not a problem. -#}
+  {% if bw.note is defined and bw.note %}<div class="elset-passed-over">{{ bw.note }}</div>{% endif %}
+  {% endif %}
+</div>
+</div>

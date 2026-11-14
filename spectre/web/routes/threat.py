@@ -10,30 +10,56 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 import time
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, NamedTuple
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
 
+from spectre.astro.along_track import (
+    error_rate_words,
+    figure_applied,
+    position_error_km,
+    regime_basis,
+    shift_along_track,
+)
 from spectre.astro.constants import normalise_regime, regimes_compatible
+from spectre.astro.elset_check import HELD_KEPT
 from spectre.astro.events import EventType, find_orbital_events
 from spectre.astro.maneuvers import (
+    Burn,
     InterceptSolution,
     bielliptic_intercept,
     hbar_hop_intercept,
     hohmann_intercept,
     lambert_intercept,
     min_time_intercept_wrapper,
+    miss_not_read,
     phasing_intercept,
     plane_change_intercept,
     vbar_hop_intercept,
 )
+from spectre.astro.phase_angle import phase_angle_deg
 from spectre.astro.propagator import TLE_ERRORS, TLEOrbit, regime_from_tle, state_to_keplerian
+from spectre.config.settings import get_settings
 from spectre.data.intel import get_intel, satno_from_tle
+from spectre.domain import interaction_graph as ig
+from spectre.domain import threat_understanding as tu
+from spectre.domain.actor_eligibility import WORKING_LIFE_YEARS, Exclusion, why_not_an_actor
+from spectre.domain.custody import Custody, CustodyStatus, age_text
+from spectre.domain.decide_by import (
+    DecideBy,
+    Due,
+    ResponseTimes,
+    decide_by,
+    parse_response_hours,
+    withheld,
+)
 from spectre.domain.manoeuvre_calibration import (
     DEFAULT_SWEEP_BUDGET_M_S,
     classify_posture,
@@ -42,33 +68,71 @@ from spectre.domain.manoeuvre_calibration import (
     to_km_s,
 )
 from spectre.domain.models import (
+    RedTrack,
+    SweepBurn,
     ThreatActor,
     ThreatAssessment,
     ThreatSweepEntry,
     ThreatTarget,
 )
+from spectre.domain.normality import BurnNormality
+from spectre.domain.pol_assessment import PolAssessment
 from spectre.domain.threat_assessment import (
     AccessEvidence,
+    ActorRange,
     ActorVerdict,
+    Band,
     CapabilityEvidence,
+    ConfidenceContext,
+    arrives_at_target,
     assess_threat,
     rank_actors,
+    read_verdict,
     warning_time_rank,
 )
+from spectre.domain.warning_change import (
+    BurnLine,
+    Status,
+    WarningChange,
+    burns_in_window,
+    compare,
+    footer,
+    headline,
+    is_new_burn,
+    least_warning_by_target,
+    newest_unconfirmed,
+    when_burned,
+    worst_change,
+)
+from spectre.web import adjudication_log, interaction_store
 from spectre.web.auth import require_login
-from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, dominant_axis, intent_label_for
+from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, dominant_axis
+from spectre.web.burn_watch import CHECK_EVERY, BurnWatch, start_watch, watch_view
+from spectre.web.decision_threat import hold_threat_picture
 from spectre.web.deps import render
-from spectre.web.elsets import elset_age
+from spectre.web.elsets import ElsetAge, RefusedElset, elset_age, limit_hours_for_regime, refused
 from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
+from spectre.web.routes.gcat import catalogue_entry
+from spectre.web.routes.pol import (
+    HeldHistory,
+    burn_verdicts,
+    custody_from_history,
+    held_history,
+    history_evidence,
+    reserve_reset_for,
+)
+from spectre.web.routes.udl import spawn_session_task
+from spectre.web.understanding_view import HeldObject, object_view, understanding_view
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/plan/threat")
 
 _THREAT_SWEEP_TEMPLATE = "partials/threat_sweep.html"
+_BURN_WATCH_TEMPLATE = "partials/burn_watch_note.html"
 
 _RED_COUNTRIES = {"CHN", "RUS", "IRN", "PRK"}
 
@@ -138,12 +202,14 @@ async def red_orbit_info(
 
         satno = satno_from_tle(track.tle)
         pair = get_intel(satno)
+        now = _utc_now()
 
         return render(request, "partials/red_orbit_info.html", {
             "name": track.name,
             "epoch_str": epoch_str,
             "age": elset_age(track.tle, datetime.now(tz=UTC)),
             "data_mode": track.data_mode,
+            "elset_source": track.elset_source,
             "lon_deg": lon_deg,
             "inc_deg": inc_deg,
             "period_min": period_min,
@@ -151,6 +217,7 @@ async def red_orbit_info(
             "ecc": ecc,
             "a_km": a_km,
             "pair": pair,
+            "pair_tu": _red_object_view(state, str(satno), track.tle, track.data_mode, now) if pair else None,
         })
     except TLE_ERRORS as exc:
         # red_sat is a query parameter and the exception text is built from an
@@ -261,12 +328,8 @@ def _manual_target_error(existing: list[dict[str, str]], name: str, tle: str, co
     first = next((message for failed, message in problems if failed), None)
     if first:
         return first
-    try:
-        TLEOrbit(tle)
-    # BLE001: any parse failure is the operator's to see, with its reason.
-    except Exception as exc:  # noqa: BLE001
-        return f"Invalid TLE: {exc}"
-    return None
+    # The one acceptance check every ingest path runs (SPC-201); its sentence names what failed, never the text.
+    return refused(name, tle)
 
 
 @router.post("/add-manual-tle", response_model=None)
@@ -318,8 +381,8 @@ async def remove_manual_tle(
 @router.get("/target-config", response_model=None)
 async def target_config(
     request: Request,
+    current_user: Annotated[User, Depends(require_login)],
     red_sat: str = Query("", description="Selected interceptor stk_name — used to filter by regime"),
-    current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Return the sweep target dropdown filtered to the interceptor's orbital regime."""
     state = get_session_state(current_user)
@@ -333,12 +396,13 @@ async def target_config(
         "interceptor_regime": regime,
         "interceptor_name": red_sat,
         "manual_tles": state.manual_sweep_tles,
+        "response_times": state.response_time_by_target,
     })
 
 
 async def _prefetch_group_tle(
     state: object, satno_str: str, sem: asyncio.Semaphore, window_hours: float,
-) -> bool:
+) -> bool | str:
     """Bring one HRR object's element set up to date, history included.
 
     Lifted whole out of ``fetch_targets``, where it was a closure counting
@@ -346,6 +410,11 @@ async def _prefetch_group_tle(
     ends the call holding a usable element set, which is what the status
     panel counts as fetched: one that already held a REAL one counts without
     a call being made.
+
+    A set the acceptance check refuses is not stored: the sentence saying so,
+    naming the object, comes back in place of False (SPC-201). A history set
+    it refuses is left out of the clustering and said in the run log, as is
+    each newer set refused before the set stored was taken (SPC-243).
 
     The credential check is kept even though the caller has already made it.
     Session state is shared, and dropping a guard because it looks redundant
@@ -365,9 +434,14 @@ async def _prefetch_group_tle(
         )
         if not result:
             return False
-        tle, dm = result
-        state.hrr_tle_cache[satno_str] = tle  # type: ignore[attr-defined]
-        state.hrr_tle_data_mode[satno_str] = dm  # type: ignore[attr-defined]
+        if isinstance(result, RefusedElset):
+            return result.sentence(_hrr_label(state, satno_str))
+        state.hrr_tle_cache[satno_str] = result.tle  # type: ignore[attr-defined]
+        state.hrr_tle_data_mode[satno_str] = result.data_mode  # type: ignore[attr-defined]
+        # A newer set the check refused before this one was taken is said in the run log (SPC-243).
+        passed_over = result.passed_over_note(_hrr_label(state, satno_str))
+        if passed_over:
+            state.append_log(f"[UDL] {passed_over}")  # type: ignore[attr-defined]
         # Also fetch multi-provider history for clustering.
         history = await fetch_tle_history_for_satno(
             int(satno_str), state.udl_username, state.udl_password,  # type: ignore[attr-defined]
@@ -376,7 +450,11 @@ async def _prefetch_group_tle(
             source=state.udl_tle_source,  # type: ignore[attr-defined]
         )
         if len(history) > 1:
-            state.hrr_tle_multiset[satno_str] = history  # type: ignore[attr-defined]
+            state.hrr_tle_multiset[satno_str] = list(history)  # type: ignore[attr-defined]
+        # A history set the acceptance check refused was left out of the clustering: the run log says so (SPC-201).
+        refusal = history.refusal(_hrr_label(state, satno_str))
+        if refusal is not None:
+            state.append_log(f"[UDL] {refusal}")  # type: ignore[attr-defined]
     return True
 
 
@@ -441,8 +519,9 @@ async def fetch_targets(
     outcomes = await asyncio.gather(*[
         _prefetch_group_tle(state, s, sem, _window_hours) for s in satnos
     ])
-    fetched = sum(1 for ok in outcomes if ok)
+    fetched = sum(1 for ok in outcomes if ok is True)
     failed = len(outcomes) - fetched
+    refusals = [outcome for outcome in outcomes if isinstance(outcome, str)]
 
     total = len(satnos)
     group_label = f"{side.title()} HRR Rank {rank}" if rank is not None else "all HRR objects"
@@ -452,7 +531,7 @@ async def fetch_targets(
     )
 
     return render(request, "partials/sweep_fetch_status.html", {
-        "error": None, "fetched": fetched, "total": total, "failed": failed,
+        "error": None, "fetched": fetched, "total": total, "failed": failed, "refused": refusals,
     })
 
 
@@ -464,6 +543,16 @@ _EVENT_TO_LOCATION = {
     EventType.DESCENDING_NODE: "desc_node",
 }
 
+
+
+def _hrr_label(state: object, satno: str) -> str:
+    """An HRR object as the operator knows it: its watchlist name and number, or the number alone."""
+    name = next(
+        (str(o.get("name") or "").strip() for o in state.hrr_objects  # type: ignore[attr-defined]
+         if str(o.get("satno") or "").strip() == satno),
+        "",
+    )
+    return f"{name} ({satno})" if name else satno
 
 
 def _needs_live_tle(state: object, satno: str) -> bool:
@@ -518,17 +607,95 @@ def _build_target_list(
     return targets
 
 
+# Apogee, perigee and the nodes are named only where they mean something (red
+# team finding 3). Speed at perigee exceeds speed at apogee by about twice the
+# eccentricity, so below 0.005 the difference is under 1 per cent; on a
+# station-kept GEO object (e = 0.00016) the two apsides are 13 km apart on a
+# 42,164 km orbit. A station-kept GEO object also holds its inclination to a
+# few hundredths of a degree, where the equatorial nodes move with the noise
+# in the element set. Below either bar the epoch is a time sample across the
+# next day, and is labelled as one. Both bars are tuned, not sourced.
+_APSIDES_NAMED_FROM_ECC: float = 0.005
+_NODES_NAMED_FROM_INC_DEG: float = 0.5
+_APSIDES = frozenset({"apogee", "perigee"})
+_NODES = frozenset({"asc_node", "desc_node"})
+
+
+def _shape_of(tle: str) -> tuple[float, float]:
+    """Eccentricity and inclination (degrees) of *tle*."""
+    # SLF001: the parsed record already held, not a second parse.
+    sat = TLEOrbit(tle)._sat  # noqa: SLF001
+    return float(sat.ecco), math.degrees(float(sat.inclo))
+
+
+def _sample_label(epoch: datetime, now: datetime) -> str:
+    return f"now +{(epoch - now).total_seconds() / 3600.0:.1f} h"
+
+
 def _compute_epochs(red_tle: str, now: datetime) -> list[tuple[str, datetime]]:
-    """Compute the sweep epochs for the red satellite."""
+    """Compute the sweep epochs for the red satellite.
+
+    Each is labelled by the event it was found at only where that event means
+    something for this orbit; otherwise by its time after now.
+    """
     epochs: list[tuple[str, datetime]] = [("now", now)]
+    ecc, inc_deg = _shape_of(red_tle)
 
     events = find_orbital_events(red_tle, now, now + timedelta(hours=24), max_per_type=1)
     for ev in events:
         loc = _EVENT_TO_LOCATION.get(ev.event_type)
-        if loc:
-            epochs.append((loc, ev.epoch))
+        if not loc:
+            continue
+        unnamed = (loc in _APSIDES and ecc < _APSIDES_NAMED_FROM_ECC) or (
+            loc in _NODES and inc_deg < _NODES_NAMED_FROM_INC_DEG)
+        epochs.append((_sample_label(ev.epoch, now) if unnamed else loc, ev.epoch))
 
     return epochs
+
+
+def _epoch_note(red_tle: str) -> str:
+    """Why some burn times carry no apsis or node name, or empty when all do."""
+    ecc, inc_deg = _shape_of(red_tle)
+    unnamed = []
+    if ecc < _APSIDES_NAMED_FROM_ECC:
+        unnamed.append(f"its eccentricity ({ecc:.4f}) is too small for apogee and perigee to differ meaningfully")
+    if inc_deg < _NODES_NAMED_FROM_INC_DEG:
+        unnamed.append(f"its inclination ({inc_deg:.2f}\u00b0) is too small for its nodes to be well defined")
+    if not unnamed:
+        return ""
+    return (
+        "Burn times are samples across the next day, not chosen points on the orbit: "
+        + " and ".join(unnamed) + ". The phase angle to the target is what differs between them."
+    )
+
+
+def _swept_target_tle(state: object, target: ThreatTarget) -> str | None:
+    """The element set a swept target was flown with, blue assets included."""
+    return _target_tle(state, target) or state.tle_of(target.target_name)  # type: ignore[attr-defined]
+
+
+def _phase_label(red_tle: str, target_tle: str | None, epoch: datetime) -> str:
+    """Where the target sits relative to the interceptor at the burn (SPC-004)."""
+    if not target_tle:
+        return ""
+    try:
+        red = TLEOrbit(red_tle).propagate(epoch)
+        target = TLEOrbit(target_tle).propagate(epoch)
+        angle = phase_angle_deg(red.r, red.v, target.r)
+    except TLE_ERRORS as exc:  # ValueError among them, which phase_angle_deg raises
+        logger.info("Phase angle not computed: %s", log_safe(exc))
+        return ""
+    side = "ahead of" if angle >= 0 else "behind"
+    return f"{abs(angle):.1f}\u00b0 {side} the interceptor"
+
+
+def _sweep_burn(burn: Burn, departure: bool) -> SweepBurn:
+    """One burn of a transfer in m/s (SPC-184): the departure's VNB parts, as departure_m_s, or a later burn's parts
+    in red's own radial, in-track and cross-track frame, read as prograde, normal and radial."""
+    if departure or burn.own_ric is None:
+        return SweepBurn(burn.epoch, from_km_s(burn.dv_prograde), from_km_s(burn.dv_normal), from_km_s(burn.dv_radial))
+    radial, in_track, cross = burn.own_ric
+    return SweepBurn(burn.epoch, from_km_s(in_track), from_km_s(cross), from_km_s(radial))
 
 
 # PLR0913, PLR0917: one parameter per column of the row it builds.
@@ -554,7 +721,13 @@ def _sol_to_entry(  # noqa: PLR0913, PLR0917
     dv_pro = 0.0
     dv_nor = 0.0
     dv_rad = 0.0
+    departure: tuple[float, float, float] | None = None
+    # Every burn at its own time, m/s, for a scenario opened from the sweep (SPC-184): burn 1 as the departure, and
+    # each later burn split in red's own frame at its state then, where the engine applies it.
+    transfer = tuple(_sweep_burn(b, k == 0) for k, b in enumerate(sol.burns))
     if sol.burns:
+        first = sol.burns[0]
+        departure = (from_km_s(first.dv_prograde), from_km_s(first.dv_normal), from_km_s(first.dv_radial))
         tof_s = (sol.arrival_epoch - sol.burns[0].epoch).total_seconds()
         tof_hours = tof_s / 3600.0
         for b in sol.burns:
@@ -575,6 +748,9 @@ def _sol_to_entry(  # noqa: PLR0913, PLR0917
         posture_label=classify_posture(
             from_km_s(abs(sol.total_delta_v)), regime, kind_for_method(method_name),
         ).posture_label,
+        arrives=arrives_at_target(method_name),
+        departure_m_s=departure,
+        transfer_m_s=transfer,
     )
 
 
@@ -676,29 +852,31 @@ def _sweep_all_methods(
     notes: dict[str, str] = refusals if refusals is not None else {}
     budget = request.max_dv_m_s
 
-    for location, epoch in epochs:
-        for name, solver, extra in _SWEEP_METHODS:
-            kwargs = dict(extra)
-            if name == "min_time":
-                kwargs["max_delta_v"] = to_km_s(budget)  # astro takes km/s
-            try:
-                sol = solver(
-                    red_tle=request.red_tle,
-                    blue_tle=request.target_tle,
-                    manoeuvre_start=epoch,
-                    **kwargs,
-                )
-                # plane_change can report a signed figure; cost is a magnitude.
-                cost_m_s = from_km_s(abs(sol.total_delta_v))
-                if cost_m_s <= budget:
-                    entries.append(_sol_to_entry(
-                        sol, request.target, epoch, location, name, request.regime,
-                    ))
-                else:
-                    notes.setdefault(name, f"at {location}: exceeds the {budget:g} m/s budget")
-            # BLE001: one refusal is recorded and the sweep continues.
-            except Exception as exc:  # noqa: BLE001
-                notes.setdefault(name, f"at {location}: {_refusal_reason(exc)}")
+    # The sweep decides arrival by method and shows no miss, so the solvers do not fly their burns for one.
+    with miss_not_read():
+        for location, epoch in epochs:
+            for name, solver, extra in _SWEEP_METHODS:
+                kwargs = dict(extra)
+                if name == "min_time":
+                    kwargs["max_delta_v"] = to_km_s(budget)  # astro takes km/s
+                try:
+                    sol = solver(
+                        red_tle=request.red_tle,
+                        blue_tle=request.target_tle,
+                        manoeuvre_start=epoch,
+                        **kwargs,
+                    )
+                    # plane_change can report a signed figure; cost is a magnitude.
+                    cost_m_s = from_km_s(abs(sol.total_delta_v))
+                    if cost_m_s <= budget:
+                        entries.append(_sol_to_entry(
+                            sol, request.target, epoch, location, name, request.regime,
+                        ))
+                    else:
+                        notes.setdefault(name, f"at {location}: exceeds the {budget:g} m/s budget")
+                # BLE001: one refusal is recorded and the sweep continues.
+                except Exception as exc:  # noqa: BLE001
+                    notes.setdefault(name, f"at {location}: {_refusal_reason(exc)}")
 
     # A method that solved at any epoch did produce a solution for this
     # target; listing it as refused contradicted the table beside it (F-125).
@@ -707,24 +885,34 @@ def _sweep_all_methods(
     return entries
 
 
-def _red_capability(red_satno: str | None) -> CapabilityEvidence:
+def _red_capability(
+    red_satno: str | None, history: PolAssessment | None = None, span_days: float | None = None,
+) -> CapabilityEvidence:
     """Assemble what is known about the red object's ability to act.
 
-    Reads the assessed intelligence record, which is already loaded and was
-    already being joined for display. Behavioural evidence (propellant budget,
-    anomaly score, manoeuvre count) comes from pattern-of-life analysis, which
-    needs an element-set history rather than the single current TLE the sweep
-    holds; those fields stay None here and the verdict reports them as missing
-    rather than assuming either way.
+    The assessed intelligence record, and, when the object's element-set
+    history is held, what its behaviour shows: propellant used, discretionary
+    reserve left, the behavioural anomaly score and the burns observed
+    (SPC-002). Without a history those stay None and the verdict lists them
+    as missing rather than assuming either way.
     """
-    if not red_satno:
-        return CapabilityEvidence()
-    record = get_intel(red_satno)
-    if not record:
-        return CapabilityEvidence()
-    return CapabilityEvidence(
+    record = get_intel(red_satno) if red_satno else None
+    base = CapabilityEvidence(
         intel_threat_level=record.get("threat_level"),
+        intel_record_dated=tu.record_date(record) is not None,
         operational_status=record.get("status"),
+    ) if record else CapabilityEvidence()
+    if history is None:
+        return base
+    propellant = history.propellant
+    return replace(
+        base,
+        propellant_used_pct=propellant.propellant_used_pct,
+        discretionary_remaining_m_s=propellant.discretionary_remaining_m_s,
+        discretionary_max_m_s=propellant.discretionary_max_m_s,
+        anomaly_score=history.anomaly.overall if history.anomaly else None,
+        manoeuvres_observed=len(history.manoeuvres),
+        history_span_days=span_days,
     )
 
 
@@ -753,10 +941,29 @@ def _burn_direction_breakdown(
     return (0.0, 0.0, 0.0, "Unknown")
 
 
+def worst_entry_index(entries: list[ThreatSweepEntry], max_dv_m_s: float) -> int | None:
+    """Where in *entries* the worst course of action sits, or ``None`` when nothing arrives.
+
+    Only a solution that reaches the target leaves a warning time to rank, and
+    the worst is the one that leaves the least. The worst case card names this
+    index so it can open a decision scenario from the entry (SPC-150). It
+    travels beside the worst-case dict in the page context, never inside it:
+    that dict is the legacy verdict pinned for the 20 bundled red objects.
+    """
+    arriving = [i for i, e in enumerate(entries) if e.arrives]
+    if not arriving:
+        return None
+    return min(
+        arriving,
+        key=lambda i: warning_time_rank(entries[i].delta_v_m_s, entries[i].tof_hours, max_dv_m_s),
+    )
+
+
 def _compute_worst_coa(
     entries: list[ThreatSweepEntry],
     capability: CapabilityEvidence | None = None,
     max_dv_m_s: float = DEFAULT_SWEEP_BUDGET_M_S,
+    context: ConfidenceContext | None = None,
 ) -> dict[str, Any] | None:
     """Identify and describe the most dangerous course of action from sweep entries.
 
@@ -770,16 +977,15 @@ def _compute_worst_coa(
     Without it the verdict is geometry alone, which is what this function used
     to be while calling itself an adversary capability assessment.
 
+    *context* is the red set's data mode and the red custody, which cap the
+    verdict's confidence and never move the verdict (SPC-160).
+
     Returns a Jinja-safe dict, or ``None`` if *entries* is empty.
     """
-    if not entries:
+    index = worst_entry_index(entries, max_dv_m_s)
+    if index is None:
         return None
-
-    # The entry that leaves the least warning time among the feasible ones.
-    worst = min(
-        entries,
-        key=lambda e: warning_time_rank(e.delta_v_m_s, e.tof_hours, max_dv_m_s),
-    )
+    worst = entries[index]
     dv = worst.delta_v_m_s
 
     assessment = assess_threat(
@@ -790,15 +996,13 @@ def _compute_worst_coa(
             regime=worst.regime,
         ),
         capability or CapabilityEvidence(),
+        context,
     )
     threat_level = assessment.verdict_label
     threat_color, threat_bg = _BAND_COLOURS.get(
         threat_level,
         ("var(--spectre-status-unknown)", "rgba(var(--spectre-status-unknown-rgb), 0.06)"),
     )
-
-    # One table of intent labels, shared with the intercept panel (audit F-241).
-    intent_label = intent_label_for(worst.method, "Intercept Manoeuvre")
 
     # Burn direction breakdown
     pro_pct, nor_pct, rad_pct, direction = _burn_direction_breakdown(
@@ -827,7 +1031,10 @@ def _compute_worst_coa(
         # beside it.
         "access_level": assessment.access_label,
         "capability_level": assessment.capability_label,
+        # What set capability MINIMAL, a declared status or a computed tank (SPC-167).
+        "incapacity": assessment.incapacity,
         "assessment_confidence": assessment.confidence,
+        "confidence_basis": assessment.confidence_basis,
         "assessment_rationale": assessment.rationale,
         "inputs_used": assessment.inputs_used,
         "inputs_missing": assessment.inputs_missing,
@@ -840,7 +1047,6 @@ def _compute_worst_coa(
         "target_name": worst.target.target_name,
         "target_satno": worst.target.target_satno or "",
         "method": worst.method,
-        "intent_label": intent_label,
         "dv": round(dv, 4),
         "tof_label": tof_label,
         "tof_hours": round(worst.tof_hours, 2),
@@ -874,7 +1080,7 @@ def _group_entries(entries: list[ThreatSweepEntry]) -> list[dict[str, Any]]:
 
     groups: list[dict[str, Any]] = []
     for items in buckets.values():
-        items.sort(key=lambda t: (t[1].tof_hours, t[1].delta_v_m_s))
+        items.sort(key=lambda t: (not t[1].arrives, t[1].tof_hours, t[1].delta_v_m_s))
         best = items[0][1]
         groups.append({
             "target": best.target,
@@ -883,6 +1089,7 @@ def _group_entries(entries: list[ThreatSweepEntry]) -> list[dict[str, Any]]:
             "best_method": best.method,
             "best_location": best.burn_location,
             "best_tof": best.tof_hours,
+            "best_arrives": best.arrives,
             "profile_count": len(items),
             "children": [{"flat_idx": idx, "entry": e} for idx, e in items],
             "osint": get_intel(best.target.target_satno or None),  # key stays 'osint' — threat_sweep.html reads group.osint
@@ -942,33 +1149,127 @@ def _regime_of_tle(tle: str) -> str:
         return ""
 
 
-def _build_actor_list(state: object, asset_regime: str) -> list[ThreatActor]:
-    """Candidate threat actors for an asset in *asset_regime*.
+def _catalogue_index() -> dict[str, dict[str, Any]]:
+    """The UDL on-orbit catalogue keyed by catalogue number; empty before it loads.
 
-    Red HRR objects whose regime could physically reach the asset's. The filter
-    is ``regimes_compatible`` rather than equality on purpose: a GTO or HEO
-    object crosses both the LEO and GEO belts, so excluding it would be a false
-    negative on exactly the case worth catching.
+    Both spellings of the number are read, satNo and satno, so a change of key
+    shape cannot quietly switch the type test off.
     """
-    actors: list[ThreatActor] = []
-    for obj in state.hrr_objects:  # type: ignore[attr-defined]
-        country = str(obj.get("country") or "").strip().upper()
-        if country not in _RED_COUNTRIES:
-            continue
-        satno = str(obj.get("satno") or "").strip()
-        if not satno:
-            continue
-        obj_regime = normalise_regime(str(obj.get("orbit_regime") or ""))
-        if asset_regime and obj_regime and not regimes_compatible(asset_regime, obj_regime):
-            continue
-        actors.append(ThreatActor(
-            actor_name=str(obj.get("name") or satno).strip(),
-            actor_satno=satno,
-            country=country,
-            hrr_rank=obj.get("rank"),
-            regime=obj_regime,
-        ))
-    return actors
+    from spectre.web.planning_state import get_onorbit_catalog
+
+    index: dict[str, dict[str, Any]] = {}
+    for rec in get_onorbit_catalog():
+        satno = str(rec.get("satNo") or rec.get("satno") or "").strip()
+        if satno:
+            index[satno] = rec
+    return index
+
+
+def _red_in_reach(obj: dict[str, Any], asset_regime: str) -> ThreatActor | None:
+    """*obj* as a candidate actor: a red HRR object with a number, in a regime that could reach *asset_regime*."""
+    country = str(obj.get("country") or "").strip().upper()
+    satno = str(obj.get("satno") or "").strip()
+    if country not in _RED_COUNTRIES or not satno:
+        return None
+    obj_regime = normalise_regime(str(obj.get("orbit_regime") or ""))
+    if asset_regime and obj_regime and not regimes_compatible(asset_regime, obj_regime):
+        return None
+    return ThreatActor(
+        actor_name=str(obj.get("name") or satno).strip(),
+        actor_satno=satno,
+        country=country,
+        hrr_rank=obj.get("rank"),
+        regime=obj_regime,
+    )
+
+
+def _actors_in_reach(state: object, asset_regime: str) -> list[ThreatActor]:
+    """Candidate threat actors for an asset in *asset_regime*: red HRR objects whose regime could physically reach it.
+
+    The filter is ``regimes_compatible`` rather than equality on purpose: a GTO
+    or HEO object crosses both the LEO and GEO belts, so excluding it would be
+    a false negative on exactly the case worth catching.
+    """
+    found = (_red_in_reach(obj, asset_regime) for obj in state.hrr_objects)  # type: ignore[attr-defined]
+    return [actor for actor in found if actor is not None]
+
+
+def _judge_actors(
+    state: object, actors: list[ThreatActor], this_year: int, catalogue: dict[str, dict[str, Any]], *, read_sets: bool,
+) -> tuple[list[ThreatActor], list[tuple[ThreatActor, Exclusion]]]:
+    """Of *actors*, those that can still act, and who was left out and why.
+
+    Only payloads that can still act are actors
+    (``spectre.domain.actor_eligibility``): rocket bodies, debris, decayed
+    objects and payloads past their working life in *this_year* come back as
+    exclusions, each with its reason, so the page can name them. *catalogue* is
+    the UDL on-orbit catalogue by number, read once per screen. With
+    *read_sets* each is judged on the element set held for it now, in its data
+    mode, which is the set it is screened on once the screen has refreshed it
+    (SPC-239); without, on its catalogue entry, name and intelligence record
+    alone, which leaves out only what no element set could bring back in.
+    """
+    kept: list[ThreatActor] = []
+    excluded: list[tuple[ThreatActor, Exclusion]] = []
+    modes = state.hrr_tle_data_mode  # type: ignore[attr-defined]
+    for actor in actors:
+        satno = actor.actor_satno
+        tle = _resolve_hrr_tle(state, satno) if read_sets else None
+        reason = why_not_an_actor(
+            actor.actor_name, catalogue.get(satno), tle, get_intel(satno), this_year,
+            tle_data_mode=str(modes.get(satno, "REAL")),
+        )
+        if reason is None:
+            kept.append(actor)
+        else:
+            excluded.append((actor, reason))
+    return kept, excluded
+
+
+class _Walk(NamedTuple):
+    """What walking the payloads to the cap found: those kept, those cut by age, each failed fetch's note by number,
+    how many were not reached, and each live set taken over newer refused ones, its sentence by number (SPC-243)."""
+
+    kept: list[ThreatActor]
+    aged: list[tuple[ThreatActor, Exclusion]]
+    refreshed: dict[str, str]
+    unreached: int
+    passed_over: dict[str, str] = {}
+
+
+async def _walk_to_cap(
+    state: object, able: list[ThreatActor], this_year: int, catalogue: dict[str, dict[str, Any]],
+) -> _Walk:
+    """Fetch and judge *able* in watchlist order, a batch of the slots still free at a time, until _MAX_SCREEN_ACTORS
+    are kept after the age check, and stop (V0.41 review): the fetches are those the cap needs, not one per payload."""
+    kept: list[ThreatActor] = []
+    aged: list[tuple[ThreatActor, Exclusion]] = []
+    refreshed: dict[str, str] = {}
+    passed_over: dict[str, str] = {}
+    pending = list(able)
+    while pending and len(kept) < _MAX_SCREEN_ACTORS:
+        room = _MAX_SCREEN_ACTORS - len(kept)
+        batch, pending = pending[:room], pending[room:]
+        outcomes = await _refresh_outcomes(state, batch)
+        refreshed.update(outcomes.failed)
+        passed_over.update(outcomes.passed_over)
+        batch_kept, batch_aged = _judge_actors(state, batch, this_year, catalogue, read_sets=True)
+        kept += batch_kept
+        aged += batch_aged
+    return _Walk(kept, aged, refreshed, len(pending), passed_over)
+
+
+def _exclusion_note(excluded: list[tuple[str, Exclusion]]) -> str:
+    """One sentence naming each object left out of the screen and why, with the working-life assumption."""
+    by_kind: dict[str, list[str]] = {}
+    for name, reason in excluded:
+        by_kind.setdefault(reason.kind, []).append(f"{name} ({reason.detail})")
+    parts = [f"{len(names)} {kind}: {', '.join(names)}" for kind, names in sorted(by_kind.items())]
+    return (
+        f"Not screened, as not able to act: {'; '.join(parts)}. A payload is taken to be past its working life "
+        f"{WORKING_LIFE_YEARS} years after launch, an assumption, unless the intelligence record holds it as "
+        "operational or degraded."
+    )
 
 
 # PLR0913, PLR0917: the inputs of one actor's assessment.
@@ -1007,8 +1308,11 @@ def _screen_one_actor(  # noqa: PLR0913, PLR0917
     if not entries:
         return (None, [])
 
+    arriving = [e for e in entries if e.arrives]
+    if not arriving:
+        return (None, entries)
     best = min(
-        entries,
+        arriving,
         key=lambda e: warning_time_rank(e.delta_v_m_s, e.tof_hours, budget_m_s),
     )
     assessment = assess_threat(
@@ -1067,6 +1371,10 @@ def _parse_target_group(tgt_group: str) -> _TargetGroup:
     )
 
 
+#: What became of a refused manual red element set: the sweep flies the registered one instead.
+_MANUAL_RED_REFUSED = "It was not stored; the registered element set is used instead."
+
+
 def _validate_manual_red_tle(raw: str, errors: list[str]) -> str | None:
     """Accept a pasted red element set, or record why it was rejected.
 
@@ -1076,11 +1384,10 @@ def _validate_manual_red_tle(raw: str, errors: list[str]) -> str | None:
     """
     if not raw:
         return None
-    try:
-        TLEOrbit(raw)  # validate
-    # BLE001: operator input, reported not raised.
-    except Exception as exc:  # noqa: BLE001
-        errors.append(f"Manual red TLE invalid ({exc}) — using registered TLE instead.")
+    # The one acceptance check every ingest path runs (SPC-201).
+    refusal = refused("the manual red track", raw, outcome=_MANUAL_RED_REFUSED)
+    if refusal is not None:
+        errors.append(refusal)
         return None
     return raw
 
@@ -1099,8 +1406,9 @@ def _append_manual_targets(
         name = manual["name"]
         tle = manual["tle"]
         confidence = manual.get("confidence", "")
-        # satno_from_tle answers None for a number it cannot read (Alpha-5,
-        # for one); str() made that "None", which then looked fetchable.
+        # satno_from_tle answers None for a number it cannot read (a letter
+        # that is not Alpha-5, for one); str() made that "None", which then
+        # looked fetchable.
         number = satno_from_tle(tle) if tle else None
         satno = str(number) if number is not None else ""
         targets.append(ThreatTarget(
@@ -1185,10 +1493,15 @@ async def _fetch_missing_target_tles(
                 data_mode=state.udl_data_mode or "REAL",  # type: ignore[attr-defined]
                 source=state.udl_tle_source,  # type: ignore[attr-defined]
             )
-            if _result:
-                tle, dm = _result
-                state.hrr_tle_cache[t.target_satno] = tle  # type: ignore[attr-defined]
-                state.hrr_tle_data_mode[t.target_satno] = dm  # type: ignore[attr-defined]
+            if isinstance(_result, RefusedElset):
+                errors.append(_result.sentence(f"{t.target_name} ({t.target_satno})"))
+            elif _result:
+                state.hrr_tle_cache[t.target_satno] = _result.tle  # type: ignore[attr-defined]
+                state.hrr_tle_data_mode[t.target_satno] = _result.data_mode  # type: ignore[attr-defined]
+                # A newer set the check refused before this one was taken is named with the sweep's notes (SPC-243).
+                passed_over = _result.passed_over_note(f"{t.target_name} ({t.target_satno})")
+                if passed_over:
+                    errors.append(passed_over)
             else:
                 errors.append(f"TLE fetch failed for {t.target_name} ({t.target_satno})")
 
@@ -1201,13 +1514,19 @@ async def _fetch_missing_target_tles(
     )
 
 
-def _reduce_tle_clusters(state: object) -> Any | None:
-    """Reduce multi-provider element sets to one representative per object.
+def _cluster_tle_sets(state: object) -> tuple[dict[str, str], Any, dict[str, str]] | None:
+    """Cluster the multi-provider element sets, on a worker thread; write nothing.
 
-    Returns the clustering summary for display, or None when there was
-    nothing to cluster. The cache update stays inside the try: a summary
-    computed before a failed update is still the summary that was computed,
-    and reporting None there would understate what the sweep actually ran on.
+    Returns the representatives, the clustering summary and the cache as it
+    stood when the work began, or None when there was nothing to cluster or
+    the clustering failed (logged: clustering is an optimisation, never a gate).
+
+    It works on copies taken before the long work starts. The loop goes on
+    serving the same sign-in meanwhile, and a target fetch clears and refills
+    the multi-provider set. Iterated in place, the set changed size under the
+    clustering, which then failed as a whole and the sweep went ahead
+    unreduced with only a warning in the log (SPC-073). Copying a dict is one
+    step under the GIL, so each copy is consistent.
     """
     # Imported before the guard, as they were when this sat inline in the
     # handler: the sweep resolved these names on every request, whether or
@@ -1217,21 +1536,39 @@ def _reduce_tle_clusters(state: object) -> Any | None:
 
     if not state.hrr_tle_multiset:  # type: ignore[attr-defined]
         return None
-
-    clustering_summary = None
+    multiset = dict(state.hrr_tle_multiset)  # type: ignore[attr-defined]
+    cache = dict(state.hrr_tle_cache)  # type: ignore[attr-defined]
     try:
-        reduced, clustering_summary = cluster_and_reduce_tle_cache(
-            state.hrr_tle_multiset,  # type: ignore[attr-defined]
-            state.hrr_tle_cache,  # type: ignore[attr-defined]
-            TLE_CLUSTERING,
-        )
-        state.hrr_tle_cache.update(reduced)  # type: ignore[attr-defined]
+        reduced, summary = cluster_and_reduce_tle_cache(multiset, cache, TLE_CLUSTERING)
     # BLE001: clustering is an optimisation, never a gate.
     except Exception as _cl_exc:  # noqa: BLE001
         logger.warning(
             "TLE clustering step failed: %s, proceeding without reduction", log_safe(_cl_exc),
         )
-    return clustering_summary
+        return None
+    return reduced, summary, cache
+
+
+async def _reduce_tle_clusters(state: object) -> Any | None:
+    """Reduce multi-provider element sets to one representative per object.
+
+    The clustering runs off the event loop (audit F-235); its result is
+    written back here, on the loop. Returns the clustering summary for
+    display, or None when there was nothing to cluster.
+
+    A target fetch for the same sign-in can land while the clustering runs,
+    and what it wrote is newer than the history the clustering worked from. A
+    representative is written only over the entry the clustering started
+    from, so the fetch's element set stands (SPC-073). The check and the write
+    have no await between them, so nothing on the loop comes between them.
+    """
+    clustered = await asyncio.get_running_loop().run_in_executor(None, _cluster_tle_sets, state)
+    if clustered is None:
+        return None
+    reduced, summary, started_from = clustered
+    live = state.hrr_tle_cache  # type: ignore[attr-defined]
+    live.update({satno: tle for satno, tle in reduced.items() if live.get(satno) == started_from.get(satno)})
+    return summary
 
 
 # PLR0913, PLR0917: the inputs of one pass over the sweep's target list.
@@ -1327,26 +1664,89 @@ def _red_track_mode(state: object, red_sat: str, red_satno: str | None) -> str:
     object up in the target cache instead, so a hand-entered red set read as
     REAL whenever the same object was also an HRR target.
     """
-    for track in state.red_tracks:  # type: ignore[attr-defined]
-        if track.stk_name == red_sat:
-            return str(track.data_mode)
-    return str(state.hrr_tle_data_mode.get(red_satno or "", "REAL"))  # type: ignore[attr-defined]
+    recorded = _red_recorded_mode(state, red_sat, red_satno)
+    return "REAL" if recorded is None else recorded
 
 
-def _elset_ages(state: object, red_tle: str, grouped: list[dict[str, Any]], now: datetime) -> dict[str, Any]:
-    """The interceptor's element set age and the swept targets', stale ones named."""
-    targets = []
-    for group in grouped:
-        tle = _target_tle(state, group["target"])
+def _red_confidence_context(
+    state: object, red: tuple[str, str | None], stated: str | None, custody: CustodyStatus,
+) -> ConfidenceContext:
+    """What caps the worst case's confidence: the red set's mode, the operator's stated confidence and custody.
+
+    *red* is the red object's name and catalogue number. *stated* is the
+    operator's stated confidence in a pasted set, which the form always
+    supplies, and None when the set was not pasted in.
+    """
+    if stated is None:
+        return ConfidenceContext(data_mode=_red_recorded_mode(state, *red), custody=custody.state)
+    return ConfidenceContext(data_mode="MANUAL", custody=custody.state, manual_confidence=stated)
+
+
+def _red_recorded_mode(state: object, red_sat: str, red_satno: str | None) -> str | None:
+    """The red set's data mode as recorded, or None when nothing recorded one.
+
+    Confidence reads an unrecorded mode as UNKNOWN, not REAL (concept 6.2,
+    SPC-160); the provenance banner's REAL default is a later item's.
+    """
+    track = _red_track(state, red_sat)
+    if track is not None:
+        return str(track.data_mode)
+    mode = state.hrr_tle_data_mode.get(red_satno or "")  # type: ignore[attr-defined]
+    return None if mode is None else str(mode)
+
+
+def _red_track(state: object, red_sat: str) -> RedTrack | None:
+    """The session's red track called *red_sat*, or None."""
+    return next((t for t in state.red_tracks if t.stk_name == red_sat), None)  # type: ignore[attr-defined]
+
+
+def _red_track_source(state: object, red_sat: str, flown_tle: str) -> str:
+    """The UDL provider of the red track's element set, or empty when none is recorded or another set was flown.
+
+    A set pasted into the sweep overrides the track's, and came from no UDL provider, so it is never given one.
+    """
+    track = _red_track(state, red_sat)
+    if track is None or track.tle.strip() != flown_tle.strip():
+        return ""
+    return track.elset_source
+
+
+def _set_age_words(age: ElsetAge | None) -> str:
+    """An element set's age as the delta-V band's sentence says it: "5 h old", "dated 2.0 d in the future", never 0 h
+    for a set dated after now (SPC-226), or "of unknown age"."""
+    if age is None:
+        return "of unknown age"
+    return f"dated {age.label}" if age.future else f"{age_text(age.hours)} old"
+
+
+def _stale_name(name: str, age: ElsetAge) -> str:
+    """A stale target as the sweep names it: with its regime and whose limit it is past."""
+    return f"{name} ({age.regime_line})" if age.regime_line else name
+
+
+def _elset_ages(red_tle: str, basis: _SweepBasis, now: datetime) -> dict[str, Any]:
+    """The interceptor's element set age and that of every target flown, stale ones named.
+
+    Every target the runner flew, not only those that produced an approach: a stale set can be why nothing reached
+    a target, and listing ages only beside solutions hid it exactly then (charming-dirac 03b7507). A target the
+    runner skipped, for a regime mismatch or for want of a set, was never flown, so it is not aged.
+    """
+    targets: list[tuple[str, ElsetAge]] = []
+    future: list[tuple[str, ElsetAge]] = []
+    for target in basis.targets:
+        tle = None if _not_flown(basis, target) else _flown_tle(basis, target)
         age = elset_age(tle, now) if tle else None
         if age is not None:
-            targets.append((group["target"].target_name, age))
+            # A set dated in the future has no age to range over: it is named apart, never as 0 h (SPC-226).
+            (future if age.future else targets).append((target.target_name, age))
     return {
         "red": elset_age(red_tle, now),
         "newest": min(targets, key=lambda t: t[1].hours)[1] if targets else None,
         "oldest": max(targets, key=lambda t: t[1].hours)[1] if targets else None,
-        "stale": [name for name, age in targets if age.stale],
+        # Each stale target named with its regime and whose limit it is past (SPC-215, V0.40 review).
+        "stale": [_stale_name(name, age) for name, age in targets if age.stale],
         "count": len(targets),
+        "future": [f"{name} (dated {age.label})" for name, age in future],
     }
 
 
@@ -1364,6 +1764,1130 @@ def _provenance_warnings(subjects: list[tuple[str, str]]) -> list[str]:
     return [f"{mode}: {', '.join(labels)}" for mode, labels in sorted(by_mode.items())]
 
 
+# ── The red object's own history (SPC-001, SPC-009) ─────────────────────────
+
+#: How long the sweep waits for the red object's history once its own work is
+#: done. A first fetch of a long-lived object can take longer; it carries on
+#: in the background and is held for the next sweep.
+_HISTORY_WAIT_S: float = 20.0
+# Fetches still running after a sweep answered. Held here so the event loop
+# keeps a reference to each until it finishes.
+_HISTORY_TASKS: set[asyncio.Task[HeldHistory]] = set()
+
+
+def _start_red_history(state: object, red_satno: str | None, now: datetime) -> asyncio.Task[HeldHistory] | None:
+    """Start fetching the red object's history, to run alongside the sweep."""
+    if not red_satno:
+        return None
+    task = asyncio.create_task(held_history(state, int(red_satno), now))
+    _HISTORY_TASKS.add(task)
+    task.add_done_callback(_HISTORY_TASKS.discard)
+    return task
+
+
+class _RedHistory(NamedTuple):
+    """What the red object's history said, or why it said nothing."""
+
+    pol: Any | None
+    assessment: PolAssessment | None
+    normality: BurnNormality | None
+    problem: str
+    fetched_at: datetime | None
+
+
+async def _settle_red_history(
+    state: object, task: asyncio.Task[HeldHistory] | None, red_satno: str | None,
+) -> _RedHistory:
+    """Wait a bounded time for the red object's history, then interpret it."""
+    if task is None or red_satno is None:
+        return _RedHistory(None, None, None, "The interceptor has no catalogue number to fetch a history for.", None)
+    try:
+        held = await asyncio.wait_for(asyncio.shield(task), timeout=_HISTORY_WAIT_S)
+    except TimeoutError:
+        return _RedHistory(
+            None, None, None, "Its element-set history is still loading from UDL; the next sweep will use it.", None,
+        )
+    if held.pol is None:
+        return _RedHistory(None, None, None, held.problem, held.fetched_at)
+    loop = asyncio.get_running_loop()
+    reset = reserve_reset_for(state, int(red_satno))
+    assessment, normality = await loop.run_in_executor(None, history_evidence, held.pol, reset)
+    return _RedHistory(held.pol, assessment, normality, "", held.fetched_at)
+
+
+def _red_custody(red_tle: str, history: _RedHistory, now: datetime) -> CustodyStatus:
+    """Whether the interceptor is in custody: its orbit's age and its history (SPC-018), by the shared rule."""
+    return custody_from_history(
+        red_tle, now, pol=history.pol, normality=history.normality, problem=history.problem,
+    )
+
+
+def _behaviour_label(history: _RedHistory) -> str:
+    """What the worst case card says about behaviour, in place of the solver's name.
+
+    It said "Close-Proximity Operation" whenever Lambert won the delta-V
+    comparison: the solver's name in different words, read as an inference
+    about the adversary (red team finding 4). Behaviour comes from the
+    object's own history now, or the card says it is not judged (SPC-003).
+    """
+    if history.normality is not None:
+        return f"Behaviour: {history.normality.verdict.value} for this object"
+    if history.pol is not None:
+        return "Behaviour: no confirmed burns in its history"
+    return "Behaviour not judged: no element-set history"
+
+
+def _red_capability_from(red_satno: str | None, history: _RedHistory) -> CapabilityEvidence:
+    """The capability evidence, with the behaviour the held history shows."""
+    return _red_capability(red_satno, history.assessment, history.pol.span_days if history.pol else None)
+
+
+def _red_evidence(red_satno: str | None, history: _RedHistory, custody: CustodyStatus,
+                  held: interaction_store.HeldInteractions | None = None) -> HeldObject | None:
+    """What the sweep holds about the red object, for Threat Understanding (SPC-165), or None with no number.
+
+    Its intel record, its GCAT entry if the catalogue is already cached, its
+    element-set history if one arrived, with the history read once, and the
+    approaches the session holds for it (SPC-172, SPC-173). No new fetch is
+    made for any of them.
+    """
+    return _held_object(red_satno, history, custody.state, held) if red_satno else None
+
+
+def _held_object(satno: str, history: _RedHistory, custody: Custody,
+                 held: interaction_store.HeldInteractions | None = None) -> HeldObject:
+    """What the sweep holds about *satno*: its record, its cached GCAT row, its history and its approaches."""
+    signals = (tu.history_signals(history.pol, history.assessment)
+               if history.pol is not None and history.assessment is not None else None)
+    interactions = held or interaction_store.HeldInteractions()
+    return HeldObject(satno=satno, record=get_intel(satno), catalogue=catalogue_entry(satno), signals=signals,
+                      custody=custody, interactions=interactions.edges, notes=interactions.notes,
+                      seed_paths=interactions.paths)
+
+
+class _Red(NamedTuple):
+    """The red object as the sweep holds it once its history has settled."""
+
+    satno: str | None
+    tle: str
+    regime: str
+    history: _RedHistory
+    custody: CustodyStatus
+    context: ConfidenceContext
+    #: The approaches the session holds for it, each attributed to a burn of its own (SPC-172, SPC-173).
+    interactions: tuple[ig.Edge | ig.MissEdge, ...] = ()
+    #: What the ledger states about them: refusals, the UDL probe grade, the seed list (SPC-173, SPC-174).
+    notes: tuple[str, ...] = ()
+    #: Its paths to hostile seeds through the edges the session holds (SPC-174).
+    paths: tuple[ig.SeedPath, ...] = ()
+
+    @property
+    def held(self) -> interaction_store.HeldInteractions:
+        return interaction_store.HeldInteractions(edges=self.interactions, paths=self.paths, notes=self.notes)
+
+
+def _red_understanding(red: _Red, worst_coa: dict[str, Any] | None, now: datetime) -> tu.ThreatUnderstanding | None:
+    """The Threat Understanding behind the worst case: the range the evidence earns and how well founded it is.
+
+    ACCESS and the legacy verdict are the worst case's own, so the model sits
+    beside the verdict the operator already reads. It moves nothing but
+    decide-by (SPC-167): the verdict switch is SPC-175. A failure is logged
+    and reads as no understanding, so the sweep stands and decide-by is
+    shown, the safer of its two answers; the detail never reaches the page.
+    """
+    if worst_coa is None:
+        return None
+    try:
+        return _assess_red(red, worst_coa, now)
+    # BLE001: the shadow model must never take the sweep down with it.
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Threat Understanding failed for %s: %s", log_safe(red.satno), log_safe(exc))
+        return None
+
+
+def _assess_red(red: _Red, worst_coa: dict[str, Any], now: datetime) -> tu.ThreatUnderstanding:
+    """The model over what the sweep holds about *red*, against the worst case's ACCESS.
+
+    "No burns" is judged against what the worst case costs.
+    """
+    held = _red_evidence(red.satno, red.history, red.custody, red.held)
+    items = held.items(now, red.regime, float(worst_coa["dv"])) if held is not None else ()
+    age = elset_age(red.tle, now)
+    assessed = worst_coa["capability_level"] != "UNASSESSED"
+    situation = tu.Situation(
+        now=now, access=Band[worst_coa["access_level"]],
+        legacy=Band[worst_coa["threat_level"]] if assessed else None,
+        custody=red.custody.state, history_truncated=False, regime=red.regime,
+        elset_limit_hours=age.limit_hours if age is not None else limit_hours_for_regime(red.regime),
+        data_mode=red.context.data_mode, manual_confidence=red.context.manual_confidence,
+    )
+    return tu.assess(items, held.situate(situation) if held is not None else situation, with_cues=True)
+
+
+def _red_object_view(state: object, satno: str | None, tle: str, data_mode: str | None,
+                     now: datetime) -> dict[str, Any] | None:
+    """The red track's understanding for its intel card (SPC-168), from what is held: nothing is fetched.
+
+    The history is the one the sweep holds for it, if any; custody is judged
+    by the sweep's own rule, so the card's strip matches the sweep's.
+    """
+    if not satno:
+        return None
+    history, custody = _cached_history(state, satno, tle, now)
+    regime = history.pol.regime if history.pol is not None else _regime_of_tle(tle)
+    held = interaction_store.held_interactions(state, satno, now)
+    return object_view(_held_object(satno, history, custody.state, held), now, regime=regime, data_mode=data_mode)
+
+
+_NO_HISTORY_HELD = "No element-set history is held."
+
+
+def _cached_history(state: object, satno: str, tle: str, now: datetime) -> tuple[_RedHistory, CustodyStatus]:
+    """The object's history if one is already held, read once, and its custody by the sweep's rule.
+
+    Only what Pattern of Life or a sweep has already cached is read; nothing
+    is fetched, so a panel that shows understanding costs UDL nothing.
+    """
+    held = state.elset_histories.get(int(satno)) if satno.isdigit() else None  # type: ignore[attr-defined]
+    pol = held.pol if held is not None else None
+    assessment, normality = history_evidence(pol, reserve_reset_for(state, int(satno))) if pol else (None, None)
+    history = _RedHistory(pol, assessment, normality, "" if pol else _NO_HISTORY_HELD, None)
+    return history, custody_from_history(tle, now, pol=pol, normality=normality, problem=history.problem)
+
+
+def _actor_range(state: object, verdict: ActorVerdict, regime: str, actor_tle: str,
+                 now: datetime) -> ActorRange | None:
+    """One screened actor's Threat range and Understanding (SPC-169, in shadow), from what is cached.
+
+    The actor's own verdict supplies ACCESS and the legacy reading, so the
+    range sits beside the verdict the column already shows. An actor with no
+    cached history reads "no history held", and its first cue is to pull it.
+    """
+    satno = verdict.actor_satno
+    history, custody = _cached_history(state, satno, actor_tle, now)
+    mode = state.hrr_tle_data_mode.get(satno)  # type: ignore[attr-defined]
+    interactions = interaction_store.held_interactions(state, satno, now)
+    red = _Red(satno, actor_tle, regime, history, custody, ConfidenceContext(data_mode=mode, custody=custody.state),
+               interactions.edges, interactions.notes, interactions.paths)
+    assessment = verdict.assessment
+    worst = {"dv": verdict.delta_v_m_s, "access_level": assessment.access_label,
+             "threat_level": assessment.verdict_label, "capability_level": assessment.capability_label}
+    understanding = _red_understanding(red, worst, now)
+    if understanding is None:
+        return None
+    span, rating, held = understanding.range, understanding.understanding, history.pol is not None
+    # With no history held, the cue named is to pull it (section 7.2); otherwise the most steps per hour
+    # among the cues SPECTRE can read the result of.
+    cue = next((c for c in understanding.cues if c.fed and (held or c.observation == tu.PULL_HISTORY)), None)
+    return ActorRange(
+        floor=span.floor, ceiling=span.ceiling, understanding=rating.level.name, history_held=held,
+        at_ceiling=understanding.verdict.at_ceiling, statement=rating.statement,
+        cue=tu.cue_text(cue) if cue is not None else "",
+    )
+
+
+def _understanding_view(understanding: tu.ThreatUnderstanding, notes: Sequence[str] = ()) -> dict[str, Any]:
+    """Section 6.4 on the sweep, in shadow: the view every panel shares, with an intercept in view."""
+    return understanding_view(understanding, notes=notes)
+
+
+def _with_understanding(
+    worst_coa: dict[str, Any] | None, understanding: tu.ThreatUnderstanding | None, notes: Sequence[str] = (),
+) -> dict[str, Any] | None:
+    """The worst case with the Threat Understanding beside it (SPC-166); every other key is left as it was.
+
+    *notes* are what its ledger states about the red object's interactions (SPC-173, SPC-174).
+    """
+    if worst_coa is not None and understanding is not None:
+        worst_coa["understanding"] = _understanding_view(understanding, notes)
+    return worst_coa
+
+
+def _verdict_switch_on() -> bool:
+    """Whether the deployment has turned the verdict switch on (SPC-175); off unless set, and no shipped file sets it."""
+    return get_settings().threat_verdict_switch
+
+
+def _with_verdict_switch(
+    worst_coa: dict[str, Any] | None, understanding: tu.ThreatUnderstanding | None, *, switch_on: bool,
+) -> dict[str, Any] | None:
+    """The worst case with concept section 4.8's verdict shown, when the switch is on (SPC-175).
+
+    Off, or with no Threat Understanding, the worst case is returned exactly as
+    it was, so the pinned legacy verdicts hold. On, the verdict word and its
+    colours are the new band; the current rule's band and the reason in one
+    line are carried beside it, and every other key is left as it was.
+    """
+    if worst_coa is None or understanding is None or not switch_on:
+        return worst_coa
+    span = understanding.range
+    reading = read_verdict(Band[worst_coa["threat_level"]], Band[worst_coa["access_level"]],
+                           (span.floor, span.ceiling), understanding.understanding.level.name)
+    worst_coa["threat_color"], worst_coa["threat_bg"] = _BAND_COLOURS[reading.new.label]
+    worst_coa.update(threat_level=reading.new.label, legacy_threat_level=reading.old.label,
+                     verdict_reason=reading.reason)
+    return worst_coa
+
+
+def _switched_actor(verdict: ActorVerdict, *, switch_on: bool) -> ActorVerdict:
+    """One screened actor with concept section 4.8's verdict, when the switch is on and its range was read."""
+    span = verdict.understanding
+    if span is None or not switch_on:
+        return verdict
+    reading = read_verdict(verdict.assessment.verdict, verdict.assessment.access, (span.floor, span.ceiling),
+                           span.understanding)
+    return replace(verdict, switched=reading)
+
+
+def _worst_coa_in_context(
+    state: object, entries: list[ThreatSweepEntry], evidence: tuple[CapabilityEvidence, ConfidenceContext],
+    max_dv_m_s: float, red: tuple[_RedHistory, str],
+) -> dict[str, Any] | None:
+    """The worst course of action, with its behaviour label and phase angle.
+
+    *evidence* is the interceptor's capability and what bears on the
+    confidence in it. *red* is the interceptor's history and element set.
+    *entries* is sorted on the same warning-time key the worst case is
+    chosen by, so its first entry is the worst.
+    """
+    capability, context = evidence
+    worst = _compute_worst_coa(entries, capability, max_dv_m_s, context)
+    if worst is None:
+        return None
+    history, red_tle = red
+    worst["behaviour_label"] = _behaviour_label(history)
+    worst["phase_label"] = _phase_label(
+        red_tle, _swept_target_tle(state, entries[0].target), entries[0].burn_epoch,
+    )
+    return worst
+
+
+def _red_history_view(history: _RedHistory, custody: CustodyStatus) -> dict[str, Any]:
+    """The sweep's custody and is-this-normal section."""
+    problem = history.problem
+    if not problem and history.normality is None:
+        problem = "No confirmed burns in its element-set history."
+    return {
+        "custody": custody,
+        "normality": history.normality,
+        "problem": problem,
+        "elsets": history.pol.tle_count if history.pol else 0,
+        "span_days": history.pol.span_days if history.pol else 0.0,
+        "fetched_at": history.fetched_at,
+    }
+
+
+# ── What the burn changed (SPC-006, SPC-007) ─────────────────────────────────
+#
+# The operator's second question: how long have I got, and how did that burn
+# change it? Warning before and after is flown, not remembered: the orbit just
+# before the burn and the orbit the sweep flew, against the same targets and
+# their same element sets, at the same moment. So the change needs no earlier
+# sweep, and the after figure is the worst case card's own.
+
+
+def _utc_now() -> datetime:
+    """The sweep's clock, a seam so tests can stand at a chosen moment."""
+    return datetime.now(tz=UTC)
+
+
+class _FrozenTargets(NamedTuple):
+    """The swept targets' element sets, copied once after clustering.
+
+    Every run of one sweep flies these, so a set refreshed mid-sweep cannot
+    make the before and after figures fly different targets. It stands in for
+    the session state in ``_run_target_sweep``, which reads only this cache.
+    """
+
+    hrr_tle_cache: dict[str, str]
+
+
+class _SweepBasis(NamedTuple):
+    """What every run of one sweep holds constant."""
+
+    targets: list[ThreatTarget]
+    manual_tle_by_name: dict[str, str]
+    frozen: _FrozenTargets
+    red_regime: str
+    max_dv_m_s: float
+    blue_satnos: frozenset[str]
+    now: datetime
+
+
+# PLR0913: one argument per thing the runs hold constant, all named at the call.
+def _sweep_basis(  # noqa: PLR0913
+    state: object, targets: list[ThreatTarget], *, manual: dict[str, str], red_regime: str,
+    max_dv_m_s: float, now: datetime,
+) -> _SweepBasis:
+    """Freeze the swept targets' element sets and the rest of what every run holds constant."""
+    cache = state.hrr_tle_cache  # type: ignore[attr-defined]
+    hrr_objects = state.hrr_objects  # type: ignore[attr-defined]
+    return _SweepBasis(
+        targets=list(targets),
+        manual_tle_by_name=dict(manual),
+        frozen=_FrozenTargets({t.target_satno: cache[t.target_satno] for t in targets if t.target_satno in cache}),
+        red_regime=red_regime,
+        max_dv_m_s=max_dv_m_s,
+        # A blue object with no number adds nothing: "" would make every unnumbered target "yours".
+        blue_satnos=frozenset(
+            s for s in (str(o.get("satno") or "").strip() for o in hrr_objects if _hrr_side(o) == "blue") if s
+        ),
+        now=now,
+    )
+
+
+async def _fly(
+    basis: _SweepBasis, red_tle: str,
+) -> tuple[list[ThreatSweepEntry], list[str], list[tuple[str, str, str]]]:
+    """Fly one red orbit against the frozen targets: the sweep, the before run and the watch.
+
+    Epochs and the sweep run off the event loop, the sweep a bounded number at
+    once across all operators: each holds an executor thread for its whole
+    length (audit F-235).
+    """
+    loop = asyncio.get_running_loop()
+    epochs = await loop.run_in_executor(None, _compute_epochs, red_tle, basis.now)
+    async with _SWEEP_SLOTS:
+        return await loop.run_in_executor(
+            None,
+            lambda: _run_target_sweep(
+                basis.frozen, basis.targets, basis.manual_tle_by_name, red_tle,
+                basis.red_regime, epochs, basis.max_dv_m_s,
+            ),
+        )
+
+
+def _when(moment: datetime) -> str:
+    """A moment as the operator reads it: "03:12 UTC on 2 Nov"."""
+    return f"{moment:%H:%M} UTC on {moment.day} {moment:%b}"
+
+
+def _hours_ago(now: datetime, moment: datetime) -> str:
+    return format_tof_label(max((now - moment).total_seconds(), 0.0) / 3600.0)
+
+
+_DETECTION_NOTE = (
+    "A burn counts once 2 independent estimators agree on it at 10 times its own element-set scatter; "
+    "screening starts at 2 m/s, so small burns can go unseen."
+)
+
+
+class _ChangeContext(NamedTuple):
+    """The facts the change is worded from, beyond the two runs."""
+
+    red_name: str
+    red_satno: str | None
+    red_epoch: datetime | None
+    history: _RedHistory
+    prior: ThreatAssessment | None
+
+
+def _window_burns(pol: Any, basis: _SweepBasis) -> list[Any]:
+    """The confirmed burns within the regime's element-set age limit, earliest first."""
+    limit = limit_hours_for_regime(basis.red_regime)
+    return sorted(burns_in_window(pol.manoeuvres, basis.now, limit), key=lambda m: m.burn_window[0])
+
+
+def _held_after(burns: list[Any], red_epoch: datetime | None) -> str:
+    """With custody lost, what UDL already holds from after a burn the flown set predates, and how to get it."""
+    if not burns or red_epoch is None or red_epoch >= burns[-1].burn_window[1]:
+        return ""
+    return (f" UDL holds an element set from after a burn {when_burned(burns[-1])}; reconnect to UDL to "
+            "refresh held element sets (sets entered by hand are not refreshed), then sweep again.")
+
+
+def _custody_refusal(
+    history: _RedHistory, custody: CustodyStatus, red_epoch: datetime | None, basis: _SweepBasis,
+) -> WarningChange | None:
+    """No figures without a history, or with custody lost."""
+    if history.pol is None:
+        return WarningChange(Status.CANNOT_SAY, f"What the burn changed: cannot say. {history.problem}")
+    if custody.state is Custody.LOST:
+        return WarningChange(
+            Status.NOT_COMPUTED,
+            "What the burn changed is not shown: custody is lost, so any figure would rest on an out-of-date orbit."
+            + _held_after(_window_burns(history.pol, basis), red_epoch),
+        )
+    return None
+
+
+def _newer_than_held(pol: Any, red_epoch: datetime | None) -> datetime | None:
+    """The newest held set's epoch when the set the sweep flew is newer still, else ``None``.
+
+    The history is cached and refreshed apart from the red track, so a burn
+    between the two would be in the after figures but in no held set.
+    """
+    newest: datetime | None = pol.records[-1].epoch if pol.records else None
+    if red_epoch is None or newest is None or red_epoch <= newest:
+        return None
+    return newest
+
+
+def _unseen_burn(red_epoch: datetime, newest: datetime) -> WarningChange:
+    """No burn held, but the sweep flew a set newer than any held: a burn between them cannot be ruled out."""
+    return WarningChange(
+        Status.NOT_COMPUTED,
+        f"The sweep above flies its element set of {_when(red_epoch)}, newer than the newest in its history "
+        f"({_when(newest)}); a burn between them would be in its figures but cannot be named, so the change is "
+        "not computed. Reconnect to UDL to refresh held element sets, then sweep again.",
+    )
+
+
+def _no_burn(pol: Any, now: datetime, limit_hours: float, figure: str = "") -> WarningChange:
+    """The window held no confirmed burn: say what was looked at, never "nothing moved"."""
+    newest = pol.records[-1].epoch if pol.records else now
+    confirmed = sorted(pol.manoeuvres, key=lambda m: m.burn_epoch)
+    last = (f"Its last confirmed burn was {_hours_ago(now, confirmed[-1].burn_epoch)} ago."
+            if confirmed else "It has no confirmed burn in its history.")
+    window_start = now - timedelta(hours=limit_hours)
+    return WarningChange(
+        Status.NO_BURN,
+        f"No confirmed burn in its element sets from {_when(window_start)} to its newest, {_when(newest)}: "
+        f"the last {limit_hours:.0f} h, its element-set age limit{_figure_tail(figure)}. There is no burn to compare. "
+        f"{last}",
+    )
+
+
+def _burn_selection(
+    history: _RedHistory, red_epoch: datetime | None, custody: CustodyStatus, basis: _SweepBasis,
+    only: list[Any] | None = None,
+) -> WarningChange | list[Any]:
+    """The burns to compare across, or the sentence saying why there are none to compare.
+
+    *only*, from the watch, keeps the burns it is announcing: a burn already
+    told to the operator is neither flown from nor worded again.
+    """
+    refusal = _custody_refusal(history, custody, red_epoch, basis)
+    if refusal is not None:
+        return refusal
+    pol: Any = history.pol  # a history is held: _custody_refusal answered for none
+    limit = limit_hours_for_regime(basis.red_regime)
+    burns = _window_burns(pol, basis)
+    if only is not None:
+        burns = [m for m in burns if m in only]
+    if not burns:
+        newest = _newer_than_held(pol, red_epoch)
+        if red_epoch is not None and newest is not None:
+            return _unseen_burn(red_epoch, newest)
+        return _no_burn(pol, basis.now, limit, _red_figure(pol, basis))
+    latest = burns[-1]
+    if red_epoch is not None and red_epoch < latest.burn_window[1]:
+        return WarningChange(
+            Status.NOT_COMPUTED,
+            f"The sweep above flies its element set of {_when(red_epoch)}, from before its burn "
+            f"{when_burned(latest)}, so its figures do not include the burn and the change is not computed. "
+            f"UDL holds a set from after it ({_when(latest.tle_after.epoch)}); reconnect to UDL to refresh "
+            "held element sets (sets entered by hand are not refreshed), then sweep again.",
+        )
+    before = burns[0].tle_before
+    before_age = (basis.now - before.epoch).total_seconds() / 3600.0
+    if before_age > limit:
+        return WarningChange(
+            Status.NOT_COMPUTED,
+            f"That burn's warning change is not computed: its last element set before the burn is "
+            f"{age_text(before_age)} old against a {limit:.0f} h limit{_figure_tail(_red_figure(pol, basis))}, too "
+            "old to fly to now.",
+        )
+    return burns
+
+
+def _burn_line(m: Any, red_name: str, verdicts: dict[datetime, Any], now: datetime) -> BurnLine:
+    """One burn in the window, with its own is-this-normal verdict."""
+    start, end = m.burn_window
+    when = (f"{red_name} burned at {_when(m.burn_epoch)}, {_hours_ago(now, m.burn_epoch)} ago."
+            if start == end else f"{red_name} burned between {_when(start)} and {_when(end)}.")
+    verdict = verdicts.get(m.burn_epoch)
+    caveat = (f"Caveat: the element sets either side of that burn were {m.gap_days:.0f} days apart, "
+              "so the before orbit may already include other burns.") if m.long_gap else ""
+    return BurnLine(when, f"Is this normal? {verdict.sentence}" if verdict else "", caveat)
+
+
+def _basis_line(basis: _SweepBasis, before: Any, red_epoch: datetime | None, flown: int) -> str:
+    """What the figures rest on, in small text under the section; *flown* counts only the targets swept."""
+    after = f"(epoch {_when(red_epoch)})" if red_epoch else ""
+    against = "1 target and its same element set" if flown == 1 else f"{flown} targets and their same element sets"
+    return (
+        f"Computed at {basis.now:%H:%M} UTC. Before: its last element set before the burn "
+        f"(epoch {_when(before.epoch)}), flown as if it had not burned. After: the element set this sweep "
+        f"flew {after}. Both against the same {against}, the same "
+        f"{len(_SWEEP_METHODS)} transfer methods and the {basis.max_dv_m_s:g} m/s budget. Each orbit is offered "
+        "its own burn times (now, and its apsides and nodes over the next 24 hours), so part of a change can be "
+        "timing rather than reach. Warning time runs from the moment it burns to arrival, for its fastest "
+        "intercept, as on the worst case. A change within 15 minutes reads as unchanged; that tolerance is "
+        f"tuned, not sourced. {_DETECTION_NOTE}"
+    )
+
+
+def _last_shown(prior: ThreatAssessment | None, red_satno: str | None, first_burn: Any, top: Any) -> str:
+    """The figure the operator last saw before the burn, cited and never used as "before"."""
+    if prior is None or top is None or not prior.red_tle or not red_satno:
+        return ""
+    prior_number = satno_from_tle(prior.red_tle)
+    prior_age = elset_age(prior.red_tle, first_burn.burn_window[0])
+    if str(prior_number) != red_satno or prior_age is None or prior_age.epoch > first_burn.burn_window[0]:
+        return ""
+    shown = least_warning_by_target(prior.entries, float("inf")).get(top.name)
+    if shown is None:
+        return ""
+    return (f"Last shown before the burn: {format_tof_label(shown)} on {top.name}, "
+            f"in your sweep at {prior.sweep_epoch:%H:%M} UTC.")
+
+
+def _change_notes(context: _ChangeContext, burns: list[Any], top: Any, now: datetime) -> tuple[str, ...]:
+    """The lines shown only when they apply."""
+    pol: Any = context.history.pol
+    notes = [_last_shown(context.prior, context.red_satno, burns[0], top)]
+    newer = newest_unconfirmed(pol.candidate_manoeuvres, burns[-1].tle_after.epoch)
+    if newer is not None:
+        notes.append(f"An unconfirmed detection {when_burned(newer)} is newer and is not counted, "
+                     "because it is not confirmed.")
+    held_newest = _newer_than_held(pol, context.red_epoch)
+    if context.red_epoch is not None and held_newest is not None:
+        notes.append(f"Caveat: the sweep's element set ({_when(context.red_epoch)}) is newer than the newest in its "
+                     f"history ({_when(held_newest)}); a burn between them would be in the after figures but not named.")
+    notes.append(_notso_cue(context.red_name, context.red_satno, burns[-1].tle_after.epoch, now))
+    return tuple(n for n in notes if n)
+
+
+def _not_flown(basis: _SweepBasis, target: ThreatTarget) -> str:
+    """Why the sweep runner skipped *target*, as ``_run_target_sweep`` decides it; ``""`` when it was flown."""
+    tle = _flown_tle(basis, target)
+    if not tle:
+        return "no element set"
+    try:
+        regime = regime_from_tle(tle)
+    except TLE_ERRORS:
+        return ""  # the runner flies it on the assumption it is compatible, and says so
+    return "" if regimes_compatible(basis.red_regime, regime) else "regime mismatch"
+
+
+def _build_change(
+    basis: _SweepBasis, burns: list[Any], before: list[ThreatSweepEntry], after: list[ThreatSweepEntry],
+    context: _ChangeContext,
+) -> WarningChange:
+    """The rows, the headline, each burn's line, the notes and the basis.
+
+    Only the targets the runner flew are compared: one it skipped has no
+    figure either side, which is not the same as out of reach.
+    """
+    skipped = {t.target_name: why for t in basis.targets if (why := _not_flown(basis, t))}
+    named = ", ".join(f"{name} ({why})" for name, why in skipped.items())
+    if skipped and len(skipped) == len(basis.targets):
+        return WarningChange(Status.NOT_COMPUTED, "What the burn changed is not computed: no target was swept, so no "
+                                                  f"warning was flown before or after. Not swept: {named}.")
+    rows = compare(
+        [(t.target_name, t.target_source == "blue" or t.target_satno in basis.blue_satnos)
+         for t in basis.targets if t.target_name not in skipped],
+        least_warning_by_target(before, basis.max_dv_m_s),
+        least_warning_by_target(after, basis.max_dv_m_s),
+    )
+    not_swept = ""
+    if skipped:
+        whose = "its" if len(skipped) == 1 else "their"
+        not_swept = f"Not swept, so {whose} warning change is not computed: {named}."
+    changed = tuple(r for r in rows if r.change.name != "UNCHANGED")
+    top = next((r for r in rows if r.change.name in ("CUT", "NEWLY_IN_REACH")), None)
+    verdicts = burn_verdicts(context.history.pol, context.history.assessment) if context.history.assessment else {}
+    return WarningChange(
+        status=Status.FIGURES,
+        headline=headline(rows, len(burns), basis.max_dv_m_s, format_tof_label),
+        rows=tuple(rows),
+        footer=footer(rows),
+        burns=tuple(_burn_line(m, context.red_name, verdicts, basis.now) for m in burns),
+        notes=_change_notes(context, burns, top, basis.now) + ((not_swept,) if not_swept else ()),
+        basis=_basis_line(basis, burns[0].tle_before, context.red_epoch, len(basis.targets) - len(skipped)),
+        worst=worst_change(rows),
+        changed=changed,
+    )
+
+
+async def _warning_change(
+    basis: _SweepBasis, red: tuple[str, str | None, str], history: _RedHistory,
+    entries: list[ThreatSweepEntry], context: tuple[CustodyStatus, ThreatAssessment | None],
+) -> WarningChange:
+    """What the burn changed: the one call the sweep makes for it.
+
+    *red* is the interceptor's name, catalogue number and the element set the
+    sweep flew; *entries* are the sweep's own, so the after figure is the one
+    the worst case card shows. *context* is its custody and the operator's
+    previous sweep, cited when it flew the orbit from before the burn.
+    """
+    red_name, red_satno, red_tle = red
+    custody, prior = context
+    age = elset_age(red_tle, basis.now)
+    red_epoch = age.epoch if age else None
+    selection = _burn_selection(history, red_epoch, custody, basis)
+    if isinstance(selection, WarningChange):
+        return _with_notso_cue(selection, red_name, red_satno, history.pol, basis.now)
+    before, _, _ = await _fly(basis, selection[0].tle_before.tle)
+    change = _build_change(
+        basis, selection, before, entries, _ChangeContext(red_name, red_satno, red_epoch, history, prior),
+    )
+    return _with_notso_cue(change, red_name, red_satno, history.pol, basis.now)
+
+
+def _interactions(change: WarningChange, history: _RedHistory, basis: _SweepBasis,
+                  red_satno: str | None) -> tuple[ig.Edge, ...]:
+    """The approaches the warning change attributes to the red object's own burns: Interactions (SPC-172).
+
+    Only a change with figures has any: its rows were flown across every
+    confirmed burn in the window, the same burns read here, so each edge
+    rests on what the operator was shown. Every burn in Pattern of Life's
+    ``manoeuvres`` is a confirmed one; unconfirmed detections are kept apart.
+    A failure is logged and reads as no approach held, so the sweep stands;
+    the detail never reaches the page.
+    """
+    if change.status is not Status.FIGURES or history.pol is None or not red_satno:
+        return ()
+    try:
+        satnos = {t.target_name: t.target_satno for t in basis.targets}
+        return tuple(replace(e, target_satno=satnos.get(e.target, ""))
+                     for e in ig.warning_edges(red_satno, change.rows, _flown_burns(history.pol, basis), basis.now))
+    # BLE001: the shadow model's evidence must never take the sweep down with it.
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Interactions could not be read for %s: %s", log_safe(red_satno), log_safe(exc))
+        return ()
+
+
+def _flown_burns(pol: Any, basis: _SweepBasis) -> list[ig.Burn]:
+    """The confirmed burns in the window as the edge rule reads them: the ones the warning change flew across."""
+    return [ig.Burn(epoch=m.burn_epoch, earliest=m.burn_window[0], latest=m.burn_window[1], confirmed=True,
+                    detection=str(m.confidence), provider=tu.source_chain(m.tle_after.source), long_gap=m.long_gap)
+            for m in _window_burns(pol, basis)]
+
+
+def _flown_tle(basis: _SweepBasis, target: ThreatTarget | None) -> str | None:
+    """The element set the sweep flew *target* with, from the sets it froze; None for a target it did not sweep."""
+    if target is None:
+        return None
+    if target.target_source == "manual":
+        return basis.manual_tle_by_name.get(target.target_name)
+    return basis.frozen.hrr_tle_cache.get(target.target_satno)
+
+
+def _computed_targets(change: WarningChange, basis: _SweepBasis) -> list[interaction_store.Target]:
+    """The targets in reach after the burn, soonest first, each with the element set it was flown with."""
+    by_name = {t.target_name: t for t in basis.targets}
+    rows = sorted((r for r in change.rows if r.after_h is not None), key=lambda r: (r.after_h, r.name))
+    return [interaction_store.Target(r.name, by_name[r.name].target_satno if r.name in by_name else "", r.ours,
+                                     _flown_tle(basis, by_name.get(r.name)))
+            for r in rows]
+
+
+_NOT_SEARCHED = "Closest approaches could not be computed on this sweep; the server log has the detail."
+
+
+def _red_computed(change: WarningChange, history: _RedHistory, basis: _SweepBasis,
+                  red_tle: str) -> tuple[tuple[ig.Miss, ...], tuple[str, ...]] | None:
+    """The closest approach to each target in reach, before and after the burns, or None with no figures (SPC-173).
+
+    Before is the red set from before the first burn the warning change flew
+    across; after is the set the sweep flew. Only sets the sweep already
+    holds are read; nothing is fetched. A failure is logged, and stated
+    without its detail, so the sweep stands.
+    """
+    if change.status is not Status.FIGURES or history.pol is None:
+        return None
+    flown = _window_burns(history.pol, basis)
+    if not flown:
+        return None
+    try:
+        return interaction_store.computed_misses(_flown_burns(history.pol, basis), flown[0].tle_before.tle, red_tle,
+                                                 _computed_targets(change, basis), basis.now)
+    # BLE001: the shadow model's evidence must never take the sweep down with it.
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Closest approaches could not be computed: %s", log_safe(exc))
+        return (), (_NOT_SEARCHED,)
+
+
+def _history_burns(pol: Any) -> interaction_store.HistoryBurns | None:
+    """The confirmed burns the held history shows and when it starts, or None when it holds no element set."""
+    records = getattr(pol, "records", None) or []
+    if not records:
+        return None
+    return interaction_store.HistoryBurns(confirmed=frozenset(m.burn_epoch for m in pol.manoeuvres),
+                                          since=min(r.epoch for r in records))
+
+
+class _Learnt(NamedTuple):
+    """What the sweep learnt about the red object's approaches: its warning change and the closest approaches."""
+
+    change: WarningChange
+    computed: tuple[tuple[ig.Miss, ...], tuple[str, ...]] | None
+
+
+async def _sweep_interactions(state: object, change: WarningChange, history: _RedHistory, basis: _SweepBasis,
+                              red: tuple[str | None, str]) -> interaction_store.HeldInteractions:
+    """The sweep's one call for Interactions: search the closest approaches off the event loop, then hold them."""
+    red_satno, red_tle = red
+    computed = await asyncio.get_running_loop().run_in_executor(None, _red_computed, change, history, basis, red_tle)
+    return _hold_red_interactions(state, history, basis, red_satno, _Learnt(change, computed))
+
+
+def _hold_red_interactions(state: object, history: _RedHistory, basis: _SweepBasis, red_satno: str | None,
+                           learnt: _Learnt) -> interaction_store.HeldInteractions:
+    """Hold what this sweep learnt about the red object, and read back all the session holds for it (SPC-173).
+
+    Without a history there is nothing to judge, but edges an earlier sweep
+    held still count. A failure is logged and reads as none held, so the
+    sweep stands; the detail never reaches the page.
+    """
+    if not red_satno:
+        return interaction_store.HeldInteractions()
+    try:
+        if history.pol is None:
+            return interaction_store.held_interactions(state, red_satno, basis.now)
+        found = interaction_store.SweepFindings(
+            burns=tuple(_flown_burns(history.pol, basis)),
+            warning=_interactions(learnt.change, history, basis, red_satno), computed=learnt.computed,
+            blue_satnos=basis.blue_satnos, history=_history_burns(history.pol),
+        )
+        return interaction_store.sweep_interactions(state, red_satno, found, basis.now)
+    # BLE001: the shadow model's evidence must never take the sweep down with it.
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Interactions could not be held for %s: %s", log_safe(red_satno), log_safe(exc))
+        return interaction_store.HeldInteractions()
+
+
+def _with_notso_cue(
+    change: WarningChange, red_name: str, red_satno: str | None, pol: Any, now: datetime,
+) -> WarningChange:
+    """No burn to compare, or a change not computed, never stands alone while a cached notice says it moved.
+
+    Only with a history held: without one there are no element sets to say a
+    notice is newer than. Figures carry the cue in their own notes.
+    """
+    if change.status not in (Status.NO_BURN, Status.NOT_COMPUTED) or pol is None:
+        return change
+    latest_after = max((m.tle_after.epoch for m in pol.manoeuvres), default=None)
+    cue = _notso_cue(red_name, red_satno, latest_after, now)
+    return replace(change, notes=(*change.notes, cue)) if cue else change
+
+
+def _notso_cue(red_name: str, red_satno: str | None, latest_after: datetime | None, now: datetime) -> str:
+    """A manoeuvre NOTSO newer than any confirmed burn: named, never turned into a figure.
+
+    Newer by the event time the notice states. A notice that states none is
+    newer only if it was written after the last post-burn element set, and is
+    then named as possibly a burn already accounted for. Read from the cache the
+    operator syncs; nothing is pulled from UDL here.
+    """
+    if not red_satno:
+        return ""
+    from spectre.data.notso_cache import event_class, event_time, get_notso_cache, is_manoeuvre_notice, notice_time
+
+    cache = get_notso_cache()
+    newer: list[tuple[bool, datetime, dict[str, Any]]] = []
+    for rec in filter(is_manoeuvre_notice, cache.get_for_satno(red_satno)):
+        # With no event time, notice_time is when the record was written, which
+        # is after the event, so such a notice is flagged undated and worded so.
+        when = notice_time(rec)
+        if when is not None and when <= now and (latest_after is None or when > latest_after):
+            newer.append((event_time(rec) is not None, when, rec))
+    if not newer:
+        return ""
+    # A notice that says when the object moved outranks any undated one.
+    dated, when, rec = max(newer, key=lambda n: (n[0], n[1]))
+    synced = f"NOTSO cache last synced {cache.last_sync_utc() or 'never'}."
+    if not dated:
+        return (f"NOTSO created at {_when(when)} reports a {event_class(rec)} by {red_name} but gives no event "
+                "time, so it may be a burn already accounted for or one no element set shows yet; its effect on your "
+                f"warning cannot be computed. {synced}")
+    return (f"NOTSO at {_when(when)} reports a {event_class(rec)} by {red_name}. No element set since shows "
+            f"a confirmed burn yet, so its effect on your warning cannot be computed. {synced}")
+
+
+async def _watch_change(
+    state: object, watch: BurnWatch, found: tuple[Any, PolAssessment, list[Any]], now: datetime,
+) -> WarningChange:
+    """What the burns the watch found changed, flown from the newest held orbit at check time.
+
+    The same selection and wording as the sweep. After is the history's newest
+    element set, refused as custody lost past its regime's limit, and the
+    targets' element sets are frozen afresh from the session at this moment.
+    """
+    pol, assessment, burns = found
+    basis = _sweep_basis(state, watch.targets, manual=watch.manual_tle_by_name, red_regime=watch.red_regime,
+                         max_dv_m_s=watch.max_dv_m_s, now=now)
+    red_tle = pol.records[-1].tle
+    verdicts = burn_verdicts(pol, assessment)
+    latest = verdicts.get(max(burns, key=lambda m: m.burn_epoch).burn_epoch)
+    history = _RedHistory(pol, assessment, latest, "", now)
+    custody = _red_custody(red_tle, history, now)
+    age = elset_age(red_tle, now)
+    red_epoch = age.epoch if age else None
+    selection = _burn_selection(history, red_epoch, custody, basis, only=burns)
+    if isinstance(selection, WarningChange):
+        return selection
+    after, _, _ = await _fly(basis, red_tle)
+    before, _, _ = await _fly(basis, selection[0].tle_before.tle)
+    context = _ChangeContext(watch.red_name, str(watch.red_satno), red_epoch, history, None)
+    return _build_change(basis, selection, before, after, context)
+
+
+def _shown_until(pol: Any, flown: tuple[CustodyStatus, datetime | None]) -> datetime | None:
+    """The post-burn set of the last burn whose change the sweep showed, or ``None`` if it showed none.
+
+    The sweep's figures include a burn only with custody held and a flown set
+    from after it; a burn it refused figures for was never told, so the watch
+    must still announce it (V0.9 review 13).
+    """
+    custody, red_epoch = flown
+    if custody.state is Custody.LOST or red_epoch is None:
+        return None
+    return max((m.tle_after.epoch for m in pol.manoeuvres if m.burn_window[1] <= red_epoch), default=None)
+
+
+def _watch_start(
+    pol: Any, flown: tuple[CustodyStatus, datetime | None], basis: _SweepBasis,
+) -> tuple[datetime | None, datetime | None, datetime]:
+    """Where a watch starts: what is accounted for, the newest set it has seen, and when it first checks.
+
+    With a burn in the window left unshown, or no history yet, no set counts
+    as seen and the first check runs at once, so it fetches and announces.
+    """
+    if pol is None:
+        return None, None, basis.now
+    accounted = _shown_until(pol, flown)
+    limit = limit_hours_for_regime(basis.red_regime)
+    if any(is_new_burn(m, accounted) for m in burns_in_window(pol.manoeuvres, basis.now, limit)):
+        return accounted, None, basis.now
+    return accounted, pol.records[-1].epoch if pol.records else None, basis.now + CHECK_EVERY
+
+
+def _flown_epoch(red_tle: str, now: datetime) -> datetime | None:
+    """The epoch of the element set the sweep flew, if it can be read."""
+    age = elset_age(red_tle, now)
+    return age.epoch if age else None
+
+
+# PLR0913: one argument per thing the watch starts from, all named at the call.
+def _watch_after_sweep(  # noqa: PLR0913
+    state: object, user: User, basis: _SweepBasis, red: tuple[str, str | None], *,
+    history: _RedHistory, history_task: asyncio.Task[HeldHistory] | None,
+    flown: tuple[CustodyStatus, datetime | None],
+) -> None:
+    """Start, or replace, the burn watch on the object just swept (SPC-006).
+
+    Only with UDL connected and a catalogue number to ask UDL about. *flown*
+    is the sweep's custody and the epoch of the set it flew. The burns whose
+    change the sweep showed are accounted for; any burn in the window it did
+    not show, and every burn while the history is still loading, is left for
+    the first check, which then runs at once and announces it.
+    """
+    red_name, red_satno = red
+    if not red_satno or not state.udl_username or user.session_key is None:  # type: ignore[attr-defined]
+        return
+    accounted, newest, first_check = _watch_start(history.pol, flown, basis)
+    watch = BurnWatch(
+        red_name=red_name, red_satno=int(red_satno), red_regime=basis.red_regime,
+        targets=list(basis.targets), manual_tle_by_name=dict(basis.manual_tle_by_name),
+        max_dv_m_s=basis.max_dv_m_s, accounted_until=accounted,
+        started_at=basis.now, next_check_at=first_check, newest_epoch=newest,
+    )
+    start_watch(state, user.session_key, watch, first_history=history_task,  # type: ignore[arg-type]
+                compute=_watch_change, spawn=spawn_session_task)
+
+
+@router.get("/burn-watch", response_model=None)
+async def burn_watch_note(
+    request: Request,
+    current_user: Annotated[User, Depends(require_login)],
+) -> HTMLResponse:
+    """The burn watch note: watching, an alert, or why it is not watching. Makes no UDL call."""
+    state = get_session_state(current_user)
+    return render(request, _BURN_WATCH_TEMPLATE, watch_view(state, current_user.session_key, _utc_now()))
+
+
+def _band_runs(worst: ThreatSweepEntry, red_tle: str, target_tle: str, errors_km: tuple[float, float],
+               max_dv_m_s: float) -> list[tuple[float, float]]:
+    """The worst case re-solved with each orbit moved ahead and behind along track: ``(m/s, hours)`` each."""
+    method = next((m for m in _SWEEP_METHODS if m[0] == worst.method), None)
+    if method is None:
+        return []
+    name, solver, extra = method
+    kwargs = dict(extra)
+    if name == "min_time":
+        kwargs["max_delta_v"] = to_km_s(max_dv_m_s)  # astro takes km/s
+    red_km, target_km = errors_km
+    values: list[tuple[float, float]] = []
+    for red_sign, target_sign in ((1, 1), (1, -1), (-1, 1), (-1, -1)):
+        try:
+            sol = solver(red_tle=shift_along_track(red_tle, red_sign * red_km),
+                         blue_tle=shift_along_track(target_tle, target_sign * target_km),
+                         manoeuvre_start=worst.burn_epoch, **kwargs)
+        # BLE001: a solver refusing a shifted geometry narrows the band; it is not a sweep failure.
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Band re-solve refused for %s: %s", log_safe(worst.method), log_safe(exc))
+            continue
+        tof_h = (sol.arrival_epoch - sol.burns[0].epoch).total_seconds() / 3600.0 if sol.burns else 0.0
+        values.append((from_km_s(abs(sol.total_delta_v)), tof_h))
+    return values
+
+
+def _figure_tail(figure: str) -> str:
+    """", the LEO figure applied to HEO/Molniya, unsourced for this regime" beside a limit, or "" (SPC-215)."""
+    return f", the {figure}" if figure else ""
+
+
+def _red_figure(pol: Any, basis: _SweepBasis) -> str:
+    """Whose figure red's element-set age limit is: the regime of its newest held set, the figure the sweep chose
+    by the interceptor's regime family (SPC-215)."""
+    records = getattr(pol, "records", None) or []
+    return figure_applied(str(getattr(records[-1], "tle", "") or ""), basis.red_regime) if records else ""
+
+
+def _regime_of(tle: str) -> str:
+    """The regime *tle* is stated in (SPC-215), or "not readable"."""
+    basis = regime_basis(tle)
+    return "not readable" if basis is None else basis.regime
+
+
+#: Re-solves needed before a spread says anything: one alone has nothing to differ from.
+_MIN_BAND_RUNS: int = 2
+
+
+def _dv_band(state: object, entries: list[ThreatSweepEntry], red_tle: str, basis: _SweepBasis) -> dict[str, str]:
+    """The worst case's delta-V band from element-set age (SPC-005, red team finding 6), or nothing.
+
+    A sensitivity, not a confidence interval: how far the figure moves when
+    each orbit sits where its element set's age says it could be. Needs at
+    least two re-solves to say anything.
+    """
+    if not entries:
+        return {}
+    worst = entries[0]
+    target_tle = _swept_target_tle(state, worst.target)
+    if not target_tle:
+        return {}
+    ages = [elset_age(tle, basis.now) for tle in (red_tle, target_tle)]
+    red_km, target_km = (position_error_km(a.days if a else 0.0, basis.red_regime) for a in ages)
+    values = _band_runs(worst, red_tle, target_tle, (red_km, target_km), basis.max_dv_m_s)
+    if len(values) < _MIN_BAND_RUNS:
+        return {}
+    dv_spread = max(abs(dv - worst.delta_v_m_s) for dv, _ in values)
+    tof_minutes = max(abs(tof - worst.tof_hours) for _, tof in values) * 60.0
+    red_age, target_age = (_set_age_words(a) for a in ages)
+    # Both orbits take the rate for the interceptor's regime family; the words say whose figure that is (SPC-215).
+    how = (f"re-solved with the interceptor's orbit moved {red_km:.0f} km and the target's {target_km:.0f} km along "
+           f"track, ahead and behind, the error assumed for element sets {red_age} and {target_age} (for the "
+           f"interceptor's regime, {_regime_of(red_tle)}: {error_rate_words(red_tle)}; tuned, not sourced). A "
+           "sensitivity, not a confidence interval.")
+    if worst.method == "min_time":
+        # The minimum-time solver spends the whole budget by construction, so
+        # its delta-V cannot move; its flight time, the warning, is what does.
+        return {
+            "dv_band": "(the budget)",
+            "dv_band_basis": (f"This intercept spends the whole budget by construction, so its delta-V does not "
+                              f"move; its flight time moves by \u00b1 {tof_minutes:.0f} min when {how}"),
+        }
+    band = f"\u00b1 {dv_spread:.1f}" if dv_spread < 1.0 else f"\u00b1 {dv_spread:.0f}"
+    return {
+        "dv_band": band,
+        "dv_band_basis": (f"Delta-V band {band} m/s, and flight time \u00b1 {tof_minutes:.0f} min: the figure {how}"),
+    }
+
+
+def _with_band(worst_coa: dict[str, Any] | None, band: dict[str, str]) -> dict[str, Any] | None:
+    if worst_coa is not None:
+        worst_coa.update(band)
+    return worst_coa
+
+
+def _why_not_silenced(understanding: tu.ThreatUnderstanding | None) -> str:
+    """The reason in words: no model, a ceiling held back by Understanding LOW, or one never earned."""
+    if understanding is None:
+        return "but the evidence behind it could not be assessed"
+    row = tu.computed_incapacity(understanding)
+    if row is not None and row.applied:
+        return (f"and the evidence has set a MINIMAL Threat ceiling, but only at Understanding "
+                f"{understanding.understanding.level.name}")
+    held_back = f" ({row.note})" if row is not None and row.note else ""
+    deception = "".join(f", and {label} is voided: possible deception"
+                        for label in understanding.range.possible_deception)
+    return f"but that has not earned a MINIMAL Threat ceiling{held_back}{deception}"
+
+
+def _not_silenced(worst_coa: dict[str, Any], understanding: tu.ThreatUnderstanding | None) -> str:
+    """Why a legacy capability MINIMAL leaves decide-by standing, naming the evidence."""
+    return (f"Capability reads MINIMAL on {worst_coa.get('incapacity') or 'the evidence held'}, "
+            f"{_why_not_silenced(understanding)}, so decide-by stands.")
+
+
+def _sweep_decide_by(
+    state: object, entries: list[ThreatSweepEntry], custody: CustodyStatus,
+    assessed: tuple[dict[str, Any] | None, tu.ThreatUnderstanding | None], basis: _SweepBasis,
+) -> DecideBy:
+    """Decide-by for this sweep (SPC-008), or why it is withheld.
+
+    *assessed* is the worst case and the Threat Understanding behind it.
+    Withheld where custody is lost, because the arrival would rest on an
+    out-of-date orbit, and where computed evidence has earned a MINIMAL Threat
+    ceiling at Understanding above LOW, because a deadline for something the
+    object cannot do would alarm. A recorded status alone, the cheapest claim
+    an adversary can make, no longer silences the clock (SPC-167, concept
+    section 7.4); where it would have, the sentence says why it did not.
+    """
+    if custody.state is Custody.LOST:
+        return withheld("custody is lost, so the soonest arrival would rest on an out-of-date orbit")
+    worst_coa, understanding = assessed
+    earned = tu.earned_incapacity(understanding) if understanding is not None else None
+    if earned is not None and understanding is not None:
+        return withheld(f"the evidence has earned a MINIMAL Threat ceiling, {earned.item.label}, computed from "
+                        f"{earned.item.derived_from}, at Understanding {understanding.understanding.level.name}")
+    times = ResponseTimes(sign_in=state.response_time_h,  # type: ignore[attr-defined]
+                          by_target=dict(state.response_time_by_target))  # type: ignore[attr-defined]
+    result = decide_by(entries, times, basis.now, basis.max_dv_m_s)
+    # With no response time set there is no decide-by to stand, so the note that it stands is not added (SPC-211).
+    if result.due is not Due.NEEDS_TIME and worst_coa is not None and worst_coa.get("capability_level") == "MINIMAL":
+        return replace(result, sentence=f"{result.sentence} {_not_silenced(worst_coa, understanding)}")
+    return result
+
+
+def _take_response_time(state: object, raw: str, errors: list[str]) -> None:
+    """Hold the response time the sweep form carries; blank keeps the last one set."""
+    hours, problem = parse_response_hours(raw)
+    if problem:
+        errors.append(f"{problem} The response time held, if any, is unchanged; with none set, decide-by says it "
+                      "needs one.")
+    elif hours is not None:
+        state.response_time_h = hours  # type: ignore[attr-defined]
+
+
+#: The longest target name a response time is held under; the form field carries the same limit.
+_MAX_TARGET_NAME = 80
+
+
+def _take_target_response_time(state: object, form: Any, errors: list[str]) -> str:
+    """Hold the response time the sweep form sets for one named target (SPC-022), and return that name.
+
+    Checked as the sign-in's time is. A blank time keeps what is held, and
+    returns ``""``, as does a refusal, which says why and changes nothing.
+    """
+    name = str(form.get("target_response_name") or "").strip()
+    hours, problem = parse_response_hours(str(form.get("target_response_h") or ""))
+    if hours is None and not problem:
+        return ""
+    if not name:
+        errors.append("A response time for one target needs the target's name; it was not set.")
+    elif len(name) > _MAX_TARGET_NAME:
+        errors.append(f"A target's name for a response time must be at most {_MAX_TARGET_NAME} characters; "
+                      "it was not set.")
+    elif problem:
+        errors.append(f"{problem} The response time for {name} is unchanged.")
+    else:
+        state.response_time_by_target[name] = hours  # type: ignore[attr-defined]
+        return name
+    return ""
+
+
+def _unmatched_response_target(name: str, targets: list[ThreatTarget], errors: list[str]) -> None:
+    """A response time just set for a name no swept target has is said, not held in silence."""
+    if name and all(t.target_name != name for t in targets):
+        errors.append(f"The response time for {name} is held, but no target in this sweep is called {name}, "
+                      "so decide-by did not use it.")
+
+
 @router.post("/sweep", response_model=None)
 async def threat_sweep(
     request: Request,
@@ -1374,8 +2898,10 @@ async def threat_sweep(
     """Run a threat sweep for a red satellite against the selected target group."""
     t0 = time.monotonic()
     state = get_session_state(current_user)
-    now = datetime.now(tz=UTC)
+    now = _utc_now()
     errors: list[str] = []
+    # The operator's previous sweep, cited if it flew this object's pre-burn orbit.
+    prior = state.last_threat_assessment
 
     # Parse target group selection (e.g. "blue:1", "red:3", "all").
     form = await request.form()
@@ -1385,6 +2911,8 @@ async def threat_sweep(
     manual_red_tle_raw = str(form.get("manual_red_tle") or "").strip()
     manual_red_confidence = str(form.get("manual_red_confidence") or "MEDIUM").strip().upper()
     manual_red_tle: str | None = _validate_manual_red_tle(manual_red_tle_raw, errors)
+    _take_response_time(state, str(form.get("response_time_h") or ""), errors)
+    response_target = _take_target_response_time(state, form, errors)
 
     parsed = _parse_target_group(tgt_group)
     if parsed.error:
@@ -1431,6 +2959,10 @@ async def threat_sweep(
         })
 
     targets = _cap_targets(state, targets, _manual_tle_by_name, red_regime, errors)
+    _unmatched_response_target(response_target, targets, errors)
+
+    # Its own history comes from UDL while the sweep computes.
+    history_task = _start_red_history(state, red_satno, now)
 
     # Any targets without a cached TLE get a last-chance fetch now.
     await _fetch_missing_target_tles(state, targets, errors)
@@ -1438,38 +2970,23 @@ async def threat_sweep(
     loop = asyncio.get_running_loop()
     # Cluster multi-provider TLEs and reduce to best representative per object,
     # off the event loop like the sweep itself (audit F-235).
-    clustering_summary = await loop.run_in_executor(None, _reduce_tle_clusters, state)
-
-    # What is known about the RED object's ability to act.
-    #
-    # Capability is a property of the threatening object, not of the things it
-    # might reach, and red is a single object, so this is one lookup rather
-    # than one per target. The sweep previously looked up intelligence for the
-    # TARGET and used it for display only, while the verdict consulted nothing.
-    red_capability = _red_capability(red_satno)
-
-    # Compute epochs for red satellite.
-    epochs = await loop.run_in_executor(None, _compute_epochs, red_tle, now)
+    clustering_summary = await _reduce_tle_clusters(state)
 
     # Count total targets (HRR + manual).
     hrr_count = len(targets)
 
-    # Run sweep in executor, a bounded number at once across all operators:
-    # each holds an executor thread for its whole length (audit F-235).
-    async with _SWEEP_SLOTS:
-        entries, sweep_errors, method_refusals = await loop.run_in_executor(
-            None,
-            lambda: _run_target_sweep(
-                state, targets, _manual_tle_by_name, red_tle, red_regime, epochs, max_dv_m_s,
-            ),
-        )
+    # The targets' element sets are frozen here, after the last-chance fetch
+    # and clustering, so the sweep and the before-burn run fly the same ones.
+    basis = _sweep_basis(state, targets, manual=_manual_tle_by_name, red_regime=red_regime,
+                         max_dv_m_s=max_dv_m_s, now=now)
+    entries, sweep_errors, method_refusals = await _fly(basis, red_tle)
     errors.extend(sweep_errors)
 
     # Rank on warning time among the feasible intercepts. Delta-V keeps its
     # role as the feasibility filter it already was, but it is not the ranking:
     # an intercept arriving in 35 minutes is a harder problem than a cheaper
     # one arriving in 40 hours, and sorting on cost called the second worse.
-    entries.sort(key=lambda e: warning_time_rank(e.delta_v_m_s, e.tof_hours, max_dv_m_s))
+    entries.sort(key=lambda e: warning_time_rank(e.delta_v_m_s, e.tof_hours, max_dv_m_s, e.arrives))
 
     elapsed = time.monotonic() - t0
 
@@ -1493,8 +3010,46 @@ async def threat_sweep(
         + [(f"target {g['target'].target_name}", g["data_mode"]) for g in grouped],
     )
 
+    # What is known about the RED object's ability to act: its assessed record
+    # and, when its history arrived, its behaviour (SPC-002). Capability is a
+    # property of the threatening object, not of the things it might reach.
+    history = await _settle_red_history(state, history_task, red_satno)
+    red_capability = _red_capability_from(red_satno, history)
+    # Custody and the red set's data mode cap the verdict's confidence, so
+    # custody is judged before the worst case is assessed (SPC-160).
+    custody = _red_custody(red_tle, history, now)
+    stated_confidence = manual_red_confidence if manual_red_tle else None
+    confidence_context = _red_confidence_context(state, (red_sat.strip(), red_satno), stated_confidence, custody)
+
     # Identify the most dangerous course of action.
-    worst_coa = _compute_worst_coa(entries, red_capability, max_dv_m_s)
+    worst_coa = _worst_coa_in_context(
+        state, entries, (red_capability, confidence_context), max_dv_m_s, (history, red_tle),
+    )
+    red_history = _red_history_view(history, custody)
+    # What the burn changed, from the orbit before it and the one just flown.
+    warning_change = await _warning_change(
+        basis, (red_sat.strip(), red_satno, red_tle), history, entries, (custody, prior),
+    )
+    _watch_after_sweep(state, current_user, basis, (red_sat.strip(), red_satno), history=history,
+                       history_task=history_task, flown=(custody, _flown_epoch(red_tle, now)))
+    # Threat Understanding beside the verdict (SPC-166, shadow); it moves only decide-by (SPC-167).
+    # The approaches attributed to its burns are its Interactions evidence (SPC-172, SPC-173): held per object,
+    # so an edge from an earlier sweep still counts. The closest approaches run off the event loop.
+    held = await _sweep_interactions(state, warning_change, history, basis, (red_satno, red_tle))
+    understanding = _red_understanding(
+        _Red(red_satno, red_tle, red_regime, history, custody, confidence_context, held.edges, held.notes,
+             held.paths),
+        worst_coa, now,
+    )
+    decide = _sweep_decide_by(state, entries, custody, (worst_coa, understanding), basis)
+    # The engine reads this picture, so its range and deadline cannot disagree with the sweep's (SPC-171).
+    hold_threat_picture(state, red_sat.strip(), understanding, decide, now)
+    # What it showed, held so an analyst can adjudicate exactly that range (SPC-176).
+    adjudication_log.hold_subject(state, red_sat.strip(), red_satno, understanding, now)
+    worst_coa = _with_understanding(worst_coa, understanding, held.notes)
+    # After decide-by, the engine's picture and the model, which all read the current rule's verdict (SPC-175).
+    worst_coa = _with_verdict_switch(worst_coa, understanding, switch_on=_verdict_switch_on())
+    worst_coa = _with_band(worst_coa, await loop.run_in_executor(None, _dv_band, state, entries, red_tle, basis))
 
     state.last_threat_assessment = assessment
     state.append_log(
@@ -1514,20 +3069,39 @@ async def threat_sweep(
         "grouped": grouped,
         "hrr_count": hrr_count,
         "worst_coa": worst_coa,
+        # Where the worst case sits in the sweep, so its card can open a decision scenario (SPC-150); None
+        # exactly when worst_coa is, since both pick by the same rule.
+        "worst_entry_index": worst_entry_index(entries, max_dv_m_s),
         # Methods that produced nothing, and why. Previously discarded, which
         # hid the fastest approaches: refusals cluster on the aggressive end.
         "method_refusals": method_refusals,
         "red_satno": red_satno or "",
-        "manual_red_confidence": manual_red_confidence if manual_red_tle else None,
+        "manual_red_confidence": stated_confidence,
         "clustering_summary": clustering_summary,
         "provenance_warnings": provenance,
-        "elset_ages": _elset_ages(state, red_tle, grouped, now),
+        "elset_ages": _elset_ages(red_tle, basis, now),
+        "red_elset_source": _red_track_source(state, red_sat, red_tle),
+        "red_history": red_history,
+        "warning_change": warning_change,
+        "decide_by": decide,
+        "adjudication": adjudication_log.sweep_panel(state),
+        **watch_view(state, current_user.session_key, now),
+        "epoch_note": _epoch_note(red_tle),
         "error": None,
     })
 
 
 
 
+
+
+def _refresh_note(actor: ThreatActor, outcome: object) -> str:
+    """One actor's line when its live set was not fetched: a refusal's own sentence, or what went wrong."""
+    if isinstance(outcome, str):
+        return outcome
+    why = f" ({_refusal_reason(outcome)})" if isinstance(outcome, BaseException) else ""
+    return (f"{actor.actor_name} ({actor.actor_satno}): live element set not fetched{why}; "
+            "screened on the set already held")
 
 
 async def _refresh_actor_tles(state: object, actors: list[ThreatActor]) -> list[str]:
@@ -1538,38 +3112,57 @@ async def _refresh_actor_tles(state: object, actors: list[ThreatActor]) -> list[
     per actor whose fetch failed: it is then screened on the set already
     held, and the operator is told so (F-135), as the sweep does.
     """
+    return list((await _refresh_outcomes(state, actors)).failed.values())
+
+
+class _Refreshed(NamedTuple):
+    """What fetching the actors' live sets found, each keyed by the actor's catalogue number so a caller can keep
+    those it screens: *failed*, the note for each actor whose live set was not fetched, screened on the set held;
+    *passed_over*, the sentence for each actor whose live set was taken over newer ones the check refused (SPC-243).
+    The second is a live set, so it must never join the first, which the provenance banner shows as illustrative."""
+
+    failed: dict[str, str] = {}
+    passed_over: dict[str, str] = {}
+
+
+async def _refresh_outcomes(state: object, actors: list[ThreatActor]) -> _Refreshed:
+    """_refresh_actor_tles's outcomes: the failed fetches' notes and the passed-over sentences, apart."""
     missing = [a for a in actors if _needs_live_tle(state, a.actor_satno)]
     if not missing or not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
-        return []
+        return _Refreshed()
 
     from spectre.web.routes.udl import fetch_tle_for_satno
 
     sem = asyncio.Semaphore(10)
     user: str = state.udl_username  # type: ignore[attr-defined]
     password: str = state.udl_password  # type: ignore[attr-defined]
+    passed_over: dict[str, str] = {}
 
-    async def _fetch_one(actor: ThreatActor) -> bool:
+    async def _fetch_one(actor: ThreatActor) -> bool | str:
         async with sem:
             got = await fetch_tle_for_satno(
                 int(actor.actor_satno), user, password,
                 data_mode=state.udl_data_mode or "REAL",  # type: ignore[attr-defined]
                 source=state.udl_tle_source,  # type: ignore[attr-defined]
             )
+            if isinstance(got, RefusedElset):
+                return got.sentence(f"{actor.actor_name} ({actor.actor_satno})", outcome=HELD_KEPT)
             if not got:
                 return False
-            tle, mode = got
-            state.hrr_tle_cache[actor.actor_satno] = tle  # type: ignore[attr-defined]
-            state.hrr_tle_data_mode[actor.actor_satno] = mode  # type: ignore[attr-defined]
+            state.hrr_tle_cache[actor.actor_satno] = got.tle  # type: ignore[attr-defined]
+            state.hrr_tle_data_mode[actor.actor_satno] = got.data_mode  # type: ignore[attr-defined]
+            # A newer set the check refused before this one was taken is named, apart from the failures (SPC-243).
+            note = got.passed_over_note(f"{actor.actor_name} ({actor.actor_satno})")
+            if note:
+                passed_over[actor.actor_satno] = note
             return True
 
     outcomes = await asyncio.gather(*[_fetch_one(a) for a in missing], return_exceptions=True)
-    held = "screened on the set already held"
-    return [
-        f"{a.actor_name} ({a.actor_satno}): live element set not fetched"
-        + (f" ({_refusal_reason(outcome)}); {held}" if isinstance(outcome, BaseException) else f"; {held}")
-        for a, outcome in zip(missing, outcomes, strict=True)
-        if outcome is not True
-    ]
+    failed = {
+        a.actor_satno: _refresh_note(a, outcome)
+        for a, outcome in zip(missing, outcomes, strict=True) if outcome is not True
+    }
+    return _Refreshed(failed, passed_over)
 
 
 
@@ -1600,6 +3193,7 @@ def _screen_all_actors(  # noqa: PLR0913, PLR0917
     entries: list[ThreatSweepEntry] = []
     refusals: list[tuple[str, str, str]] = []
     notes: list[str] = []
+    switch_on = _verdict_switch_on()
 
     for actor in actors:
         actor_tle = _resolve_hrr_tle(state, actor.actor_satno)
@@ -1616,7 +3210,9 @@ def _screen_all_actors(  # noqa: PLR0913, PLR0917
                 f"{budget_m_s:g} m/s"
             )
             continue
-        verdicts.append(verdict)
+        regime = actor.regime or _regime_of_tle(actor_tle)
+        spanned = replace(verdict, understanding=_actor_range(state, verdict, regime, actor_tle, now))
+        verdicts.append(_switched_actor(spanned, switch_on=switch_on))
 
     return _ScreenRun(verdicts=verdicts, entries=entries, refusals=refusals, notes=notes)
 
@@ -1635,7 +3231,7 @@ def _profiles_by_actor(
             continue
         grouped.setdefault(entry.actor.actor_satno, []).append(entry)
     for rows in grouped.values():
-        rows.sort(key=lambda e: (e.tof_hours, e.delta_v_m_s))
+        rows.sort(key=lambda e: (not e.arrives, e.tof_hours, e.delta_v_m_s))
     return grouped
 
 
@@ -1646,15 +3242,33 @@ class _Candidates(NamedTuple):
     red_population: int = 0
     notes: list[str] = []
     error: str = ""
+    #: The sentence naming the objects left out as not able to act, and why; "" when none was.
+    not_screened: str = ""
+    #: One note per actor screened whose live element set was not fetched (F-135): shown in the provenance banner,
+    #: as the actor is screened on the set held. Never a passed-over sentence, which is a live set's.
+    refresh_notes: list[str] = []
+    #: One sentence per actor screened whose live set was taken over newer ones the check refused (SPC-243): a plain
+    #: note, never in the provenance banner.
+    passed_over_notes: list[str] = []
 
 
-def _select_candidates(state: object, asset_regime: str) -> _Candidates:
-    """Choose which red objects to screen against this asset.
+async def _select_candidates(state: object, asset_regime: str, this_year: int) -> _Candidates:
+    """Choose which red objects to screen against this asset, fetching the element sets they are screened on.
 
     Every empty outcome carries a different sentence. An operator reading
     "no candidates" has to be able to tell a missing watchlist from a
     watchlist whose red objects are all in the wrong regime, because one is a
-    setup problem and the other is a finding.
+    setup problem and the other is a finding; and both from a watchlist whose
+    red objects in reach are all stages, debris or past their working life.
+
+    A payload's age is judged on the element set it will be screened on
+    (SPC-239). Stages, debris, decayed objects and payloads the catalogue or
+    the intelligence record already settles are judged first, and nothing is
+    fetched for those left out; the rest are walked in watchlist order, their
+    live sets fetched and then judged on, until the cap is filled
+    (_walk_to_cap). The objects left out are named in watchlist order. Until 0.41.0 the age was judged on the set cached
+    before the fetch, so an old payload with nothing cached was screened on a
+    first screen and left out on the next.
     """
     if not state.hrr_objects:  # type: ignore[attr-defined]
         return _Candidates(error=(
@@ -1667,7 +3281,18 @@ def _select_candidates(state: object, asset_regime: str) -> _Candidates:
         1 for o in hrr_objects
         if str(o.get("country") or "").strip().upper() in _RED_COUNTRIES
     )
-    actors = _build_actor_list(state, asset_regime)
+    in_reach = _actors_in_reach(state, asset_regime)
+    catalogue = _catalogue_index()
+    able, settled = _judge_actors(state, in_reach, this_year, catalogue, read_sets=False)
+    walk = await _walk_to_cap(state, able, this_year, catalogue)
+    actors = walk.kept
+    place = {id(actor): i for i, actor in enumerate(in_reach)}
+    excluded = [(a.actor_name, why) for a, why in sorted(settled + walk.aged, key=lambda pair: place[id(pair[0])])]
+    not_screened = _exclusion_note(excluded) if excluded else ""
+    if not actors and excluded:
+        return _Candidates(error=(
+            f"No red HRR object in a regime compatible with {asset_regime or 'this asset'} can act. {not_screened}"
+        ))
     if not actors:
         return _Candidates(error=(
             f"No red HRR objects are in a regime compatible with "
@@ -1676,14 +3301,19 @@ def _select_candidates(state: object, asset_regime: str) -> _Candidates:
         ))
 
     notes: list[str] = []
-    if len(actors) > _MAX_SCREEN_ACTORS:
+    if walk.unreached:
+        # The payloads past the cap are not fetched, so their age is not judged: the count is of those not left out
+        # before the walk stopped.
         notes.append(
-            f"Candidate list truncated to {_MAX_SCREEN_ACTORS} of {len(actors)} "
+            f"Candidate list truncated to {_MAX_SCREEN_ACTORS} of {len(actors) + walk.unreached} "
             "(compute cap). Ranking covers the truncated set only."
         )
-        actors = actors[:_MAX_SCREEN_ACTORS]
 
-    return _Candidates(actors=actors, red_population=red_population, notes=notes)
+    return _Candidates(
+        actors=actors, red_population=red_population, notes=notes, not_screened=not_screened,
+        refresh_notes=[walk.refreshed[a.actor_satno] for a in actors if a.actor_satno in walk.refreshed],
+        passed_over_notes=[walk.passed_over[a.actor_satno] for a in actors if a.actor_satno in walk.passed_over],
+    )
 
 
 class _ResolvedAsset(NamedTuple):
@@ -1705,11 +3335,10 @@ def _resolve_asset(
 ) -> _ResolvedAsset:
     """Resolve the blue asset from a watchlist selection or a pasted TLE."""
     if manual_tle:
-        try:
-            TLEOrbit(manual_tle)
-        # BLE001: operator input, reported not raised.
-        except Exception as exc:  # noqa: BLE001
-            return _ResolvedAsset(error=f"Manual asset TLE invalid: {exc}")
+        # The one acceptance check every ingest path runs (SPC-201).
+        refusal = refused("the manual asset", manual_tle)
+        if refusal is not None:
+            return _ResolvedAsset(error=refusal)
         satno = str(satno_from_tle(manual_tle) or asset_satno)
         return _ResolvedAsset(
             tle=manual_tle,
@@ -1774,6 +3403,41 @@ async def screen_config(
     })
 
 
+# PLR0913, PLR0917: one argument per field of the adjudication form.
+@router.post("/adjudicate", response_model=None)
+async def threat_adjudicate(  # noqa: PLR0913, PLR0917
+    request: Request,
+    current_user: Annotated[User, Depends(require_login)],
+    ledger_hash: Annotated[str, Form(max_length=64)] = "",
+    satno: Annotated[str, Form(max_length=16)] = "",
+    on_range: Annotated[str, Form(max_length=16)] = "",
+    analyst_threat: Annotated[str, Form(max_length=16)] = "",
+    on_understanding: Annotated[str, Form(max_length=16)] = "",
+    analyst_understanding: Annotated[str, Form(max_length=16)] = "",
+    reason: Annotated[str, Form(max_length=4000)] = "",
+) -> HTMLResponse:
+    """Record an analyst's agree or disagree with the sweep's Threat range and Understanding (SPC-176).
+
+    Recorded against the picture the sweep holds for this sign-in, and only
+    when the form names that picture's ledger hash. It changes no band. The
+    panel comes back with what was recorded or why not, and the coverage report.
+    """
+    state = get_session_state(current_user)
+    form = adjudication_log.AdjudicationForm(
+        ledger_hash=ledger_hash.strip(), satno=satno.strip(), on_range=on_range.strip().lower(), analyst_threat=analyst_threat.strip(),
+        on_understanding=on_understanding.strip().lower(), analyst_understanding=analyst_understanding.strip(),
+        reason=reason,
+    )
+    entry, message = adjudication_log.take(state, form, current_user.username, _utc_now())
+    if entry is None:
+        logger.info("Threat adjudication not recorded for %s", log_safe(current_user.username))
+    else:
+        logger.info("Threat adjudication recorded for %s by %s: range %s, Understanding %s",
+                    log_safe(entry.subject.satno), log_safe(current_user.username), log_safe(entry.on_range.value),
+                    log_safe(entry.on_understanding.value))
+    return render(request, "partials/adjudication.html", {"adjudication": adjudication_log.view(state, message)})
+
+
 @router.post("/screen", response_model=None)
 async def threat_screen(
     request: Request,
@@ -1791,7 +3455,7 @@ async def threat_screen(
     """
     t0 = time.monotonic()
     state = get_session_state(current_user)
-    now = datetime.now(tz=UTC)
+    now = _utc_now()
     errors: list[str] = []
 
     def _fail(message: str) -> HTMLResponse:
@@ -1819,15 +3483,14 @@ async def threat_screen(
     )
 
     # ── Enumerate candidate actors ───────────────────────────────────────────
-    candidates = _select_candidates(state, asset_regime)
+    # Fetches any missing or synthetic element set before a payload's age is judged on it (SPC-239).
+    candidates = await _select_candidates(state, asset_regime, now.year)
     if candidates.error:
         return _fail(candidates.error)
     actors = candidates.actors
     screened_from = candidates.red_population
     errors.extend(candidates.notes)
-
-    # ── Fetch any missing or synthetic actor element sets ────────────────────
-    refresh_notes = await _refresh_actor_tles(state, actors)
+    refresh_notes = candidates.refresh_notes
 
     # ── Screen, off the event loop ───────────────────────────────────────────
     loop = asyncio.get_running_loop()
@@ -1838,7 +3501,7 @@ async def threat_screen(
     errors.extend(run.notes)
 
     screening = rank_actors(run.verdicts)
-    # Read after _refresh_actor_tles, which replaces synthetic sets when it can.
+    # Read after _select_candidates's refresh, which replaces synthetic sets when it can.
     asset_mode = "MANUAL" if manual_asset_tle else state.hrr_tle_data_mode.get(asset_satno, "REAL")
     actor_modes = {
         v.actor_satno: state.hrr_tle_data_mode.get(v.actor_satno, "REAL")
@@ -1873,6 +3536,8 @@ async def threat_screen(
         "method_refusals": method_refusals,
         "profiles_by_actor": profiles_by_actor,
         "errors": errors,
+        "not_screened": candidates.not_screened,
+        "passed_over_notes": candidates.passed_over_notes,
         "error": None,
         "band_colours": _BAND_COLOURS,
         "actor_modes": actor_modes,
@@ -1922,6 +3587,8 @@ async def refine_entry(
         return render(request, "partials/threat_sweep_row.html", {
             "entry": entry, "index": entry_index, "group_idx": group_idx,
             "red_name": assessment.red_name if assessment else "",
+            # The sweep this row belongs to, so its decision control names it (SPC-150).
+            "sweep_at": assessment.sweep_epoch.isoformat() if assessment else "",
             "error": error, "refine_error": refine_error,
         })
 

@@ -28,7 +28,7 @@
       <span title="Analyst judgement carried with the record, not a computed score">{{ pair.threat_level }}</span>
     </span>
 
-    <span style="font-size:0.62rem; font-weight:700; color:var(--ops-gold);
+    <span style="font-size:0.62rem; font-weight:700; color:var(--gold);
                  text-transform:uppercase; letter-spacing:0.04em; white-space:nowrap">
       {{ pair.assessed_threat }}
     </span>
@@ -62,6 +62,19 @@
   <div style="font-size:0.68rem; color:var(--text-dim); line-height:1.45; margin-bottom:0.2rem">
     {{ pair.significance }}
   </div>
+
+  {# ── What is understood about the object (SPC-168, concept section 7.3):
+     the record's own grade and what it does to the range, the cue to date
+     and source it, the Understanding line and the strip every panel shows. #}
+  {% if pair_tu is defined and pair_tu %}
+  {% set tu = pair_tu %}
+  <div class="pair-understanding" style="font-size:0.62rem; color:var(--text-dim); margin-bottom:0.2rem">
+    {% if tu.record %}<div>{{ tu.record }}.</div>{% endif %}
+    {% if tu.record_cue %}<div>Raise it by: {{ tu.record_cue }}.</div>{% endif %}
+    <div>{{ tu.understanding }}</div>
+    {% include "partials/understanding_strip.html" %}
+  </div>
+  {% endif %}
 
   {# ── Source footnote ── #}
   <div style="font-size:0.57rem; color:var(--text-muted);

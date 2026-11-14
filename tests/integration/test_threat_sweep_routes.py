@@ -9,6 +9,7 @@ regime skip and the error paths.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from typing import Any
 
@@ -54,7 +55,7 @@ class TestManualTargets:
 
     @pytest.mark.parametrize(
         "case",
-        [("", _BLUE_GEO, "Target name is required"), ("X", "", "TLE is required"), ("X", "not a tle", "Invalid TLE")],
+        [("", _BLUE_GEO, "Target name is required"), ("X", "", "TLE is required"), ("X", "not a tle", "The element set for X was refused: it does not hold two element lines.")],
     )
     def test_bad_input_is_refused_with_a_reason(
         self, client: Any, auth_cookie: str, sweep_state: Any, case: tuple[str, str, str],
@@ -109,7 +110,10 @@ class TestSweep:
         resp = _post(client, auth_cookie, "sweep", {
             "red_sat": "RED-GEO", "tgt_group": "none", "manual_red_tle": "garbage",
         })
-        assert "Manual red TLE invalid" in resp.text
+        assert (
+            "The element set for the manual red track was refused: it does not hold two element lines. It was not "
+            "stored; the registered element set is used instead." in resp.text
+        )
         assert sweep_state.last_threat_assessment is not None
 
 
@@ -121,6 +125,19 @@ class TestRefine:
         assert resp.status_code == 200
         assert "Invalid entry" not in resp.text
         assert "BLUE-GEO" in resp.text
+
+    def test_the_refined_row_keeps_its_decision_control_naming_the_sweep(
+        self, client: Any, auth_cookie: str, sweep_state: Any,
+    ) -> None:
+        # SPC-150: the row the refine swaps in opens a decision scenario from the same sweep as the row it replaces.
+        _add_manual(client, auth_cookie, "BLUE-GEO", _BLUE_GEO)
+        _post(client, auth_cookie, "sweep", {"red_sat": "RED-GEO", "tgt_group": "none"})
+        resp = _post(client, auth_cookie, "refine", {"entry_index": 0, "group_idx": 0})
+        assessment = sweep_state.last_threat_assessment
+        assert assessment.entries[0].arrives
+        controls = re.findall(r"<button[^>]*data-opens-decision[^>]*>", resp.text)
+        assert len(controls) == 1
+        assert f'"sweep": "{assessment.sweep_epoch.isoformat()}"' in controls[0]
 
     def test_an_index_past_the_sweep_is_refused(self, client: Any, auth_cookie: str, sweep_state: Any) -> None:
         resp = _post(client, auth_cookie, "refine", {"entry_index": 99, "group_idx": 0})

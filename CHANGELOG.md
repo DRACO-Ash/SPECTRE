@@ -9,6 +9,578 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-11-14
+
+**A refused newer element set no longer blocks the UDL fetch, and every place a set is shown says which newer one was passed over and why.**
+
+### Fixed
+- The UDL fetch checks the sets UDL holds newest first and takes the newest the acceptance check passes. Before, it took only the set or sets tied at the newest epoch and was refused when those failed: one commercial provider files every set with ephemeris type 2, which the check refuses, and its sets are often a millisecond newer than other providers' accepted ones, so the fetch for GOES-16 was refused whenever its set was newest. Each newer set passed over is named, with its provider, its epoch to the millisecond and why, as a note beside the set used: in the TLE panel, red and blue quick-add, the sweep, the threat screen (never in its "not from live tracking" banner), the intercept panels (the Data Mode badge stays REAL), the connect refresh note, the burn watch and the run log. The name, epoch, age, data mode and source shown are the set used. The fetch is refused only when no set passes, up to the newest 500 checked, and says so when older sets were left unchecked. The panel's epoch mode now asks UDL for up to 100 sets and walks past a closest record with no lines. Type 2 stays refused: whether it is plain SGP4 is unconfirmed (SPC-243).
+
+### Changed
+- Development and CI dependencies, as Dependabot proposed in pull requests 25 to 34: actions/checkout 4.4.0 to 7.0.1; CodeQL init and analyze 4.38.3 to 4.39.3, together; mypy 2.3.1 to 2.4.1 (with its dependencies ast-serialize 0.13.1 and librt 0.16.0); pytest 9.1.1 to 9.2.0; pytest-asyncio 1.4.0 to 1.4.1; types-pyyaml 6.0.12.20260906; pip-tools 7.6.2. The lock files were recompiled with `scripts/lock.sh`'s own command, so no other pin moved. One browser test compared a mapping of lists with `pytest.approx`, which pytest 9.2 refuses; it now compares each list on its own.
+
+## [0.44.0] - 2026-11-13
+
+**A decision record being written when the server stops now stands.**
+
+### Fixed
+- The server now waits, up to 8 s, for decision jobs that are sampling or writing their record when it stops, so a record being written is committed rather than cancelled part-way. A job still reading custody or queued is not waited on. Before, the record was lost, on PostgreSQL as on SQLite, and on SQLite the cancelled write could keep its write lock, so later writes failed with "database is locked". A job given up at the bound is logged by count. The 8 s bound assumes the platform allows at least 10 s to stop, Docker's default; no platform figure is confirmed (`docs/architecture.md`). In the test suite this showed as a test-order fault in `test_decision_record_route.py` (SPC-242).
+
+### Security
+- `opentelemetry-api` 1.45.1 to 1.45.2, for CVE-2026-126360: a crafted `traceparent` value could make the trace-context propagator's regular expression run in quadratic time. It reaches SPECTRE only as a FastAPI dependency; only that pin moved in the lock files, which were recompiled with the repository's own command and a targeted upgrade.
+
+## [0.43.0] - 2026-11-13
+
+**The force model measured against a higher-fidelity one, and every sampled note saying where it holds.**
+
+### Changed
+- The RK45 force model (two-body, J2 and drag) is measured against a reference that adds J3 and J4, the Moon, the Sun and solar radiation pressure, on 6 pairs across LEO, MEO, GEO and HEO/Molniya, with burns of none, 0.1, 1 and 10 m/s, and with both objects alike or one at a quarter or none of the other's area-to-mass ratio. The omitted forces move a GEO object up to 23.8 km by 72 h and a pair's separation up to 4.2 km. Set against the sampled spread at any instant up to 72 h, they exceed it with no burn and with 0.1 m/s in LEO and at GEO, are over a tenth of it with 1 m/s in LEO, and under a tenth with 1 m/s elsewhere and with 10 m/s everywhere. The module's claim that burn dispersion dominates is corrected, the table is in `docs/decision_engine_phases.md`, and each sampled basis note now states the figures for red's own regime. The physics is unchanged and old records replay exactly; stating the omission rather than changing the physics is Claude's judgement for the owner to confirm (SPC-209, F-19).
+
+## [0.42.0] - 2026-11-13
+
+**Scores, inputs, seeds, constants and dates checked before anything is recommended.**
+
+### Changed
+- A composite score that is not finite is refused before any rule ranks on it, naming the cell in the server log; the operator sees a fixed sentence and no figure. Collect-first advice says whether a cue could change the recommendation is not available, rather than failing the page, when a cue's outcome holds such a score (SPC-221, F-32).
+- A missing row value or weight is refused inline, naming the row and the field, rather than taking a default; a column longer than the rows is refused too. Fields optional by design say so where they are declared (SPC-222, F-33).
+- Every sampled row shows its seed and is drawn again on a second seed, the seed plus one, and counts as converged only when both draws are. Each sampled row is charged twice against the cost cap, so at 500 samples the longest horizon that fits falls from 23.7 h to 11.8 h. On a game tree this holds for turn 1; turns 2 and 3 draw on a seed derived from the row's seed, the turn and the branch, are judged on that one draw, and the tree says so. Stored inputs go to version 7; records from 0.28.0 to 0.41.0 replay exactly (SPC-224, F-35).
+- The sampled basis note states the WGS-72 to WGS-84 handover between SGP4 and RK45, measured at no more than 0.18 km of separation by 72 h, so the constants are kept (SPC-225, F-36).
+- An element set dated more than 5 minutes after the time it is checked is refused wherever a set enters (the paste boxes, the sweep's and the screen's manual sets, a training load, the UDL panel, current fetch and history fetch, and the Pattern of Life history, where it is counted with the other refused sets) and at binding. A set already held that is dated in the future reads FUTURE EPOCH, loses custody and gets no interaction window. The sweep names it apart from the age range, and the delta-V band says it is dated in the future rather than 0 h old (SPC-226, F-38).
+
+### Fixed
+- The browser smoke script finds the installed Chromium and checks the asset screen against its current wording (SPC-230).
+
+## [0.41.0] - 2026-11-13
+
+**The game tree drawn, two scoring assumptions stated, and the asset screen judging age on the set it uses.**
+
+### Added
+- The game tree is drawn beside its branches, collapsible and zoomable by mouse and keyboard, and shown in full without script. Each box shows the branch's own sequence score and closest approach as the text list writes them, and a remainder branch carries its caveat (SPC-190).
+- Beside the outcome matrix and the game tree, a note says custody lost and closest approach are added to the score as separate terms, so an approach we cannot see may be worse than the two added together. It is an unsourced assumption, also stated in the guide's limitations and the lookup register (SPC-219, F-20).
+- Beside the game tree, a note says each branch of the last turn shown is valued as if no one moves after it, also in the guide's limitations (SPC-220, F-21).
+
+### Changed
+- The asset screen fetches a payload's live element set before judging its age, walking the watchlist in order and fetching only until the 60-actor cap is filled, so an old payload is left out on the first screen as on the next. Objects left out are listed in watchlist order (SPC-239).
+- A bundled synthetic element set's placeholder designator is no longer read as a launch year, so bundled objects are not cut as past their working life from 2036 (SPC-239).
+
+## [0.40.0] - 2026-11-13
+
+**Hop plans flown and costed burn by burn, and every limit names its orbit class.**
+
+### Changed
+- V-bar and H-bar hop plans now record every burn, so the burns add up to the stated cost, and each hop row is flown like every other approach. Arrival is judged on the flown closest approach; a hop plan that does not arrive reads "No approach". V-bar entry and correction burns are signed by the side the target is on (SPC-237).
+- Every staleness limit and error-model figure on the decision, sweep and POL pages names whose figure it is, for example "against a 24 h limit, the LEO figure applied to HEO/Molniya, unsourced for this regime". Orbits are classed as LEO, MEO, GEO, HEO/Molniya or other deep-space; a geosynchronous period within 20.5 min with eccentricity under 0.25 reads as GEO. The bands are registered as unsourced judgement (SPC-215).
+- The sampled spread reports P5's own half-width, and a non-finite miss is no longer hidden: the widest half-width reads NaN and the cell is not converged (SPC-213).
+- The sampled note states the RK45 integration error measured against DOP853, keyed to the longest span actually integrated, and says "measured to 72 h only" past 72 h (SPC-214).
+
+## [0.39.0] - 2026-11-13
+
+**Lookup results labelled training only, and the update's likelihood stated as uncalibrated.**
+
+### Added
+- A calibration harness, `scripts/calibrate_likelihood.py`, reads held histories as a CSV (`history,predicted,observed`) and reports a Brier score, a reliability table by bin and the count, naming the data and the scoring code by SHA-256. No held histories exist yet, so no calibration is claimed; the score measures the probabilities in the file, and is evidence about the update only if the update produced them (SPC-210).
+
+### Changed
+- The lookup model's seven relations are registered as unsourced judgements. Every result resting on one is labelled "Training only", naming each relation, at the top of the results, in the session log, in the replay and in a new `training_only` column of the decision record. The numbers are unchanged and older records replay exactly (SPC-207).
+- Wherever the update's posterior share is shown, it says the likelihood is uncalibrated, with no calibration data yet (SPC-210).
+
+## [0.38.0] - 2026-11-12
+
+**Ties named, the tree's own cost cap, and decide-by on your own response time.**
+
+### Added
+- Under each response the rule would not pick, the game tree now marks the best way on in its own words, apart from the plan (SPC-189).
+- Responses whose scores lie within 5e-07 of the best are named together and the recommendation says it is a tie, in the matrix, the rankings and each turn of the tree. Rules finding the same tie count as agreeing. The record still keeps the response with the lowest score, as 0.37.0 did (SPC-206).
+
+### Changed
+- Composite scores are no longer coloured by unsourced thresholds; each shows as its number with "lower = better for friendly" and its basis (SPC-208).
+- Game trees have their own cost cap of 21,000 sample-hours, measured under load by `scripts/measure_tree_cost.py` in the build container and to be measured again on the deployment target. Records from earlier releases are still checked against the 12,000 cap they shared, and the replay says so first (stored inputs version 6) (SPC-188).
+- Decide-by needs the response time you set. With none set for a target in reach, it says so, names the target and shows no time, instead of using an unsourced 12-hour default. Older records replay as stored (SPC-211).
+
+## [0.37.0] - 2026-11-12
+
+**Turns set by the engine, chains counted once, and suggestions shown at once (owner rulings of 2026-11-05).**
+
+### Changed
+- The game tree's turns are set by the engine from the rows' burn times, so every burn falls inside its own turn and a transfer of several burns gets a turn per burn; the operator never sets a length. A row whose first burn falls past the span searched is refused by name. Records from 0.28.0 to 0.36.0 replay exactly over their equal turns (stored inputs version 5) (SPC-187).
+- Copies in one source chain no longer fold a reading: the chain's strongest reading counts once at its best reliability, so a new copy does not widen the Threat range. The one exception is decision 7: a floor a later unusual or unprecedented burn has ended is tested on its own reliability, so no later copy revives it, and a newer reading from its chain replaces it. The 20 pinned legacy verdicts are unchanged (SPC-186).
+- Any collection with value above 0 whose result SPECTRE can read may trigger collect first, whether or not it could take the Threat range off the action line (SPC-182).
+- Every adversary row's NOTSO suggestion shows as soon as the Decision Engine panel opens, with no Load from NOTSO control; applying it is still the operator's tick, honoured at Evaluate. The cache is read once per request, not once per row (SPC-185).
+- A path propagated from a hostile seed names the seed by name and catalogue number on screen and in the ledger, and the docs no longer say the seed list may become classified (SPC-180).
+
+## [0.36.0] - 2026-11-12
+
+**Realistic intercepts from the NOTSO on-station record (charming-dirac d3447e2).**
+
+### Added
+- The Intercept Engine flies every red approach's burns and reports the closest it comes, beside its 1-sigma element-set error band, through the one flown-miss path 0.33.0's solvers use. Hops are not flown, and the row says so (SPC-234).
+- Red approaches are searched over burn point, time of flight, revolutions and hops for the cheapest plan that arrives. A row that never arrives is kept and labelled "No approach"; "Use the values typed below" keeps the old behaviour (SPC-234).
+- Each red approach is banded Seen before, Possible or Unrealistic against JCO's NOTSO on-station record, `spectre/data/manoeuvre_evidence.json`, merged with the NOTSO cache. Only arriving, realistic rows set the worst case and the most likely course of action (SPC-234).
+- `check-quality.sh` refuses a coverage report older than any changed source or test file, before any leg reads it (SPC-234).
+
+### Changed
+- Arrival is judged in one place, within the approach radius plus the larger of 1 m and a millionth of the radius, so a plan aimed at the radius is not rejected for rounding. A plan whose target is already inside the radius with no burn reads "Already within" and does not count (SPC-234 review).
+- Live NOTSO cache records raise a satellite's own figures and replace a blank name; the fleet-wide ceiling that bounds Possible comes from the shipped, reviewed record alone. A malformed record is skipped on its own, and the merge is held until the cache changes (SPC-234 review).
+- The Intercept Engine refuses a coast or intercept time over a year, a standoff over 100,000 km, and infinity or NaN in any of them, with a 422 rather than a 500 or a silent change (SPC-234 review).
+- The Intercept Engine's Max ΔV defaults to 171.8 m/s, overruling R7 for the engine by the owner's ruling of 2026-11-12. The threat sweep and asset screening keep 500 m/s (SPC-234).
+- COLA, Evasion and Formation are listed as avoidance and defence, and J2 drift as an assessment, never as red threats (SPC-234).
+
+### Fixed
+- A flown closest approach that cannot be computed reads "not computed" and no longer fails the method; the trade-space data gives it as null and the CSV export as "not computed". A propagator fault still fails the method (SPC-238).
+- A red element set that has decayed by the manoeuvre start is reported in each method's row instead of failing the whole Intercept Engine page (SPC-234 review).
+
+## [0.35.0] - 2026-11-12
+
+**Every Code Quality rule the App Store gate has raised, checked before it runs (charming-dirac c930087).**
+
+### Added
+- `scripts/sonar_rules.py` checks changed code against the 14 SonarQube rules the gate has raised, scoped as the gate scopes: changed lines and elements against a base, thresholds when crossed. `check-quality.sh` and the App Store packager fail on a blocking finding (SPC-233).
+- `docs/SONAR-RULES.md`, the rule ledger: each rule, the release that raised it, its calibration and the procedure for a new one. `docs/CODE-QUALITY-GATE.md` now says the new-code window runs from master, 0.6.4 (SPC-233).
+
+### Changed
+- Every blocking finding since master is cleared, with no change in behaviour, by the owner's ruling that issues are converted as code is touched: first-party JavaScript reads `data-*` attributes through `dataset` and uses `Number.parseFloat`, `Number.parseInt` and `Number.isNaN`; Python has no exact float equalities or nested conditional expressions; Decision Engine row fields, the sweep search and the time-to-execute fields carry labels a screen reader announces; live status messages use `aria-live` (SPC-233).
+- The three changed-line checks (`sonar_rules.py`, `sonar_scope.py`, `cognitive_complexity.py`) and `check-quality.sh` read the diff whatever the caller's `diff.noprefix` or `diff.mnemonicPrefix` setting, which had hidden every finding; a base that names no commit stops them with exit 2 instead of being handed to git or read as nothing changed; with no local master they measure from `origin/master`; the packager stops if the checker is missing (SPC-233 review).
+- One finding stays: the closest-approach chart's `<canvas role="img">`, which no native element can replace without losing its accessible name. `docs/SONAR-RULES.md` sets out the alternative (SPC-233).
+
+## [0.34.0] - 2026-11-12
+
+**The newest element set from every UDL provider (charming-dirac 7ed9d0b and 5751c3e).**
+
+### Changed
+- A latest fetch, from the TLE panel, quick-add, the sweep or the refresh at connect, takes the newest set any UDL provider filed in the last 72 hours, or the chosen TLE Source, falling back to the current catalogue. Sets tied at the newest epoch are none of them older: the one the acceptance check passes is taken, whatever order UDL lists them in. When every newest set is refused, nothing is stored and no older set is taken, as before (SPC-232).
+- The TLE Source list lists every provider on the ISS's 24-hour archive and every provider the held sets came from, and is cleared at disconnect and at each new connection (SPC-232).
+- The repeated UDL path and timestamp literals are named constants (SPC-232).
+
+### Added
+- Held red tracks and blue assets keep the provider that filed their set. The red card and the sweep name it, the sweep only for the set it flew, never a pasted one; a training set reads as SYNTHETIC; editing the set by hand drops it (SPC-232).
+- `docs/BUILD-STATE-AND-ROADMAP.md` lists UDL's element-set providers as of 28 October 2026, and what is still unknown about them (SPC-232).
+
+## [0.33.0] - 2026-11-12
+
+**The small changes from the charming-dirac branch, ported by the owner's ruling of 2026-11-12.**
+
+### Changed
+- Base image moved to the current `python:3.12-slim-bookworm` build, Python 3.12.16, clearing CVE-2026-115557; pinned by digest in both Dockerfiles. Not built or scanned here, as no Docker daemon was available (SPC-231, SPC-236).
+- An SGP4-XP element set (ephemeris type 4, or any type but 0) or an uncorrelated track is refused by the one acceptance check on every ingest path, history included. The newest set is still the one taken; when it is refused, nothing is stored and the page says why. The log counts what was skipped by type and provider, never the set's text (SPC-231).
+- Asset screening no longer treats rocket bodies, debris, decayed objects, or payloads over 15 years old with no intelligence record as actors, and names each one it leaves out. The 15-year working life is an assumption, stated on the page (owner ruling 2026-11-12; SPC-231).
+- Plane change, phasing and the R-bar, V-bar and H-bar hops report their true closest approach to the target. Previously these figures were 0, the radial gap, the separation asked for, or the distance travelled. A figure that cannot be computed never reads as reaching the target. No row's arrival status changed; rows that do not reach the target stay listed and labelled (owner ruling 2026-11-12; SPC-231).
+- The sweep's element-set ages line covers every target flown, including those where every method failed or went over budget, but never one skipped for its regime (SPC-231).
+- The pre-paint theme script tests membership with `includes()`; open dropdown lists take the theme's colours (SPC-231).
+
+### Added
+- `scripts/verify-container.sh` runs Grype and fails on any fixable High or Critical finding. A scan that cannot run is reported SKIPPED, never passed. A failed check no longer leaves the proxy CA certificate or the patched Dockerfile in the repository, and git ignores both (SPC-231).
+
+## [0.32.0] - 2026-11-12
+
+**Element-set error in the miss (evaluation F-11), and the console's script under a policy with no inline script or eval (F-08).**
+
+### Changed
+- Every sampled closest approach now draws each object's element-set error along track, 1 sigma from the sweep's own age model (1 km plus 2 km a day in LEO, 2 km plus 1 km a day at GEO; tuned, not sourced), red and blue each their own, seeded so an evaluation repeats. Every computed miss shows a 1-sigma band beside it, the two sets' errors in quadrature at the time of closest approach, and the score reads its lower edge. Every sentence that said element-set error was not in a figure now names the error, its model and the ages read. Records of 0.28.0 to 0.31.0 replay under the rule they were evaluated by (stored inputs version 4). No stored record's or reference case's pick changed; a burn sized short of the error now buys less than its target says, and the result says so (SPC-202).
+- The Content Security Policy's `script-src` is `'self'` alone: every inline script, event-handler attribute and `hx-on` moved into first-party files under `spectre/web/static/js/`, htmx runs with eval and script tags off, and browser tests drive every control under the policy (SPC-199).
+
+### Added
+- `docs/threat-model-decision-engine.md`: a draft engine threat model by the 7 ISN 2023/09 principles, 11 threats each with what exists, what remains and its owner, for the owner's security lead to review and sign (SPC-199).
+
+## [0.31.0] - 2026-11-12
+
+**Operator output: 4, the recommended response, states how far a weight must move to change it (evaluation F-16), and collect-first advice is tied to the decision it informs (F-14).**
+
+### Added
+- Weight stability beside the recommendation: for each of the five weights, the others rescaled in proportion, the smallest change in each direction that changes the pick and what it changes to, or that none within 0 to 1 does, for the primary rule's headline and the chosen rule's pick when it differs. Exact, from the breakpoints where the linear scores cross, not sampled; vetoed responses are never reported; the tree's picks are not covered, and the page says so. On the evaluation's bound scenario the delta-V weight moving by 0.089 changes the pick. The decision record stores the line (SPC-205).
+
+### Changed
+- Collect-first advice in the Decision Engine is computed from the engine: the recommended response under each of a cue's outcomes. Today the outcome matrix reads no Threat band, so no collection can change the recommendation, and the advice says so and recommends no delay. "Where your response changes" is gone from every sentence; the action line is described as the Threat band at which the owner may set that a response changes, HIGH by default, tuned, not sourced (SPC-204).
+
+## [0.30.0] - 2026-11-11
+
+**Inputs the engine accepts: element-set integrity (evaluation F-25), a written operating envelope (F-09) and what P means (F-12).**
+
+### Added
+- One acceptance check for an element set, run on every path one enters by (UDL fetches, the background refresh, the operator's pages, the sweep, the bundled data and the binder): both line checksums and line numbers, one readable catalogue number on both lines (and the one asked for), an epoch that reads, the format's own characters, inclination, eccentricity, mean motion and the three angles in range, and an orbit SGP4 can start from. A refused set is not stored and never replaces a held one; the refusal is logged without the set's text and said in a sentence naming the object (SPC-201, evaluation F-25 and F-34).
+- `docs/decision-engine-envelope.md`: the operating design domain, every row held to the code by a test. Checked at entry: an object below the re-entry floor, or reported decayed by SGP4, is refused on the SGP4 path as on RK45; a set on SDP4, the deep-space branch, is flagged with its limits named as rules of thumb not validated for it (sourced limits are SPC-215); all five weights at 0 are refused (SPC-200, evaluation F-09, F-30, F-31).
+
+### Changed
+- P is a probability over mutually exclusive adversary actions: the rows' P must sum to at most 1, and a sum above it is refused at the panel and by the scenario, naming the sum. Below 1 the engine adds one row of its own, "No adversary action (remainder of P)", weighed by every rule, the comparison, the tree and the record, labelled as the engine's, not the operator's. Each row shows its share beside its P. Some picks move as intended: a single manoeuvre row at P 0.1 no longer reads as certain. Three rows left at the default 0.5 are refused until P is set (SPC-203, evaluation F-12).
+- Stored inputs are written at schema version 3, holding the probability rule; records written by 0.28.0 and 0.29.0 read under the rule they were evaluated by and replay exactly, and the replay says so.
+
+## [0.29.0] - 2026-11-11
+
+**Operator output: 4, the recommended response, can exclude responses the operator marks not permitted (evaluation F-04), and every input says whether it is the operator's judgement (F-05).**
+
+### Added
+- Each friendly response can be marked "Not permitted", with a reason of up to 500 characters. A vetoed response is removed before aggregation: it is never the pick under any rule, in the side-by-side comparison, in a game tree at any turn or in the decision record, and it is never ranked first. It is still evaluated and shown greyed with "Not permitted" and its reason. With every response vetoed, nothing is recommended and the result says why. Recording a vetoed response as the operator's own decision needs a rationale. Constraint libraries from doctrine or rules of engagement are the owner's to supply later; the veto is Claude's design (SPC-195).
+- A fourth basis, judgement, for every value the operator enters that reaches a score or a pick (response cost, reversibility and time to execute, P and Conf, the weights, the keep-out distance); it never lends a figure more standing than lookup, and the results list the judgement inputs in words (SPC-196).
+- `docs/lookup-register.md`: every fixed figure the Decision Engine uses, with its value, place in the code, purpose, source, owner and date. A test fails when a listed constant changes or disappears, or when an engine module gains a numeric constant the register does not list (SPC-196).
+- The code version on the results page (SPC-196).
+
+### Changed
+- Stored inputs are written at schema version 2, which carries each response's veto; version 1 records from 0.28.0 still read and replay.
+
+## [0.28.0] - 2026-11-11
+
+**Operator output: 4, the recommended response, shows all three rules side by side (evaluation F-03) and can be replayed from its record (F-02).**
+
+### Added
+- Every result shows the picks under minimax, minimin and expected value side by side, each with its meaning, and says whether they agree or which differ; where a tree was built, each rule's turn-1 pick on it too. A deployment sets its primary rule (`SPECTRE_PRIMARY_RULE`, default minimax, Claude's choice as the cautious rule; an unknown value is read as minimax with a logged warning). The panel defaults to it, the headline is its pick, and when the operator chose another rule both answers stay on screen. The decision record stores the primary rule and whether the chosen rule differed (SPC-194).
+- Each decision record stores the evaluation's canonical inputs: the whole scenario, including each bound element set's text, the rule and the score matrix, as one canonical JSON document with its SHA-256. `scripts/replay_decision.py` rebuilds and re-evaluates a record and reports whether every pick, score and input hash matches, saying first when the code version differs; the reader refuses tampered, unknown or incomplete documents (SPC-193). Storing element-set text reverses 0.27.0's "no element-set text": it is Claude's choice, held in the deployment's own database as the NOTSO cache is, and the owner's open retention ruling (SPC-228) now covers it.
+
+### Changed
+- An existing 0.27.0 database gains the record's four new columns in place at start.
+
+## [0.27.0] - 2026-11-10
+
+**Operator output: 4, the recommended response, is now recorded with the operator's decision (evaluation finding F-01).**
+
+### Added
+- A decision record for every finished evaluation, kept in the database: when, who, the scenario, the rule used, the recommendation, the picks under all three rules, the turns, the keep-out distance, the code version and every input hash. No element-set text or raw input is stored (that is SPC-193). The operator records one decision on the results page, once: one of their own responses, "None of these" (with a rationale) or "Decision deferred", with a rationale of up to 2,000 characters. A second decision, or a decision on another operator's record, is refused. A Decision records page lists an operator's own records, and every record for an admin. A deleted account's records are kept, readable by an admin. No retention is applied: retention, access and erasure await the owner's ruling as data protection lead (SPC-192, SPC-228).
+- SGP4 is checked in the suite against the published verification vectors shipped with the sgp4 library, and the production RK45 settings against a tight DOP853 reference at 48 h and 72 h (evaluation finding F-06, SPC-197).
+
+### Changed
+- The Decision Engine reads the sweep's threat picture for the same red track at any age, and states its age beside every line it feeds; a decide-by already passed is restated, not dropped (owner ruling, SPC-181).
+- The operator guide no longer calls the engine "game-theoretic": it is decision analysis over the operator's rows, minimax a guaranteed floor over pure responses, not a game solution, and randomised responses are not considered (evaluation finding F-15, SPC-218).
+- The test suite's database is a temporary SQLite file rather than one shared in-memory connection, so a background record write is not undone by a request's rollback.
+
+## [0.26.0] - 2026-11-10
+
+**Operator output: 4, the recommended response, now registers miss distance (evaluation finding F-10).**
+
+### Changed
+- The score values closest approach in orders of magnitude: the full penalty at or inside a keep-out distance the operator sets on the panel, none at 50,000 km or more, and ln(50,000 / miss) / ln(50,000 / K) between. Before, it was linear over 0 to 50,000 km, so 1 m/s of our delta-V weighed the same as 400 km of miss (SPC-191).
+- The score values our delta-V in orders of magnitude up to the engine's 1,000 m/s per-burn limit, ln(1 + dv) / ln 1,001, so 100 and 500 m/s no longer score the same.
+- At the defaults, spending about 9.3 m/s to move a miss from 1 km to 100 km now breaks even; it was about 0.25 m/s. No reference case's pick changed; far-miss scores fall, so some cells move to a lower colour band (finding F-18, SPC-208, is open).
+
+### Added
+- A "Keep-out distance (km)" field on the decision panel, from 0.1 to 10,000 km, default 10 km. The default and both scales are Claude's design choices, unsourced, and every result says so; the technical authority has not yet signed the scale rationale (`docs/decision_engine_phases.md`, "Score scales"), so F-10 stays open until it does.
+
+## [0.25.0] - 2026-11-10
+
+**Operator output: 4, the recommended response, from four owner rulings of 5 November 2026.**
+
+### Changed
+- A sampled evaluation may now run for 300 s, not 120 s, so the cost cap rises from 4,800 to 12,000 sample-hours at the measured 40 sample-hours a second. The panel's hints, the refusals and the tree's cost check say so; nothing else bounds a run below 300 s (SPC-178).
+- Degraded custody, an orbit current but with no history to judge its burns, now scores between held and lost: each hour degraded carries 0.25 of the penalty an hour lost carries, the owner's ruling and not a sourced figure. Degraded hours are shown as degraded in the cell, its basis and the custody note, never as held or lost, and the custody gap counts lost hours only. The game tree's observation model is unchanged: degraded custody still shows nothing (SPC-179).
+- The panel records whether each P was edited, so a deliberate 0.5 is no longer read as untouched; an applied NOTSO suggestion counts as edited. A row never edited reads "P 0.5 is the panel's default, never edited" (SPC-183).
+- A scenario opened from the sweep carries every burn of the transfer, each at its own time, applied in time order wherever the row is sampled or sized against. A burn at or before the bound red element set's epoch is dropped, and the panel, the result, the session log and the provenance name every burn applied and dropped. Custody reads the earliest burn applied. The game tree refuses a row of several burns and keeps the one-turn result (SPC-184).
+
+### Added
+- `scripts/udl_conjunction_probe.py` (SPC-033): checks the assumed UDL conjunction field names against live UDL and prints
+  field names, types and value shapes only, for the owner to run where UDL is reachable.
+- `docs/analyst-session-agenda.md` (SPC-080): the agenda and questions for the analyst session the owner is arranging.
+- `evaluation/`: an independent evaluation of the decision-analysis engine at 0.24.2 against the owner's framework. Verdict Fail (9 of 10 gates Red), score 1.68; 36 findings, now SPC-191 to SPC-226 on the board.
+
+## [0.24.2] - 2026-11-05
+
+**Test hardening: a mutation run, concurrency tests, PostgreSQL in CI, and one race fixed.**
+
+### Fixed
+- The sweep's cluster reduction could overwrite an element set another fetch had just refreshed; it now writes a cluster's representative only over an entry still holding the value it read (found by SPC-073).
+
+### Changed
+- A committed mutation runner and report. Every kill is re-checked by running its test alone. The security core (465 mutants) scores 417 killed or timed out, and every remaining survivor has a written reason in `docs/MUTATION-REPORT.md`; 103 survivors were killed by new tests. The astro figures were not re-checked this way, and the report says so (SPC-071).
+- Concurrency tests with barriers and events, no sleeps: many sign-ins at once, sign-out during a job, a newer evaluation replacing a running one, the one sampled slot under contention and the login budget (SPC-073).
+- The suite runs on PostgreSQL 16 in CI as well as SQLite, proven green first; a PostgreSQL test proves the admin row lock stops two concurrent demotions removing the last admin (SPC-070).
+
+## [0.24.1] - 2026-11-04
+
+**Test hardening, and one sweep panel fix.**
+
+### Fixed
+- With the interceptor's regime unknown, the sweep's target panel said its list was unfiltered and then offered no target groups, so only manual targets could be swept. Every group is now offered, unfiltered, and the panel says so.
+
+### Changed
+- The threat route is held by tests at each refusal and fallback: coverage rises from 91.8 to 98.3 per cent and its CI floor from 90 to 95 (SPC-010).
+- Each house-rule guard has a committed red case that runs its own detector on planted bad input, so a guard that silently stops detecting anything goes red; the clustering guard now requires the Dockerfile COPY, not just the package's name (SPC-074).
+- Exhaustive invariant tests for Kepler, RK45 and Lambert: round trips, energy and angular momentum, end points and times, and delta-V never negative, with each tolerance justified (SPC-013).
+
+## [0.24.0] - 2026-11-04
+
+**Operator output: 4, the recommended response, shows its game tree, and the operator guide describes the Decision Engine as it is built.**
+
+### Added
+- The game tree's view. The decision panel takes a turn depth of 1 to 3, refused inline when the tree would not fit, naming the largest that would, and an optional statement of what turn 1 shows (a burn, no burn or nothing), refused on a one-turn evaluation. The results show the tree as nested sections: each branch with its figures and their basis in words, the path it rests on, times no finer than their uncertainty, and whether it is on the recommended plan; the per-turn recommendation for the rule in use; under expected value the update with its likelihood model and the stated observation, or a line saying none was stated; under minimax and minimin what each turn lets us see, and that the rule reads no probability. A partial tree names the deepest turn built in full (SPC-142).
+
+### Changed
+- The Decision Engine section of the operator guide and `docs/decision_engine_phases.md` are rewritten to describe the engine as built, with its design choices numbered D1 to D15. The guide no longer lists MAXIMIN, adds Minimin and Game Tree, and its bullets are ● and ■ throughout (SPC-152).
+
+### Fixed
+- The 0.23.0 entry above described the game tree's design, not its code: the selectors pick over information sets, and the update reads custody at each turn's end with likelihoods of 1 or 0. It is corrected.
+
+## [0.23.0] - 2026-11-04
+
+**Operator output advanced: 4, the recommended response, can now look up to three turns ahead; and two defects found by new tests are fixed.**
+
+### Added
+- A game tree of one to three turns. Turn 2 starts from where turn 1's burns left both objects, every figure in a tree is RK45 for both objects, and each node's figures carry their basis and the path they rest on. A tree runs as one evaluation inside the 120 s budget, capped at 1,000 branches, and is refused before it runs when it would not fit, naming the largest that would; a run that overruns shows the deepest turn built in full and says so (SPC-140).
+- Selectors over the tree, by backward induction over information sets: each turn's pick depends only on what we would have seen by then. Minimax takes the worst sequence over every red move and every branch that fits what we would have seen; minimin the best; expected value weighs red's moves by the rows' P and the branches by the update after what we have seen. What a turn shows of red is the bound red track's custody at the turn's end (lost at a burn shows a burn, held shows none, anything else shows nothing), so the update is the rows' P restricted to the moves that fit, renormalised. It says which turn-1 branch we are on, not what red does next, is shown only under expected value, and is never written into a field. No view yet (SPC-142) (SPC-141). Corrected in 0.24.0: this entry first described the design, not the code.
+
+### Fixed
+- The Pattern of Life chart now draws once an analysis is loaded; its route read a field that no longer exists and returned a 500, which the panel swallowed (found by SPC-012).
+- A refused state vector fetch now gives the same advice as the other UDL calls, and logs the detail (found by SPC-011).
+
+### Changed
+- Coverage floors that guard something: the whole suite at 90 per cent (it was 74 against 95.9 measured), and floors of their own for the Pattern of Life route (100), the UDL route (95) and the threat route (90, from 75). Tests now pin the refusals, data modes, rate limits and error sentences at every exit of the Pattern of Life and UDL routes, raising them from 69.7 and 85.5 per cent to 100 and 99.8 (SPC-012, SPC-011, SPC-014).
+- The quality gate accepts a coverage floor above the house standard instead of refusing it.
+
+## [0.22.0] - 2026-11-04
+
+**Operator output advanced: 4, the recommended response, now says whether it holds across the uncertainty in a NOTSO-based probability, not just at its centre.**
+
+### Added
+- Load from NOTSO on each adversary row: it shows that row's suggestion, its basis and an unticked apply box, and writes nothing into P or Conf (SPC-131).
+- A NOTSO timeline in the results for each applied suggestion: the periods the cache covers, the gaps, time before launch and the time since the cache's last cover, each named as not counted, and each counted notice dated, readable without colour (SPC-131).
+- An exact 95 in 100 Poisson interval on each suggested probability, edges rounded outward. Under expected value the results say whether the recommendation holds across each row's interval, naming the probability where it would change, and with two or more rows across every corner of their joint range. Minimax and minimin say they do not use probability and show no interval (SPC-132).
+
+### Changed
+- A row's NOTSO suggestion is worked out only once the operator loads it, not on every change to the form.
+
+## [0.21.0] - 2026-11-04
+
+**Operator outputs: the Threat Understanding concept is now built end to end, with its verdict switch off pending the owner's sign-off; analysts can record their judgement of it; and the Decision Engine offers a probability from NOTSO history.**
+
+### Added
+- The verdict switch, behind `SPECTRE_THREAT_VERDICT_SWITCH`, off in every shipped configuration. On, the verdict shown is the Threat ceiling when Understanding is LOW or the range spans four bands or more, otherwise the current reading held inside the range, each with a visible reason. The sign-off sheet, `docs/threat_verdict_reference.md`, gives old against new verdict for all 20 bundled red objects, and a test fails if the sheet and the code ever disagree: 11 of 20 change, all to the access ceiling, because every bundled element set is synthetic (SPC-175).
+- The adjudication log. An analyst records agreement or disagreement with an object's Threat range and Understanding, with a reason; it never moves a band, a form for another object or an older picture is refused, and the coverage rate shows only once 30 judgements exist. Judgements are held per sign-in (SPC-176).
+- A probability and confidence suggested from the object's NOTSO history beside each adversary row, with its basis: the notices counted, the periods the cache covers and the gaps it does not. Gaps and time before launch are never read as quiet, nothing is offered below the sample floor or under 0.01, and nothing is written in unasked; the result records whether each value was the operator's own or an accepted suggestion (SPC-130).
+
+### Fixed
+- The scenario binding fields refresh in a browser again. Inside the evaluate form they took the form's htmx settings, threw, and never sent their request, from 0.11.0 until now.
+
+### Out of scope, named
+- Turning the verdict switch on, which is the owner's decision (SPC-175). Verifying the doctrine citations before any PHIA or ICD 203 wording appears, which needs network access (SPC-177). The live check of the UDL conjunction contract (SPC-033).
+
+## [0.20.0] - 2026-11-04
+
+**Operator outputs: the sweep's answer becomes a decision in one step, and Threat Understanding reads interactions from conjunctions and from known hostile objects.** The threat verdict word and band are unchanged.
+
+### Added
+- Open a decision from the sweep. A Decide control on the worst case, and on each arriving target row, opens the Decision Engine panel with the red track, the blue asset when the target is a held one matched by catalogue number (or a sentence saying why it cannot be bound), and a hypothesis from the worst course of action or the detected burn. The panel says what was filled and from which sweep; nothing is evaluated on the operator's behalf, and probability and confidence are never filled (SPC-150).
+- Interactions from held UDL conjunctions and the sweep's closest approaches, kept per object between sweeps. A conjunction counts only from REAL data and only when it came closer after a confirmed burn by more than the element-set error; a malformed miss distance or a stale element set is refused and stated, and UDL rows are graded as the unverified probe they are (SPC-173).
+- Suspicion from a hostile seed list over one and two hops, never a third; a benign seed clears nothing, and one edge never lifts the floor past MEDIUM through propagation. The list is owner data read only from the `SPECTRE_HOSTILE_SEEDS` path, validated strictly, and none is shipped (SPC-174).
+
+### Out of scope, named
+- The verdict switch, off until the owner signs off against the reference table (SPC-175), the adjudication log (SPC-176), the doctrine wording gate, which needs network access to verify citations (SPC-177), and the live check of the UDL conjunction contract (SPC-033).
+
+## [0.19.0] - 2026-11-04
+
+**Operator outputs advanced: 4, the recommended response, now says when to collect before acting; and Threat Understanding gains its first interaction evidence.** The threat verdict word and band are unchanged.
+
+### Added
+- Collect first. The Decision Engine reads the sweep's Threat picture for the bound red track while it is under 30 minutes old, and its decide-by only for the blue asset it was set for, so the two never disagree. When the threat range straddles the line where the recommended response changes and a collection that could move it off that line lands before decide-by, the guidance says collect first and names it; with decide-by passed, it says act on the ceiling. Collections are listed beside the ranking, never scored against the operator's responses, so the recommendation is always one of the operator's own rows (SPC-171).
+- Interactions evidence. An approach to one of our assets counts only when a confirmed burn caused it within 7 days and brought the target into reach sooner. Newly in reach after a hostile burn raises the threat floor to HIGH once Interactions is earned; a pass with no burn behind it adds nothing, and one resting only on routine burns is coverage only (SPC-172).
+
+### Changed
+- Lookup distances, the rule-of-thumb custody and the response delta-V lookup now serve only scenarios not bound to real objects, labelled as lookups, so no bound figure rests on one (SPC-125).
+- A red-bound operator is no longer told to bind red; an element-set limit reached as the horizon ends reads so on either side of float tolerance; a bound evaluation says when it is waiting on a first or a fresh UDL history fetch (SPC-119).
+
+### Out of scope, named
+- Interactions from UDL conjunctions and held closest approaches (SPC-173), hostile seeds and propagation (SPC-174), the verdict switch, off until the owner signs off (SPC-175), the adjudication log (SPC-176) and the doctrine wording gate (SPC-177).
+
+## [0.18.0] - 2026-11-04
+
+**Operator output: 1, "does it mean anything", now says how well SPECTRE understands the satellite on every panel that shows it, and what to collect next to understand it better.** The verdict word and band are unchanged.
+
+### Added
+- What to collect next. Each threat carries up to three cues, such as holding its conjunctions or pulling a second provider's history, each saying how many steps of the threat range it would remove and how long it takes, ranked by steps per hour (SPC-170).
+- The Threat Understanding display on the sweep, the red track's intel card and the Pattern of Life results: the Threat line first, then the Understanding line with its cues, a four-cell strip for identity, capability, manoeuvres and interactions with each item's grade, age and basis, the Missing list and the evidence ledger, from one shared view so every panel agrees (SPC-168).
+- Screening shows a range and an Understanding column from cached history only, reading "no history held" where none is cached, and names a disagreement when the verdict sits outside the range or the range is wide at LOW (SPC-169).
+
+### Changed
+- The verdict badge is outlined, not filled, unless Understanding is computed and above LOW. All 20 bundled red objects use synthetic element sets, so every badge in a demonstration is outlined: the honest answer, worth briefing first.
+
+### Out of scope, named
+- Collect-first rows in the Decision Engine (SPC-171), interactions (SPC-172 to SPC-174), the verdict switch, off until the owner signs off (SPC-175), the adjudication log (SPC-176) and the doctrine wording gate (SPC-177).
+
+## [0.17.0] - 2026-11-03
+
+**Operator outputs: 1 and 3 made more honest, and Threat Understanding reaches the sweep.** Beside today's verdict, which is unchanged, the sweep now shows the threat range and how well SPECTRE understands the satellite, with the evidence behind both.
+
+### Added
+- Threat Understanding on the sweep, beside the verdict. The threat range (floor and ceiling within access) and Understanding (HIGH, MODERATE or LOW) show under the confidence line, each labelled, with the evidence ledger collapsed by default and its hash. The verdict badge and sentence are unchanged and pinned for all 20 bundled red objects (SPC-166).
+- The evidence comes from what SPECTRE already holds: the assessed record, counted for identity only when it carries a date; the GCAT catalogue row; the element-set history's reserve and spent-tank readings; each burn's normality; the providers that corroborate it, with spellings of one provider counted once; and the anomaly index as a capped lookup. A burn with too little history to judge is listed as missing, not counted (SPC-165).
+- A custody gap share per adversary row on the decision panel, defaulting to 0.7, with P, Conf and Gap labelled and explained (SPC-161).
+
+### Changed
+- Decide-by is withheld only when custody is lost or the evidence earns a computed MINIMAL ceiling with Understanding above LOW. A declared Degraded status no longer withholds it, and a spent tank read from one provider's history does not earn the ceiling, so decide-by stands and the sentence says why (SPC-167).
+- Intelligence confidence no longer sets our custody gap; it is recorded and moves no figure, and the expected-value selector weights by probability as before. The operator guide said otherwise and is corrected (SPC-161).
+
+### Out of scope, named
+- The full display across panels (SPC-168), a second provider's history (SPC-169), what to collect next (SPC-170), collect-first in the Decision Engine (SPC-171), interactions (SPC-172 to SPC-174), and the verdict switch, off until the owner signs off (SPC-175).
+
+## [0.16.0] - 2026-11-03
+
+**Operator outputs advanced: 4, the recommended response, now computes what our own manoeuvre buys; and the owner's Threat Understanding concept begins: the more SPECTRE understands a satellite, its capability, manoeuvres and interactions, the more it understands its threat.**
+
+### Added
+- Threat Understanding, the concept (`docs/threat_confidence_concept.md`): researched against how Google builds confidence from many signals and against UK and NATO evidence grading, then judged across three designs. Threat becomes a range that narrows as independent, fresh, reliable evidence is earned, and Understanding (HIGH, MODERATE, LOW) says how well founded it is and what to collect next. SPC-160 to SPC-177 carry the build.
+- The Threat Understanding model, a pure module held at every line by its tests: evidence graded on the Admiralty scale with freshness, copies of one source counted once, declared claims capped, a floor and ceiling set by earned readings, a contradicted impairment voided as possible deception, conflicts that never narrow, and Understanding as the weakest of information base, analytical rigour and volatility. Not yet on screen; the sweep shows it beside today's verdict in SPC-166 (SPC-162, SPC-163, SPC-164).
+- Our response is computed: a friendly manoeuvre's burn is sized by propagation to a target separation, blue is flown after it, and each cell scores what the burn buys and the delta-V it spends, so a row's responses differ (SPC-121).
+- Each cell shows its time of closest approach with an uncertainty from position error over closing speed (about plus or minus 1.2 h on a slow GEO approach), a Show trajectory button for the Hill-frame view, and a histogram of times of closest approach in a sampled cell (SPC-124).
+
+### Changed
+- Sweep confidence counts independent sources, each once, never the orbital geometry, and says what it rests on and what is missing. The four figures from one element-set history count once; an undated assessed record cannot establish identity, so confidence now tops out at MODERATE until dated records arrive; a recorded status is declared, not observed; a recorded impairment contradicted by observed burns is named as possible deception. The verdict band is unchanged (SPC-160).
+- Once any response burns, every computed figure in that result is on RK45 for both objects, so no figure or row mixes propagators; the SGP4 no-burn figure stays as a reference (SPC-121).
+- Sampled runs end where an element set passes its age limit, as computed runs do (SPC-118).
+
+### Out of scope, named
+- Threat Understanding on screen (SPC-166), its adapters from held signals (SPC-165) and the verdict switch, which stays off until the owner signs off (SPC-175).
+
+## [0.15.0] - 2026-11-03
+
+**Operator output advanced: 4, the recommended response. With both sides bound, closest approach and custody come from the real orbits, not lookups, and custody means what the operator means by it.** Recommendations can change for every bound scenario, because closest approach and custody no longer depend on the response chosen.
+
+### Added
+- Computed closest approach. With a red track and a blue asset bound, a row whose action does not move red gets its closest approach and its time from SGP4 on both element sets, refined as the access search does, over the span both orbits stay inside their age limits. It passes the reference cases. A manoeuvre row with no hypothesis stays a lookup, because its no-burn miss would understate the threat (SPC-120).
+- Custody in each outcome is the bound red track's custody, held, degraded or lost as on the sweep and by the same rule, carried over the horizon: lost from the moment its newest element set passes its limit, assuming no newer one arrives. Degraded, an orbit current but no history to judge its burns, scores as lost, so with UDL not connected a bound evaluation reads custody lost. An unbound scenario keeps the rule of thumb and says so (SPC-123).
+
+### Changed
+- A sampled closest approach converges when its uncertainty is small next to the miss, with an absolute floor, not only below 1 km, so a burn already made can be sampled; the page says what converged means (SPC-117).
+- One figure never mixes propagators: computed is SGP4 on both sides, sampled is RK45 on both. When both kinds share a matrix, the page states the measured gap between the propagators, below which a difference between rows means nothing.
+
+### Fixed
+- The admin error flash, the Steel theme's logout hover and its focus ring are above their contrast floors (SPC-035).
+
+### Out of scope, named
+- Our response is not applied to the blue orbit (SPC-121). The sampled path is not yet trimmed to the element-set limits, and a time of closest approach carries no uncertainty (SPC-118).
+
+## [0.14.0] - 2026-11-03
+
+**Operator output advanced: 4, the recommended response. An operator can now enter a manoeuvre hypothesis, run it against the real orbits without holding up anyone else, and read the sampled closest approach as a band, with lookups still labelled as lookups.**
+
+### Added
+- A hypothesis section on each adversary row of the decision panel: archetype, delta-V, RIC direction, spread and samples (100 to 2,000, default 500), each range-checked inline with the field named. A row without one stays a lookup (SPC-114).
+- A sampled evaluation runs as a job the page checks every 2 s, showing which hypothesis is being sampled and how much of its 120 s budget is used, with Cancel. It stops within a sample when cancelled, replaced by a newer evaluation, signed out or the server stops. One sampled evaluation runs at a time on the server; a second waits, says it is queued, and its budget starts when it runs. A cell that does not finish names the budget (SPC-113).
+- Sampled cells show P5 to P95, with P5, P50, P95, the spread, the samples and the convergence on hover, and an uncertainty column; the ranking shows the spread of the score across samples. A lookup cell shows no band and says lookup (SPC-115).
+- A hypothesis that starts more than 100 m/s from the bound red track's velocity is refused as being in other units or from another object (SPC-116).
+
+### Changed
+- The cost cap rises from 600 to 6,000 sample-hours, set from measured rates for the 120 s budget. A default hypothesis over 48 h is still refused, and the refusal names the longest horizon that fits, for example 11.8 h at 500 samples. The horizon field takes tenths of an hour so that horizon can be entered.
+
+### Fixed
+- The Steel theme's admin bar buttons had dark text on the dark bar; they read 7.12:1. The admin flash used a class no stylesheet defined (SPC-034).
+- The results footer showed a 9.4 h horizon as 9h.
+
+### Out of scope, named
+- Our response is not applied to the blue orbit, so a sampled closest approach is the same across a row's responses. Most burns already made are refused as not converged against the 1 km tolerance (SPC-117). The admin error flash's contrast (SPC-035).
+
+## [0.13.0] - 2026-11-03
+
+**Operator output advanced: 4, the recommended response, gets its first figure computed from real orbits.** When a scenario is bound to a red track and a blue asset and an adversary action carries a manoeuvre hypothesis, that cell's closest approach is sampled from the Monte Carlo engine and scored on its P5, the smallest likely miss. Every other figure is still a lookup, and the page says which is which.
+
+### Added
+- A separation series from the Monte Carlo engine: each sample of the hypothesis's burn, drawn from its delta-V, pointing, timing and drag spreads, is flown against the bound blue asset over the horizon, red and blue alike on RK45 with J2 and drag, and its closest approach found with the shared helper. It passes the closest-approach reference cases at both window starts (SPC-110).
+- Sampled cells. The cell's closest approach is the P5 of the samples' misses, with P5, P50 and P95, the spread, the samples and the propagator in its basis, and its time to closest approach from a sample at or below P5. The ranking still reads as a weighted heuristic, and the page says the 50,000 km normalisation lets the sampled spread move a score only slightly (SPC-112).
+- Each refusal is a sentence in the cell, never a quiet fallback to the lookup: over the cost cap (it names the longest horizon that would fit), a stale orbit, an element set newer than the burn, a hypothesis that does not start at the bound red track, failed samples, or samples that did not converge (SPC-112).
+
+### Changed
+- The decision evaluation runs on a worker thread, so a sampled evaluation, up to about 9 s within its cap, no longer stalls every other signed-in session.
+- The 13 colour names used but defined nowhere now resolve in both themes, and a test keeps it that way (SPC-029).
+
+### Out of scope, named
+- The panel to enter a hypothesis (SPC-114), the time budget off the request (SPC-113) and P5 to P95 bands in the cells (SPC-115). Our response is not yet applied to the blue orbit, so a sampled closest approach is the same across a row's responses. A coarse velocity check on the hypothesis's start (SPC-116).
+
+## [0.12.0] - 2026-11-03
+
+**Operator outputs: 2 and 3 made more exact, and output 4, the recommended response, gets its manoeuvre hypothesis.** Decide-by now honours a response time per target, a burn the sweep could not show stays watched, and every Decision Engine figure is still a lookup.
+
+### Added
+- A response time per target. Set one for a named target on the sweep form and decide-by uses it; otherwise the sign-in's, otherwise the 12 h default, and the sentence says which: "your response time for BLUE-1 of 6 h". Decide-by is the earliest decide-at across targets, so a later arrival with a longer response time can set it. A time held for a name no swept target has is said to be unused (SPC-022).
+- A manoeuvre hypothesis on an adversary action: from an archetype, an entered delta-V with a RIC direction, or a detected manoeuvre, with its direction basis and archetype carried with it (audit F-104). It is in the result's provenance and changes no figure yet; a test proves no figure or selector reads it (SPC-111).
+- Alpha-5 catalogue numbers are read wherever SPECTRE reads a catalogue number: A0001 is 100001, skipping I and O. An invalid letter stays unreadable, never guessed (SPC-026).
+
+### Fixed
+- A burn the sweep refused to show, because custody was lost or the flown orbit predates it, stays announceable by the burn watch; it used to count as already told (SPC-028).
+- An undated burn is said to have happened between two times, in the watch's alert and log and in the sweep's notes, not at a single time the software has not earned (SPC-028).
+- Signing out blanks the stored UDL credentials, so a watch check in flight cannot use them (SPC-028).
+- 22 uses of the colour token `--ops-gold`, which was defined nowhere, now use the existing `--gold`. A test refuses any colour name defined nowhere; 13 older ones are listed with reasons for SPC-029 (SPC-027).
+
+### Out of scope, named
+- UDL observation endpoints wait on the live check of the conjunction contract (SPC-032 after SPC-033). Removing a held per-target response time: it lasts until sign-out, and the form says so. An Alpha-5 number written only in a NOTSO's free text is not read.
+
+## [0.11.0] - 2026-11-03
+
+**Operator outputs: no new output; 1 and 2 made safer, and output 4, the recommended response, gets the two foundations the Decision Engine plan puts first.** The burn watch no longer loses a burn it found, the sweep no longer reports targets it never flew, and a scenario can now name the real objects it is about. Every Decision Engine figure is still a lookup.
+
+### Added
+- Bind a decision scenario to a held red track and blue asset. The result names them, with each orbit's epoch, its age at evaluation against its regime's limit (72 h for GEO and deep space, 24 h otherwise) and its data mode, and puts their element sets in its provenance. It changes no figure, and says so: "Binding records which real objects this scenario is about. It changes no figure yet". A test proves no figure or selector reads the binding (SPC-100).
+- Closest-approach reference cases every later Decision Engine phase must pass: co-planar LEO, GEO drift-in and a plane change with crossing planes, each with an expected miss distance and time of closest approach from a closed form checked by an independent two-body integration. The helper that finds a closest approach in sampled separations is shared with the scenario planner (SPC-102).
+- A UDL conjunction lookup: the close approaches UDL holds for a catalogue number, newest first, at most 50, with UDL's own miss distance and probability of collision, each labelled as UDL's figure, not SPECTRE's. This is a probe: the UDL path and field names are inferred from UDL's published API and have not been checked against live UDL (SPC-033). Records it cannot read are skipped and counted, never guessed (SPC-031).
+
+### Fixed
+- The burn watch no longer loses a burn when working out what it changed fails. It used to mark the element set as handled first, so the next check skipped it and cleared the problem; it now retries, names the burn and its time while it does, and no longer blames UDL for a failure that was its own. A history it cannot use is said to be that, not a failed fetch.
+- The watch announces a burn whose pre-burn element set is the previous burn's post-burn set; it used to miss it. A new burn is flown from its own pre-burn set, not bundled with burns already announced. It also stops at once when the sign-in ends mid-check, and its live region no longer replaces itself every minute, so a screen reader hears the alert.
+- The sweep's "Sweep again" button no longer replaces the results panel itself, which left every later sweep with nowhere to show.
+- "What the burn changed" counts only the targets it flew. A target with no element set was reported as out of reach before and after; it is now named as not compared. The quiet headline no longer says nothing changed when a target went out of reach.
+- With custody lost, the sweep says what newer element set UDL already holds and how to fetch it. When the sweep's orbit is newer than the held history, the change carries a caveat that an unseen burn may be part of it. A NOTSO manoeuvre notice newer than the last confirmed burn is named beside a refusal too, not only beside a figure.
+- An HRR blue object with no catalogue number no longer makes every unnumbered target read as yours.
+- Pattern of Life errors say what failed and keep the detail in the server log (SPC-023). The session data mode refuses anything but REAL, SIMULATED, EXERCISE or TEST (SPC-024), and so does the intercept panel's (SPC-025).
+- Two burn-watch tests would have called UDL with a test password from 10:00 UTC on 3 November 2026; the watch's clock is pinned and any UDL call now fails the test.
+
+### Changed
+- The scenario provenance hash changes: the scenario's recorded value now includes its binding, or None.
+- Muted text in "What the burn changed" uses a colour token that exists; it used an undefined one.
+
+### Out of scope, named
+- UDL observation endpoints (SPC-032), the live check of the conjunction contract (SPC-033), Alpha-5 catalogue numbers (SPC-026), the undefined `--ops-gold` colour token (SPC-027), and four V0.9 review items left outside this release's fix groups (SPC-028). Response time per blue asset (SPC-022) moves to V0.12.
+
+## [0.10.0] - 2026-11-03
+
+**Operator output advanced: 3, the decide-by time, which completes outputs 1 to 3.** Output 4, the recommended response, is next.
+
+### Added
+- Decide-by. The sweep says "Decide by 21:00 UTC on 2 Nov for BLUE-1: its fastest intercept within 500 m/s could arrive at 09:00 UTC on 3 Nov", or that decide-by has passed. It is the soonest credible arrival, burn time plus flight time, minus your response time, set on the sweep form and kept for the sign-in. Until you set it, 12 hours is used and every sentence says it is the default. It is withheld, with the reason, when custody is lost or the interceptor is assessed unable to fly the intercept (SPC-008).
+- A band on the worst case's delta-V from element-set age: the figure re-solved with each orbit moved ahead and behind along track by the error its age implies, with the basis on screen. A minimum-time intercept spends the whole budget by construction, so its band is on flight time (SPC-005, red team finding 6).
+- A data mode per fetch. The Red and Blue TLE fetches take REAL, SIMULATED, EXERCISE or TEST for that fetch only, never changing the session mode; anything else is refused and nothing is fetched. The result says which mode it used, and a set fetched in its own mode is refreshed in that mode at the next UDL connect, not the session's (SPC-030).
+
+### Fixed
+- A plane change is no longer the most dangerous course of action. It only aligns the planes, and its zero flight time ranked it "arriving in < 1m" whenever it fitted the budget, since warning-time ranking arrived in 0.5.14. It now never ranks on warning time and counts for neither decide-by nor the before-and-after; its rows read "aligns planes only".
+- No UDL error reaches the page as exception text or UDL's own reply: eleven sites in the UDL routes now say what failed and what to try, and a 5xx says the fault is UDL's. The detail goes to the server log (SPC-019).
+
+### Changed
+- The TLE fetch's request handling is a helper of its own, giving the route headroom under the complexity limit (SPC-060).
+
+## [0.9.0] - 2026-11-02
+
+**Operator outputs advanced: 2, the warning-time change, with output 1 beside it; and lays the foundation for output 4, recommended response: every Decision Engine figure now states its own basis (lookup, sampled or computed), so later releases can show computed figures beside lookups honestly.** The decide-by time is not shown yet, and the sweep says so.
+
+### Added
+- What the burn changed. When the interceptor has a confirmed burn inside its element-set age limit (72 h for GEO and deep space, 24 h otherwise), the sweep says what it did to the warning you have: "That burn cut your warning on BLUE-1 from 14h to 3h, and put BLUE-7 in reach with 9h 30m warning", with a table of every target that changed and each burn's own is-this-normal verdict beside it. Before is flown from the element set just before the burn, after is the sweep's own, against the same targets and their same element sets at the same moment, so no earlier sweep is needed. A basis line says what the figures rest on, including that part of a change can be timing rather than reach (SPC-007).
+- It shows no figures it cannot stand behind, and says why: without a history, with custody lost, when the sweep's own element set predates the burn, or when the last set before the burn is past its regime's limit. An earlier sweep of the pre-burn orbit is cited, never used as the before figure. A newer unconfirmed detection, or a newer manoeuvre NOTSO from the synced cache, is named and never turned into a figure (SPC-007).
+- The burn watch. After a sweep with UDL connected, SPECTRE keeps checking that object while you are signed in: it asks UDL for the newest element set every 10 minutes, fetches the history again only when that set moved, and announces a new confirmed burn once, with what it changed, on the sweep and in the session log. It stops when UDL disconnects, within 30 seconds of the sign-in ending, or when a newer sweep replaces it, and says which. A failed check says so and tries again (SPC-006).
+
+### Changed
+- Every Decision Engine figure carries its own basis, shown in each cell and in a basis line per figure on the banner. All are lookups today, so no number changes; the score stays a lookup whatever its figures are, because its weights and normalisations are rules of thumb, so the modelled badge cannot drop. "(model)" in each cell reads "(lookup)" (SPC-101).
+
+### Out of scope, named
+- A UDL manoeuvre endpoint, NOTSO as a trigger, flying the post-burn set when the sweep's own predates the burn, watching more than one object or past the sign-in, and decide-by. Exception text in six UDL route error paths is logged as SPC-019.
+
+## [0.8.0] - 2026-10-29
+
+**Operator outputs advanced: 1, "is this normal", and the custody both 1 and 2 rest on.** Output 2's warning-time change, the decide-by time and the recommended response are untouched.
+
+### Added
+- Custody of the interceptor, first on the sweep and on the Pattern of Life panel, in the operator's terms: timely and actionable information to judge whether a burn is normal and how the warning time changed. Held when the orbit is inside its regime's limit and the history can judge its burns; degraded when the orbit is current but the history is missing, too short or cut by UDL's record cap; lost when the newest element set is past the limit, because its warning time is out of date and a burn since then would not be seen. Each line says which and why (SPC-018).
+- The worst case on the sweep names the target's phase angle at the burn, "1.0° ahead of the interceptor", which drives a co-orbital intercept's cost more than where on the orbit the burn falls (SPC-004).
+
+### Changed
+- The interceptor's behaviour now reaches the threat verdict. With its history held, the propellant used, discretionary reserve, behavioural anomaly score and burns observed join the capability evidence, and drop off the "unavailable" list; the operator's refuelling date applies, as on the Pattern of Life panel (SPC-002).
+- The worst case card no longer calls the winning solver an intent: "Close-Proximity Operation" whenever Lambert won read as an inference about the adversary. It shows the behaviour verdict from the object's own history, or says behaviour is not judged (SPC-003).
+- Burn times are named apogee, perigee or a node only where that means something: an eccentricity of 0.005 or more for the apsides, an inclination of 0.5° or more for the nodes. Below either, as on a station-kept GEO orbit, the burn time reads "now +4.6 h" and a note says why (SPC-004).
+
+## [0.7.0] - 2026-10-29
+
+The first release planned from the backlog in `.board/`, and the first measured
+against the operator's question: "Something moved. Can it reach one of mine, how
+long have I got, does it mean anything, and what do I need to decide, by when?"
+
+**Operator output advanced: 1 of 4, "is this normal".** Outputs 2 to 4 are untouched.
+
+### Added
+- Is this normal? Each confirmed burn is judged against the object's own earlier burns: routine, unusual, unlike anything in its history, or too little history to say, in one sentence that names the figures it rests on (for example "Unlike anything in its last 80 days: this 78 m/s altitude change. The largest of its 7 earlier burns was 14 m/s."). The Pattern of Life panel leads with the latest burn's verdict and the manoeuvre catalogue gains a Normal? column. Every verdict states its basis: this object's history only, burns below the detection floor unseen, thresholds tuned rather than sourced (SPC-009).
+- The threat sweep says whether the interceptor's latest burn is normal for it. With UDL connected it fetches the interceptor's element-set history while the sweep computes, and holds it for 30 minutes so a repeat sweep does not fetch again. Without UDL, or when the fetch fails or is still running, it says so rather than guessing (SPC-001).
+
+### Security (identity)
+- Usernames ignore letter case: "Ash" and "ash" sign in to the same account, and an admin can no longer create a second account that differs only in case. The sign-in rate limit is keyed on the name as matched, so changing the case of a name does not buy more guesses. A database that already holds names differing only in case keeps each signing in by its exact spelling and refuses any other, and says so in the log; once the duplicate is deleted, the next boot makes usernames unique whatever their case (SPC-020).
+
 ## [0.6.4] - 2026-10-28
 
 ### Fixed

@@ -1,0 +1,17 @@
+{# The understanding strip (concept section 6.4, SPC-168): Identity,
+   Capability, Manoeuvres and Interactions, each filled, half-filled or empty
+   from its coverage, the tooltip listing every item with its grade, age and
+   basis. One partial for every panel, so one object reads the same strip on
+   the sweep, the intel card and Pattern of Life.
+   Context: tu (spectre.web.understanding_view). #}
+<div class="tu-strip" style="display:flex; gap:0.3rem; margin:0.3rem 0; flex-wrap:wrap; align-items:flex-start; font-size:0.66rem">
+  {% for cell in tu.strip %}
+  {% set fill = {"full": "var(--surface-raised)", "half": "linear-gradient(90deg, var(--surface-raised) 50%, transparent 50%)"}.get(cell.fill, "transparent") %}
+  {# A details element, so the grade, age and basis are reachable by keyboard
+     and screen reader as well as by the tooltip. Collapsed by default. #}
+  <details class="tu-cell" style="border:1px solid var(--border); border-radius:3px; padding:0.05rem 0.4rem; background:{{ fill }}">
+    <summary title="{{ cell.detail or 'nothing held' }}" style="cursor:pointer">{{ cell.name }}: {{ cell.depth }}</summary>
+    <div style="color:var(--text-dim); max-width:22rem">{{ cell.detail or "nothing held" }}</div>
+  </details>
+  {% endfor %}
+</div>

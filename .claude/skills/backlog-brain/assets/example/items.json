@@ -1,0 +1,1465 @@
+[
+{
+"ref": "VH-004",
+"minutes": 55,
+"priority": "high",
+"state": "open",
+"task": "Place the unplaced, remainder",
+"group": "domain",
+"order": 3,
+"files": [
+"public/views/analytics.js"
+]
+},
+{
+"ref": "VH-007",
+"minutes": 50,
+"priority": "high",
+"state": "open",
+"task": "CSpO lens and zones on Analytics",
+"group": "domain",
+"order": 3,
+"files": [
+"public/views/analytics.js"
+]
+},
+{
+"ref": "VH-009-Q1",
+"minutes": 45,
+"priority": "high",
+"state": "open",
+"task": "Queue triage Q1: identity-only fold without the entailment judge, behind an entity-resolut",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1,
+"files": [
+"src/db/queue.js"
+]
+},
+{
+"ref": "VH-009-Q2",
+"minutes": 45,
+"priority": "high",
+"state": "open",
+"task": "Queue triage Q2: auto-reject is held, never deleted (QD2, QD3, QD5)",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1,
+"deps": [
+"VH-079"
+],
+"files": [
+"src/db/queue.js"
+]
+},
+{
+"ref": "VH-009-Q3",
+"minutes": 35,
+"priority": "med",
+"state": "open",
+"task": "Queue triage Q3: group the queue by reason, and bulk actions on the queue",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-017",
+"minutes": 25,
+"priority": "low",
+"state": "open",
+"task": "Digest names records by ID only",
+"group": "hugo",
+"order": 2
+},
+{
+"ref": "VH-019",
+"minutes": 15,
+"priority": "high",
+"state": "open",
+"task": "Registry enrichment, scope",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-065",
+"minutes": 15,
+"priority": "med",
+"state": "open",
+"task": "Retire the unused Message Batches path",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-069",
+"minutes": 35,
+"priority": "med",
+"state": "open",
+"task": "Data-integrity report control",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-070",
+"minutes": 10,
+"priority": "med",
+"state": "open",
+"task": "Four unused exports",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-072",
+"minutes": 60,
+"priority": "low",
+"state": "open",
+"task": "Check for built code nothing uses",
+"group": "hugo",
+"order": 2,
+"deps": [
+"VH-318-F"
+]
+},
+{
+"ref": "VH-075",
+"minutes": 45,
+"priority": "low",
+"state": "open",
+"task": "Real-data test fixture",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-077",
+"minutes": 20,
+"priority": "low",
+"state": "open",
+"task": "27 thinnest records, sample 5",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-079",
+"minutes": 50,
+"priority": "med",
+"state": "open",
+"task": "Held state for deleted additions",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-080",
+"minutes": 25,
+"priority": "med",
+"state": "open",
+"task": "Permanent block for ineligible additions",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-092",
+"minutes": 25,
+"priority": "low",
+"state": "open",
+"task": "False sign-in warning",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-117",
+"minutes": 20,
+"priority": "low",
+"state": "open",
+"task": "\"JCO/NATO\" relabel, remainder",
+"group": "hugo",
+"order": 2
+},
+{
+"ref": "VH-119",
+"minutes": 15,
+"priority": "med",
+"state": "open",
+"task": "Card relation line",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-121",
+"minutes": 15,
+"priority": "low",
+"state": "open",
+"task": "Remove HUGO and MARKET naming",
+"group": "hugo",
+"order": 2
+},
+{
+"ref": "VH-133",
+"minutes": 10,
+"priority": "med",
+"state": "open",
+"task": "Deliberately bad test files could be scored",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-135",
+"minutes": 15,
+"priority": "med",
+"state": "open",
+"task": "Branch drift check",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-137",
+"minutes": 10,
+"priority": "med",
+"state": "open",
+"task": "Import panel dropped-values label",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-139",
+"minutes": 45,
+"priority": "med",
+"state": "open",
+"task": "Show deleted vendors on domains",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-144",
+"minutes": 15,
+"priority": "med",
+"state": "open",
+"task": "Approve-all shows no progress below 500 cards",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-147",
+"minutes": 10,
+"priority": "low",
+"state": "open",
+"task": "2.5 MB of documentation images in the upload",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-148",
+"minutes": 20,
+"priority": "med",
+"state": "open",
+"task": "Glass over the globe and raster map, measure contrast",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-149",
+"minutes": 35,
+"priority": "med",
+"state": "open",
+"task": "Send the phone link by email from Ask Hugo",
+"group": "hugo",
+"order": 2
+},
+{
+"ref": "VH-160",
+"minutes": 125,
+"priority": "med",
+"state": "open",
+"task": "Help surface, opened from the Account menu",
+"group": "hugo",
+"order": 2,
+"deps": [
+"VH-318-F"
+]
+},
+{
+"ref": "VH-162",
+"minutes": 30,
+"priority": "low",
+"state": "open",
+"task": "Guard: fail when a new file under a shipped root has no shipped test",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-178",
+"minutes": 20,
+"priority": "med",
+"state": "open",
+"task": "Seed import deletes a domain's pending batch with no guard",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-179",
+"minutes": 75,
+"priority": "high",
+"state": "open",
+"task": "Recover snapshot files the database no longer lists",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-181",
+"minutes": 60,
+"priority": "high",
+"state": "open",
+"task": "Hugo cannot narrow a view by a typed name on any domain",
+"group": "hugo",
+"order": 2
+},
+{
+"ref": "VH-184",
+"minutes": 15,
+"priority": "high",
+"state": "open",
+"task": "No 1, NO-FAIL: every field of every domain schema and every capability, searchable and doc",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-202",
+"minutes": 20,
+"priority": "med",
+"state": "open",
+"task": "GDM stage shown twice in the domain drawer, with an ambiguous priority",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-203",
+"minutes": 15,
+"priority": "med",
+"state": "open",
+"task": "The multi-domain dialog calls merged records 'dropped'",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-204",
+"minutes": 30,
+"priority": "med",
+"state": "open",
+"task": "The drawer's Eligibility column is off screen at phone width",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-205",
+"minutes": 45,
+"priority": "med",
+"state": "open",
+"task": "VH-122's confirm is disabled when nothing will change, and held catalogues are listed by n",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-206",
+"minutes": 15,
+"priority": "low",
+"state": "open",
+"task": "Company group zero-count tiles hidden",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-208",
+"minutes": 30,
+"priority": "low",
+"state": "open",
+"task": "Contact-label cap for an unbroken 40-character name",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-210",
+"minutes": 20,
+"priority": "low",
+"state": "open",
+"task": "Make VH-078's red proof an in-suite mutation that runs every time",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-211",
+"minutes": 5,
+"priority": "low",
+"state": "open",
+"task": "Gate briefs paste git diff --stat from the last gated SHA instead of a file list typed fro",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-215",
+"minutes": 90,
+"priority": "med",
+"state": "open",
+"task": "Investigate a multi-domain tab that is only analytics, maps and dashboards across all doma",
+"kind": "research",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-216",
+"minutes": 60,
+"priority": "low",
+"state": "open",
+"task": "National Security covers health, medical and logistics data",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-225",
+"minutes": 65,
+"priority": "low",
+"state": "open",
+"task": "Update the browser tab and home-screen icon to the current identity",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-237",
+"minutes": 45,
+"priority": "high",
+"state": "open",
+"task": "Region and alliance strip on a domain board",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-238",
+"minutes": 45,
+"priority": "high",
+"state": "open",
+"task": "Zone filter on a domain board",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-239",
+"minutes": 52,
+"priority": "high",
+"state": "open",
+"task": "Saved views on a domain board",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-242",
+"minutes": 90,
+"priority": "high",
+"state": "open",
+"task": "Bulk retire and restore, and a whole-page edit mode, on a domain",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-245",
+"minutes": 30,
+"priority": "high",
+"state": "open",
+"task": "Headline and ribbon counts filter a domain board, as on Space",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-246-A",
+"minutes": 45,
+"priority": "high",
+"state": "open",
+"task": "Domain cards: relation tiles and the capability glyph",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-246-B",
+"minutes": 30,
+"priority": "high",
+"state": "open",
+"task": "Domain cards: direct Edit and Retire",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-246-C",
+"minutes": 45,
+"priority": "high",
+"state": "open",
+"task": "Domain cards: the Settings choice of which card fields show",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-249",
+"minutes": 30,
+"priority": "high",
+"state": "open",
+"task": "Capability fingerprint in the domain drawer",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-250",
+"minutes": 37,
+"priority": "high",
+"state": "open",
+"task": "Field finder and \"only what is missing\" in the domain drawer",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-251",
+"minutes": 45,
+"priority": "high",
+"state": "open",
+"task": "\"Also present in\" line in the domain drawer",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-252",
+"minutes": 52,
+"priority": "high",
+"state": "open",
+"task": "\"In GDM in every catalogue\" can start from a domain provider",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-253",
+"minutes": 65,
+"priority": "high",
+"state": "open",
+"task": "Add a provider by hand on a domain",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-254",
+"minutes": 75,
+"priority": "high",
+"state": "open",
+"task": "Domain export: PDF, ticked-row scope, typed country list, no 5,000-row cap, retired and fu",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-255",
+"minutes": 45,
+"priority": "high",
+"state": "open",
+"task": "A shared link carries the domain, its filters, sort and open drawer",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-256",
+"minutes": 90,
+"priority": "high",
+"state": "open",
+"task": "A GDM roster matches domain-only providers too, and uploads from a domain screen",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-257",
+"minutes": 37,
+"priority": "high",
+"state": "open",
+"task": "A merged domain provider keeps the merged-away record's history",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-258",
+"minutes": 60,
+"priority": "high",
+"state": "open",
+"task": "Coalition areas, search-area drawing, zone moves, coverage and digest panels on every doma",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-260",
+"minutes": 90,
+"priority": "high",
+"state": "open",
+"task": "Area digest, tasking and brief read the domain stores",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-261",
+"minutes": 75,
+"priority": "high",
+"state": "open",
+"task": "Hugo and the board filter a domain by product type, capability family and pipeline fields",
+"group": "hugo",
+"order": 2
+},
+{
+"ref": "VH-262",
+"minutes": 25,
+"priority": "high",
+"state": "open",
+"task": "A GDM filter in store-wide search keeps the six domain stores",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-263",
+"minutes": 35,
+"priority": "high",
+"state": "open",
+"task": "Cross-domain hunts and Hugo map each domain's own facets, not only Space's orbital facet",
+"group": "hugo",
+"order": 2
+},
+{
+"ref": "VH-264",
+"minutes": 37,
+"priority": "high",
+"state": "open",
+"task": "The verification judge checks a domain's own facets",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-265",
+"minutes": 20,
+"priority": "high",
+"state": "open",
+"task": "Source reputation learns from domain accept and reject decisions",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-266",
+"minutes": 30,
+"priority": "high",
+"state": "open",
+"task": "Boot-time record repairs run on every domain",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-267",
+"minutes": 15,
+"priority": "high",
+"state": "open",
+"task": "Field-fill report by arrival for a domain, and a live count that includes the domains",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-269",
+"minutes": 45,
+"priority": "high",
+"state": "open",
+"task": "Agents edit, bulk-edit and retire domain records as they do on Space",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-270",
+"minutes": 45,
+"priority": "high",
+"state": "open",
+"task": "An admin can import straight into a domain catalogue, as on Space, with review still avail",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-273",
+"minutes": 255,
+"priority": "high",
+"state": "open",
+"task": "Deep study of the UI, UX and GUI, packaged as a research brief for a light-mode investigat",
+"kind": "research",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-306",
+"minutes": 15,
+"priority": "low",
+"state": "open",
+"task": "The View pills on the 6 non-Space domain boards cannot be moved by arrow keys: wireRadiogr",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-318-A",
+"minutes": 60,
+"priority": "high",
+"state": "open",
+"task": "Scoping: settle the Realtime model, the live interface question, the transport, the transc",
+"group": "hugo",
+"order": 2,
+"lock": "V2.8"
+},
+{
+"ref": "VH-318-B",
+"minutes": 60,
+"priority": "high",
+"state": "open",
+"task": "Talk relay and client move to the current Realtime event shape",
+"group": "hugo",
+"order": 2,
+"deps": [
+"VH-318-A"
+],
+"lock": "V2.8"
+},
+{
+"ref": "VH-318-C",
+"minutes": 150,
+"priority": "high",
+"state": "open",
+"task": "Typed turns go through the Realtime session and stream to the rail as they are produced",
+"group": "hugo",
+"order": 2,
+"deps": [
+"VH-318-B"
+],
+"lock": "V2.8"
+},
+{
+"ref": "VH-318-D",
+"minutes": 90,
+"priority": "high",
+"state": "open",
+"task": "One rail for typing and talking",
+"group": "hugo",
+"order": 2,
+"deps": [
+"VH-318-C"
+],
+"lock": "V2.8"
+},
+{
+"ref": "VH-318-E",
+"minutes": 90,
+"priority": "high",
+"state": "open",
+"task": "Grounding under streaming: answers only from tool results, a visible checking mark, and a ",
+"group": "hugo",
+"order": 2,
+"deps": [
+"VH-318-C"
+],
+"lock": "V2.8"
+},
+{
+"ref": "VH-318-F",
+"minutes": 90,
+"priority": "high",
+"state": "open",
+"task": "Retire the four superseded paths, move Hey Hugo onto Realtime, and measure latency before ",
+"group": "hugo",
+"order": 2,
+"deps": [
+"VH-318-D",
+"VH-318-E"
+],
+"lock": "V2.8"
+},
+{
+"ref": "VH-318-G",
+"minutes": 15,
+"priority": "high",
+"state": "open",
+"task": "Web lookup works on the voice runner, so a spoken web question no longer fails",
+"group": "hugo",
+"order": 2,
+"lock": "V2.8"
+},
+{
+"ref": "VH-318-H",
+"minutes": 30,
+"priority": "high",
+"state": "open",
+"task": "Spoken propose_view, propose_update and propose_scan reach the rail for confirmation",
+"group": "hugo",
+"order": 2,
+"deps": [
+"VH-318-D"
+],
+"lock": "V2.8"
+},
+{
+"ref": "VH-318-I",
+"minutes": 30,
+"priority": "high",
+"state": "open",
+"task": "Price rows for the realtime and transcription models, and session caps",
+"group": "hugo",
+"order": 2,
+"lock": "V2.8"
+},
+{
+"ref": "VH-319",
+"minutes": 15,
+"priority": "low",
+"state": "open",
+"task": "Re-measure how many capability values each domain still files under 'Other' after real hun",
+"group": "domain",
+"order": 3
+},
+{
+"ref": "VH-322",
+"minutes": 15,
+"priority": "med",
+"state": "open",
+"task": "The Corporate families panel says a merge can be undone; check that a family merge actuall",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-329",
+"minutes": 20,
+"priority": "low",
+"state": "open",
+"task": "Space's last-verified field accepts free text; the domains accept only a real day",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-330",
+"minutes": 45,
+"priority": "high",
+"state": "open",
+"task": "The Master board's vendor-name hover card is cut off by its scroll wrapper for the lower r",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-331",
+"minutes": 30,
+"priority": "med",
+"state": "open",
+"task": "Globe pin label: clearance at high zoom, and the hover-content rules (WCAG 2.2 1.4.13)",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-333",
+"minutes": 65,
+"priority": "med",
+"state": "open",
+"task": "The refused-read class on Space and on the domain screens is not closed: the Space-only ma",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-334",
+"minutes": 30,
+"priority": "med",
+"state": "open",
+"task": "The refused Dashboard is not announced to assistive technology, and keyboard focus falls t",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-335",
+"minutes": 45,
+"priority": "med",
+"state": "open",
+"task": "Scan economics (C0) is built as an admin route with no operator control: BUILT, NOT WIRED",
+"needs_owner": true,
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-337",
+"minutes": 45,
+"priority": "low",
+"state": "open",
+"task": "The 'did you mean' offer for a misspelt name is not shown on the Go to palette or the boar",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-338",
+"minutes": 20,
+"priority": "low",
+"state": "open",
+"task": "The domain card lacks the verification-age line Space's card carries",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-339",
+"minutes": 25,
+"priority": "low",
+"state": "open",
+"task": "Show the CIC marker as plain, unhighlighted text somewhere visible but out of the way, on ",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-340",
+"minutes": 15,
+"priority": "med",
+"state": "open",
+"task": "The Go to palette's backup command runs Space's export on every domain",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-341",
+"minutes": 40,
+"priority": "med",
+"state": "open",
+"task": "Behaviour meant to be equal across 7 domains is tested on 2 to 4 of them",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-342",
+"minutes": 25,
+"priority": "low",
+"state": "open",
+"task": "UI copy writes 5, 6 and 7 as words and one label still says phenomenology families",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-343",
+"minutes": 25,
+"priority": "med",
+"state": "open",
+"task": "NIGHTLY_FIT_HOUR_UTC is missing from the environment table, and nothing catches the class",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-344",
+"minutes": 40,
+"priority": "med",
+"state": "open",
+"task": "Migration safety guards: statement_timeout and lock_timeout on any table rewrite or index ",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-345",
+"minutes": 60,
+"priority": "med",
+"state": "open",
+"task": "The data-type review queue can fill with junk and then refuses silently, and the name chec",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-346",
+"minutes": 20,
+"priority": "med",
+"state": "open",
+"task": "A product-line write with an object in a line facet field answers 500",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-348",
+"minutes": 20,
+"priority": "low",
+"state": "open",
+"task": "The all-seven analytics fold drops the capped flag, so a floor reads as a total",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-350",
+"minutes": 10,
+"priority": "med",
+"state": "open",
+"task": "Unmerging a company from a 2.5.0 snapshot resets the survivor's verified date and CIC flag",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-351",
+"minutes": 35,
+"priority": "low",
+"state": "open",
+"task": "Approving a mission offer can replace a legacy string of missions, and two booting instanc",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-352",
+"minutes": 20,
+"priority": "low",
+"state": "open",
+"task": "A store whose module fails to load silently draws the old screen",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-353",
+"minutes": 30,
+"priority": "low",
+"state": "open",
+"task": "Capability groups repeat hues from rank 9 and one aria-label says the wrong thing",
+"gates": [
+"sec",
+"design"
+],
+"group": "polish",
+"order": 4
+},
+{
+"ref": "VH-354",
+"minutes": 45,
+"priority": "low",
+"state": "open",
+"task": "Test hardening from the V2.6 gates: a half test that cannot fail, a tautology, a comment-b",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-355",
+"minutes": 20,
+"priority": "low",
+"state": "open",
+"task": "Comment and record wording left by the V2.6 gates",
+"gates": [
+"eng"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-358",
+"minutes": 30,
+"priority": "high",
+"state": "open",
+"task": "Drop the two trigram search indexes the stored search_fold column replaced (review item 3)",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1,
+"deps": [
+"VH-344"
+]
+},
+{
+"ref": "VH-359-B",
+"minutes": 15,
+"priority": "high",
+"state": "open",
+"task": "Put the two whole-table reads on the heavy rate tier (VH-347's remaining step)",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1,
+"deps": [
+"VH-359"
+]
+},
+{
+"ref": "VH-359",
+"minutes": 85,
+"priority": "high",
+"state": "open",
+"task": "Whole-table reads on request paths: seed a realistic dataset on PostgreSQL, measure every ",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-360",
+"minutes": 40,
+"priority": "high",
+"state": "open",
+"task": "Finish VH-287: remove the jsonb_agg backup fallback, stop listing rows no route can restor",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-361",
+"minutes": 60,
+"priority": "med",
+"state": "open",
+"task": "Read only the pending cards a batch can match, not every pending card, per scan cell (revi",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-362",
+"minutes": 30,
+"priority": "med",
+"state": "open",
+"task": "Size restore chunks by bytes as well as rows (review item 8)",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-363-B",
+"minutes": 60,
+"priority": "med",
+"state": "open",
+"task": "Migration runner: a no-transaction file mode for CREATE INDEX CONCURRENTLY, a rerun-safety",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1,
+"deps": [
+"VH-363"
+]
+},
+{
+"ref": "VH-363",
+"minutes": 60,
+"priority": "med",
+"state": "open",
+"task": "Migration runner: each pending file commits on its own under a session lock, with its ledg",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-364",
+"minutes": 25,
+"priority": "med",
+"state": "open",
+"task": "Wrap the pre-migrate snapshot in a savepoint so a SQL fault in the capture cannot poison t",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-365",
+"minutes": 45,
+"priority": "med",
+"state": "open",
+"task": "Watch disk: the file volume's free space, and refuse a capture without headroom (review it",
+"gates": [
+"eng",
+"sec"
+],
+"group": "storage",
+"order": 1
+},
+{
+"ref": "VH-366-A",
+"minutes": 60,
+"priority": "high",
+"state": "open",
+"task": "Core model and settings: items, releases, gates, lanes, people and rates held in one versi",
+"group": "domain",
+"order": 3,
+"track": "tooling"
+},
+{
+"ref": "VH-366-B",
+"minutes": 45,
+"priority": "high",
+"state": "open",
+"task": "Event log and replay: the one channel between builders and the board, validated, append-on",
+"group": "domain",
+"order": 3,
+"track": "tooling"
+},
+{
+"ref": "VH-366-C",
+"minutes": 150,
+"priority": "high",
+"state": "open",
+"task": "The optimiser: compose releases and a build order from priority, cost, dependencies, locks",
+"group": "domain",
+"order": 3,
+"track": "tooling"
+},
+{
+"ref": "VH-366-D",
+"minutes": 120,
+"priority": "high",
+"state": "open",
+"task": "Resource and time model: people and agent capacity, availability, measured pace per person",
+"group": "domain",
+"order": 3,
+"track": "tooling"
+},
+{
+"ref": "VH-366-E",
+"minutes": 105,
+"priority": "high",
+"state": "open",
+"task": "Robustness: a freshness guard, a current-state block, schema checks, backup and restore, a",
+"group": "domain",
+"order": 3,
+"track": "tooling"
+},
+{
+"ref": "VH-366-F",
+"minutes": 45,
+"priority": "high",
+"state": "open",
+"task": "Threads and relays packaged: the threads panel and a relay helper that reads it",
+"group": "domain",
+"order": 3,
+"track": "tooling"
+},
+{
+"ref": "VH-366-G",
+"minutes": 90,
+"priority": "high",
+"state": "open",
+"task": "Drag-and-drop install: one folder, an installer that reads the project, and an upgrade pat",
+"group": "domain",
+"order": 3,
+"track": "tooling"
+},
+{
+"ref": "VH-366-H",
+"minutes": 105,
+"priority": "high",
+"state": "open",
+"task": "Pilot on a second project, then move Vendor Fishing onto the pack",
+"group": "domain",
+"order": 3,
+"track": "tooling"
+}
+]

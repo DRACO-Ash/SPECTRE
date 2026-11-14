@@ -4,9 +4,16 @@
     <span title="TLE epoch"><strong>Epoch:</strong> {{ epoch_str }}</span>
     {% if age %}
     <span class="{{ 'badge-warn' if age.stale else 'badge-ok' }}"
-          title="Age now. STALE is past {{ '%.0f' | format(age.limit_hours) }} hours, the limit for this regime">{{ age.label }} old{% if age.stale %} STALE{% endif %}</span>
+          title="Age now. STALE is past {{ '%.0f' | format(age.limit_hours) }} hours, the limit for this regime; FUTURE EPOCH is dated after now, so never current">{% if age.future is defined and age.future %}{{ age.label }} FUTURE EPOCH{% else %}{{ age.label }} old{% if age.stale %} STALE{% endif %}{% endif %}</span>
+    {% if age.regime_line is defined and age.regime_line %}<span class="elset-regime" title="The regime by period and eccentricity, and whose staleness limit applies (SPC-215)">{{ age.regime_line }}</span>{% endif %}
     {% endif %}
-    <span title="Where this element set came from: a UDL data mode, or MANUAL for one entered by hand"><strong>Source:</strong> {{ data_mode }}</span>
+    {% if data_mode == "MANUAL" %}
+    <span title="This element set was entered by hand, not fetched from UDL"><strong>Source:</strong> entered by hand</span>
+    {% elif data_mode not in ("REAL", "TEST", "EXERCISE", "SIMULATED") %}
+    <span title="Not fetched from UDL: SYNTHETIC is a bundled or training set"><strong>Source:</strong> {{ data_mode }}</span>
+    {% else %}
+    <span title="The UDL provider that filed this element set, and the data mode it was fetched in"><strong>Provider:</strong> {{ elset_source or "not recorded" }} &middot; {{ data_mode }}</span>
+    {% endif %}
     <span title="Sub-satellite longitude at TLE epoch (approximate)"><strong>Lon:</strong> {{ "%.2f"|format(lon_deg) }}&deg;</span>
     <span title="Orbital inclination"><strong>Inc [<em>i</em>]:</strong> {{ "%.2f"|format(inc_deg) }}&deg;</span>
     <span title="Orbital period"><strong>Period:</strong> {{ "%.1f"|format(period_min) }} min</span>

@@ -9,29 +9,39 @@ from __future__ import annotations
 import contextlib
 import html
 import logging
-from datetime import UTC, datetime
-from typing import Annotated, Any
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Any, NamedTuple
 
 import httpx
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from spectre.astro.along_track import figure_applied
 from spectre.astro.dv_estimation import _SNR_HIGH, _SNR_LOW
+from spectre.astro.elset_check import history_refusal, refused_type
 from spectre.astro.pattern_of_life import _parse_tle_epoch as tle_epoch
 from spectre.astro.pattern_of_life import analyse_pattern_of_life, parse_tle_history_counted
 from spectre.astro.tle_filter import filter_tle_history
 from spectre.config.settings import UDL_BASE_URL
 from spectre.data.intel import get_intel
+from spectre.domain import threat_understanding as tu
+from spectre.domain.custody import Custody, CustodyStatus, assess_custody
 from spectre.domain.manoeuvre_calibration import per_event_station_keeping_m_s
-from spectre.domain.pol_assessment import assess_pattern_of_life
+from spectre.domain.normality import BurnNormality, burns_from_views, judge_burn
+from spectre.domain.pol_assessment import PolAssessment, assess_pattern_of_life
 from spectre.web.auth import require_login
 from spectre.web.deps import render
+from spectre.web.elsets import elset_age, limit_hours_for_regime, log_skipped_by_type
 from spectre.web.format_units import to_m_s
+from spectre.web.interaction_store import held_interactions
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
 from spectre.web.rate_limit import pol_compute_rate_limit, udl_auth_rate_limit, udl_data_rate_limit
+from spectre.web.routes.gcat import catalogue_entry
+from spectre.web.understanding_view import HeldObject, object_view
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pol")
@@ -58,6 +68,11 @@ _POL_PANEL_TEMPLATE = "partials/pol_panel.html"
 MAX_HORIZON_H = 720.0
 _MIN_HORIZON_H = 1.0
 MAX_PHOTOMETRY_CSV_CHARS = 524_288
+
+# What the panel says when the fetch or the analysis fails; the detail goes to
+# the log, never the page (SPC-023, as SPC-019 did for the UDL routes).
+_FETCH_FAILED = "The element-set history could not be fetched from UDL. Try again; the server log has the detail."
+_ANALYSIS_FAILED = "The element-set history could not be analysed. The server log has the detail."
 
 _NO_ANALYSIS_HTML = (
     '<p class="error-msg">No PoL analysis for this SATNO. Run Pattern of Life first.</p>'
@@ -105,10 +120,14 @@ def _parse_udl_elset_response(
     metadata: dict[str, tuple[str, str]] = {}
     rms_metadata: dict[str, float | None] = {}
     sat_name: str = ""
-    for rec in records:
-        l1 = _first(rec, "line1", "TLE_LINE1", "tle1")
-        l2 = _first(rec, "line2", "TLE_LINE2", "tle2")
-        if l1.startswith("1 ") and l2.startswith("2 "):
+    # An SGP4-XP set or an uncorrelated track is known by its record, which the parser past this point never sees,
+    # so the acceptance check's type and correlation test (spectre.astro.elset_check) is applied here, by record.
+    paired = [(f"{_first(rec, 'line1', 'TLE_LINE1', 'tle1')}\n{_first(rec, 'line2', 'TLE_LINE2', 'tle2')}", rec)
+              for rec in records if isinstance(rec, dict)]
+    log_skipped_by_type("PoL UDL history", paired)
+    for tle, rec in paired:
+        l1, l2 = tle.split("\n")
+        if l1.startswith("1 ") and l2.startswith("2 ") and not refused_type(tle, rec):
             lines += [l1, l2]
             metadata[l1] = (_first(rec, "dataMode", "data_mode"), _first(rec, "source"))
             rms_raw = rec.get("rmsResidual") or rec.get("rms_residual") or rec.get("rms")
@@ -204,7 +223,7 @@ async def pol_panel(
         "error": None,
     }
     if pol is not None:
-        context.update(_pol_view(pol, _reserve_reset_for(state, pol.satno)))
+        context.update(_pol_view(pol, reserve_reset_for(state, pol.satno), state=state))
         context.setdefault("source", "UDL")
         context.setdefault("pair", get_intel(pol.satno))
     return render(request, _POL_PANEL_TEMPLATE, context)
@@ -309,6 +328,164 @@ def _filter_note(apply_filter: bool, quality_flags: list[Any]) -> str:
     return f" [cadence-filtered, {len(quality_flags)} flags]"
 
 
+class _MergedHistory(NamedTuple):
+    """What :func:`_fetch_merged_history` returns, named."""
+
+    archive_text: str
+    merged_text: str
+    metadata: dict[str, tuple[str, str]]
+    rms_metadata: dict[str, float | None]
+    name: str
+
+
+def _analyse_merged(
+    history: _MergedHistory, satno: int, threshold_km_s: float, apply_filter: bool,
+) -> tuple[Any, list[Any]] | None:
+    """Parse a merged UDL history and run Pattern of Life over it.
+
+    Returns ``(analysis, quality_flags)``, or ``None`` when nothing parsed.
+    One copy for the panel and for the history held for the sweep (SPC-001).
+    """
+    # A set dated in the future is refused by the clock it is read at, counted with the other refusals (SPC-226).
+    records, dropped = parse_tle_history_counted(
+        history.merged_text, satno=satno,
+        metadata=history.metadata, rms_metadata=history.rms_metadata, now=datetime.now(UTC),
+    )
+    if not records:
+        return None
+    records, quality_flags = _cadence_filtered(records, apply_filter, satno)
+    pol = analyse_pattern_of_life(
+        records,
+        satno=satno,
+        name=history.name,
+        dv_threshold=threshold_km_s,
+        quality_flags=quality_flags,
+    )
+    pol.malformed_element_sets = dropped.malformed
+    pol.duplicate_epoch_sets = dropped.duplicate_epoch
+    pol.bad_provenance_sets = dropped.bad_provenance
+    pol.other_object_sets = dropped.other_object
+    pol.refused_element_sets = dropped.refused
+    pol.refused_failures = dropped.refusals
+    pol.history_truncated_at = _archive_end_if_capped(history.archive_text)
+    return pol, quality_flags
+
+
+# ── The history held for other panels (SPC-001) ──────────────────────────────
+
+#: How long a held history answers before it is fetched again. A burn shows in
+#: the next element set, hours after it happens, so a history much older than
+#: this can miss the very burn the operator is asking about.
+HELD_HISTORY_MAX_AGE = timedelta(minutes=30)
+#: The threshold the panel offers by default, so the sweep and an untouched
+#: panel see the same burns.
+_HELD_DV_THRESHOLD_KM_S = 0.002
+#: Histories held per sign-in. Each holds up to 5,000 element sets; the
+#: oldest goes first.
+_MAX_HELD_HISTORIES = 20
+
+
+@dataclass(frozen=True)
+class HeldHistory:
+    """One object's element-set history as analysed, or why there is none."""
+
+    satno: int
+    fetched_at: datetime
+    pol: Any | None = None
+    problem: str = ""
+
+
+def _hold(state: Any, held: HeldHistory) -> HeldHistory:
+    histories = state.elset_histories
+    histories.pop(held.satno, None)
+    histories[held.satno] = held
+    while len(histories) > _MAX_HELD_HISTORIES:
+        histories.pop(next(iter(histories)))
+    return held
+
+
+async def held_history(state: Any, satno: int, now: datetime) -> HeldHistory:
+    """The object's analysed element-set history, fetched from UDL if not held.
+
+    The sweep, the is-this-normal verdict and custody all read this one copy,
+    so no panel fetches the same history again. Never raises: a failure comes
+    back as a ``problem`` the panel shows in place of a verdict, with the
+    detail in the log, never the browser. Failures are not held, so the next
+    request tries again.
+    """
+    held = state.elset_histories.get(satno)
+    if held is not None and now - held.fetched_at < HELD_HISTORY_MAX_AGE:
+        return held  # type: ignore[no-any-return]
+    if not state.udl_username or not state.udl_password:
+        return HeldHistory(satno, now, problem="UDL is not connected, so no element-set history is held.")
+    pol, problem = await _fetch_and_analyse(state, satno)
+    if pol is None:
+        return HeldHistory(satno, now, problem=problem)
+    return _hold(state, HeldHistory(satno, now, pol=pol))
+
+
+async def _fetch_and_analyse(state: Any, satno: int) -> tuple[Any | None, str]:
+    """The analysed history from UDL, or ``None`` and the problem to show."""
+    try:
+        fetched = _MergedHistory(*await _fetch_merged_history(
+            satno, state.udl_username, state.udl_password,
+            state.udl_data_mode, source=state.udl_tle_source,
+        ))
+    # BLE001: any UDL failure becomes a stated problem.
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Held history: UDL fetch failed for %s: %s", log_safe(satno), log_safe(exc))
+        return None, "The element-set history could not be fetched from UDL."
+    if not fetched.merged_text.strip():
+        return None, "UDL returned no element sets for this object."
+    try:
+        analysed = await run_in_threadpool(
+            _analyse_merged, fetched, satno, _HELD_DV_THRESHOLD_KM_S, False,
+        )
+    except Exception:  # a failed analysis becomes a stated problem, logged in full
+        logger.exception("Held history: analysis failed for %s", log_safe(satno))
+        return None, "The element-set history could not be analysed."
+    if analysed is None:
+        return None, "No usable element sets were in the UDL history."
+    _log_refused(state, analysed[0])
+    return analysed[0], ""
+
+
+def history_refused(pol: Any) -> str | None:
+    """The sentence saying which sets of *pol*'s history the acceptance check refused, or None (SPC-201)."""
+    count = getattr(pol, "refused_element_sets", 0)
+    if not count:
+        return None
+    return history_refusal(f"{pol.name} ({pol.satno})", count, pol.refused_failures)
+
+
+def _log_refused(state: Any, pol: Any) -> None:
+    """Say in the operator's run log which history sets were refused, when any were."""
+    sentence = history_refused(pol)
+    if sentence is not None:
+        state.append_log(f"[POL] {sentence}")
+
+
+def burn_verdicts(pol: Any, assessment: PolAssessment) -> dict[datetime, BurnNormality]:
+    """Each confirmed burn's is-this-normal verdict, keyed by its burn epoch.
+
+    So every burn in a window reads its own verdict, not the latest one's.
+    """
+    return {n.burn.epoch: n for n in _burn_normality(pol, assessment.manoeuvres)}
+
+
+def history_evidence(
+    pol: Any, reserve_reset: datetime | None = None,
+) -> tuple[PolAssessment, BurnNormality | None]:
+    """The history's interpretation, and the verdict on its latest burn.
+
+    One assessment for both, so the sweep reads its capability evidence and
+    its is-this-normal verdict from the same reading of the history.
+    """
+    assessment = assess_pattern_of_life(pol, reserve_reset)
+    latest = max(_burn_normality(pol, assessment.manoeuvres), key=lambda n: n.burn.epoch, default=None)
+    return assessment, latest
+
+
 @router.post("/analyse", response_class=HTMLResponse)
 async def pol_analyse(
     request: Request,
@@ -343,8 +520,8 @@ async def pol_analyse(
             )
             logger.info("PoL: %s chars from UDL (direct) for %s", log_safe(len(archive_text)), log_safe(satno))
         except Exception as exc:   # noqa: BLE001 - a multi-step UDL fetch; any failure is reported to the operator
-            logger.warning("PoL: UDL direct failed: %s", exc)
-            return _panel_error(request, state, f"UDL fetch failed: {exc}")
+            logger.warning("PoL: UDL direct failed: %s", log_safe(exc))
+            return _panel_error(request, state, _FETCH_FAILED)
 
     # ── UDL session credentials ───────────────────────────────────────────────
     else:  # pol_source == "udl"
@@ -361,8 +538,8 @@ async def pol_analyse(
             )
             logger.info("PoL: %s chars from UDL (session) for %s", log_safe(len(archive_text)), log_safe(satno))
         except Exception as exc:   # noqa: BLE001 - a multi-step UDL fetch; any failure is reported to the operator
-            logger.warning("PoL: UDL session failed: %s", exc)
-            return _panel_error(request, state, f"UDL fetch failed: {exc}")
+            logger.warning("PoL: UDL session failed: %s", log_safe(exc))
+            return _panel_error(request, state, _FETCH_FAILED)
 
     if not merged_text.strip():
         return _panel_error(
@@ -373,47 +550,34 @@ async def pol_analyse(
 
     # ── Parse + analyse ───────────────────────────────────────────────────────
     try:
-        threshold_km_s = dv_threshold_ms / 1000.0
         apply_filter = bool(cadence_filter)
-        records, dropped = parse_tle_history_counted(
-            merged_text, satno=satno,
-            metadata=merged_meta, rms_metadata=merged_rms,
+        threshold_km_s = dv_threshold_ms / 1000.0
+        analysed = _analyse_merged(
+            _MergedHistory(archive_text, merged_text, merged_meta, merged_rms, name),
+            satno, threshold_km_s, apply_filter,
         )
-        if not records:
+        if analysed is None:
             return _panel_error(
                 request, state,
                 f"No valid TLEs parsed from UDL response for SATNO {satno}.",
             )
-
-        records, quality_flags = _cadence_filtered(records, apply_filter, satno)
-
-        pol = analyse_pattern_of_life(
-            records,
-            satno=satno,
-            name=name,
-            dv_threshold=threshold_km_s,
-            quality_flags=quality_flags,
-        )
-        pol.malformed_element_sets = dropped.malformed
-        pol.duplicate_epoch_sets = dropped.duplicate_epoch
-        pol.bad_provenance_sets = dropped.bad_provenance
-        pol.other_object_sets = dropped.other_object
-        pol.history_truncated_at = _archive_end_if_capped(archive_text)
+        pol, quality_flags = analysed
         state.last_pol_analysis = pol  # type: ignore[attr-defined]
+        _log_refused(state, pol)
         filter_note = _filter_note(apply_filter, quality_flags)
         state.append_log(
             f"[POL] Analysed {satno}: {pol.tle_count} TLEs, "
             f"{len(pol.manoeuvres)} manoeuvres, status={pol.pol_status} [UDL]{filter_note}"
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("PoL analysis failed for %s", log_safe(satno))
-        return _panel_error(request, state, f"Analysis error: {exc}")
+        return _panel_error(request, state, _ANALYSIS_FAILED)
 
     return render(request, "partials/pol_results.html", {
         "pol": pol,
         "source": "UDL",
         "pair": get_intel(satno),
-        **_pol_view(pol, _reserve_reset_for(state, satno)),
+        **_pol_view(pol, reserve_reset_for(state, satno), state=state),
     })
 
 
@@ -434,7 +598,29 @@ def _all_detections(pol: object) -> list[Any]:
     )
 
 
-def _reserve_reset_for(state: object, satno: int) -> datetime | None:
+def custody_from_history(
+    red_tle: str, now: datetime, *, pol: Any | None, normality: BurnNormality | None, problem: str,
+) -> CustodyStatus:
+    """Whether a red object is in custody at *now*: its orbit's age and its held history (SPC-018).
+
+    One rule for the sweep and the Decision Engine (SPC-123), so the two cannot judge one object differently.
+    *pol* is its analysed history, None with *problem* saying why; *normality* the verdict on its latest burn.
+    """
+    age = elset_age(red_tle, now)
+    return assess_custody(
+        elset_hours=age.hours if age else None,
+        ahead_hours=age.ahead_hours if age else 0.0,
+        limit_hours=age.limit_hours if age else 0.0,
+        elset_count=pol.tle_count if pol else 0,
+        history_days=pol.span_days if pol else 0.0,
+        normality=normality.verdict if normality else None,
+        history_problem=problem,
+        truncated_at=pol.history_truncated_at if pol else None,
+        limit_figure=age.regime.applied if age and age.regime else "",
+    )
+
+
+def reserve_reset_for(state: object, satno: int) -> datetime | None:
     """The operator-recorded refuelling date for *satno*, if any.
 
     The assessment's fourth watchlist recommendation is to track refuelling as
@@ -449,7 +635,73 @@ def _reserve_reset_for(state: object, satno: int) -> datetime | None:
     return resets.get(satno)
 
 
-def _pol_view(pol: object, reserve_reset: datetime | None = None) -> dict[str, object]:
+def _burn_normality(pol: object, views: list[Any]) -> list[BurnNormality]:
+    """Each confirmed burn judged against the object's own earlier burns (SPC-009).
+
+    In the order of *views*, so the manoeuvre table can pair them row by row.
+    The history starts at the first element set held, not the first burn, so
+    a long quiet stretch still counts as time the object was watched.
+    """
+    burns = burns_from_views(views)
+    if not burns:
+        return []
+    records = getattr(pol, "records", None) or []
+    start = records[0].epoch if records else min(b.epoch for b in burns)
+    return [judge_burn(b, burns, start) for b in burns]
+
+
+def _pol_custody(pol: Any, latest_burn: BurnNormality | None, now: datetime) -> CustodyStatus | None:
+    """Custody of the analysed object at *now* (SPC-018), or ``None`` with no element sets."""
+    records = getattr(pol, "records", None) or []
+    if not records:
+        return None
+    hours = max((now - records[-1].epoch).total_seconds() / 3600.0, 0.0)
+    family = str(getattr(pol, "regime", "") or "")
+    return assess_custody(
+        elset_hours=hours,
+        limit_hours=limit_hours_for_regime(family),
+        # Whose figure the limit is, the regime read from the newest set and the figure from the family it is chosen by.
+        limit_figure=figure_applied(str(getattr(records[-1], "tle", "") or ""), family),
+        elset_count=int(getattr(pol, "tle_count", len(records))),
+        history_days=float(getattr(pol, "span_days", 0.0) or 0.0),
+        normality=latest_burn.verdict if latest_burn else None,
+        history_problem="",
+        truncated_at=getattr(pol, "history_truncated_at", None),
+    )
+
+
+def _utc_now() -> datetime:
+    """The panel's clock, a seam so tests can stand at a chosen moment."""
+    return datetime.now(tz=UTC)
+
+
+def _object_understanding(pol: Any, assessment: PolAssessment, custody: CustodyStatus | None,
+                          now: datetime, state: object = None) -> dict[str, object] | None:
+    """What is understood about the analysed object (SPC-168): the strip the sweep shows for it, and more.
+
+    Built from this panel's own reading of the history, its custody and its
+    normality, the values that set volatility, and from the record and the
+    GCAT row already held. The approaches and seed paths are the ones the
+    session holds for it (SPC-173, SPC-174), as the sweep and the intel card
+    read them, so the object reads the same on every panel. Nothing is fetched.
+    """
+    satno = str(getattr(pol, "satno", "") or "")
+    try:
+        signals = tu.history_signals(pol, assessment)
+        records = getattr(pol, "records", None) or []
+        data_mode = str(getattr(records[-1], "data_mode", "") or "") or None
+        interactions = held_interactions(state, satno, now)
+    # BLE001: a history the model cannot read leaves the panel standing.
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Threat Understanding failed for %s: %s", log_safe(satno), log_safe(exc))
+        return None
+    held = HeldObject(satno=satno, record=get_intel(satno), catalogue=catalogue_entry(satno), signals=signals,
+                      custody=custody.state if custody is not None else Custody.LOST,
+                      interactions=interactions.edges, notes=interactions.notes, seed_paths=interactions.paths)
+    return object_view(held, now, regime=str(getattr(pol, "regime", "") or ""), data_mode=data_mode)
+
+
+def _pol_view(pol: object, reserve_reset: datetime | None = None, *, state: object = None) -> dict[str, object]:
     """Every delta-v figure ``pol_results.html`` shows, converted once, here.
 
     THIS IS THE UNIT BOUNDARY for the pattern-of-life panel. ``pol`` is an
@@ -469,6 +721,10 @@ def _pol_view(pol: object, reserve_reset: datetime | None = None) -> dict[str, o
     """
     stats = getattr(pol, "dv_stats", None)
     assessment = assess_pattern_of_life(pol, reserve_reset)
+    normality = _burn_normality(pol, assessment.manoeuvres)
+    latest_burn = max(normality, key=lambda n: n.burn.epoch, default=None)
+    now = _utc_now()
+    custody = _pol_custody(pol, latest_burn, now)
 
     return {
         "assessment": assessment,
@@ -490,8 +746,11 @@ def _pol_view(pol: object, reserve_reset: datetime | None = None) -> dict[str, o
         # the charts at 1,000,000x in 0.5.16.
         "budget_total_dv_m_s": assessment.propellant.spent_m_s,
         "budget_annual_dv_m_s": assessment.propellant.annual_rate_m_s,
-        "manoeuvre_rows": [{"m": v.manoeuvre, "v": v, "delta_v_m_s": v.delta_v_m_s}
-                           for v in assessment.manoeuvres],
+        "manoeuvre_rows": [{"m": v.manoeuvre, "v": v, "delta_v_m_s": v.delta_v_m_s, "normal": n}
+                           for v, n in zip(assessment.manoeuvres, normality, strict=True)],
+        "latest_burn": latest_burn,
+        "custody": custody,
+        "object_understanding": _object_understanding(pol, assessment, custody, now, state),
         "candidate_rows": [{"m": v.manoeuvre, "v": v, "delta_v_m_s": v.delta_v_m_s}
                            for v in assessment.candidates],
         "detection": _detection_view(pol),
@@ -518,6 +777,7 @@ def _detection_view(pol: object) -> dict[str, object]:
         "duplicate_epoch_sets": getattr(pol, "duplicate_epoch_sets", 0),
         "bad_provenance_sets":  getattr(pol, "bad_provenance_sets", 0),
         "other_object_sets":    getattr(pol, "other_object_sets", 0),
+        "refused_sentence":     history_refused(pol),
         "breakdowns_truncated": getattr(pol, "breakdowns_truncated", 0),
         "confirmed":            len(getattr(pol, "manoeuvres", [])),
         "candidates":           len(getattr(pol, "candidate_manoeuvres", [])),
@@ -769,7 +1029,7 @@ async def pol_reserve_reset(
         "pol": pol,
         "source": "UDL",
         "pair": get_intel(satno),
-        **_pol_view(pol, resets.get(satno)),
+        **_pol_view(pol, resets.get(satno), state=state),
     })
 
 
@@ -805,7 +1065,7 @@ async def pol_manoeuvre_detail(
     m = matching[0]
     # The interpretation comes from the same assessment the results panel uses,
     # so the drill-down cannot disagree with the row it was opened from.
-    assessment = assess_pattern_of_life(pol, _reserve_reset_for(state, satno))
+    assessment = assess_pattern_of_life(pol, reserve_reset_for(state, satno))
     view = next((v for v in (*assessment.manoeuvres, *assessment.candidates)
                  if v.manoeuvre is m), None)
     return render(request, "partials/pol_manoeuvre_detail.html", {
@@ -890,6 +1150,29 @@ async def pol_monte_carlo(  # noqa: PLR0913, PLR0917
     })
 
 
+#: The PoL chart legend: Station Keeping, Plane Change, Repositioning, Unknown.
+_CHART_TYPE_COLOURS = {
+    "station_keeping": "#3b8beb",
+    "plane_change": "#f59e0b",
+    "repositioning": "#ef4444",
+    "unknown": "#6b7280",
+}
+
+
+def _chart_type(classification: str) -> str:
+    """The legend type for an assessed manoeuvre's operator label.
+
+    Every label above the station-keeping ceiling other than a plane change
+    moves the object somewhere, so the legend reads it as repositioning; a
+    manoeuvre the assessment did not label is unknown.
+    """
+    if not classification:
+        return "unknown"
+    return {"station keeping": "station_keeping", "plane change": "plane_change"}.get(
+        classification, "repositioning",
+    )
+
+
 @router.get("/chart-data/{satno}", response_class=JSONResponse)
 async def pol_chart_data(
     satno: int,
@@ -902,12 +1185,12 @@ async def pol_chart_data(
     if pol is None or pol.satno != satno:
         return JSONResponse({"error": "No PoL analysis available"}, status_code=404)
 
-    TYPE_COLORS = {
-        "station_keeping": "#3b8beb",
-        "plane_change": "#f59e0b",
-        "repositioning": "#ef4444",
-        "unknown": "#6b7280",
-    }
+    # Each bar takes its type from the assessment the manoeuvre table reads.
+    # PolAnalysis carries no type of its own: reading one raised on every
+    # request, so no PoL chart drew (SPC-012).
+    assessment = assess_pattern_of_life(pol, reserve_reset_for(state, satno))
+    labels = {id(v.manoeuvre): v.classification for v in assessment.manoeuvres}
+    types = [_chart_type(labels.get(id(m), "")) for m in pol.manoeuvres]
 
     drift_phase_data = [
         {
@@ -945,8 +1228,8 @@ async def pol_chart_data(
         "manoeuvres": {
             "epochs": pol.manoeuvre_epochs,
             "dvs_ms": pol.manoeuvre_dvs,
-            "types": pol.manoeuvre_types,
-            "colors": [TYPE_COLORS.get(t, "#6b7280") for t in pol.manoeuvre_types],
+            "types": types,
+            "colors": [_CHART_TYPE_COLOURS[t] for t in types],
             "alts": pol.manoeuvre_alts,
             "drift_deltas": pol.manoeuvre_drift_deltas,
             "lons": man_lons,
@@ -984,13 +1267,14 @@ async def pol_notso_panel(
     })
 
 
-def _notsos_from_cache_records(raw_records: list[dict[str, Any]], satno: int) -> list[Any]:
+def notsos_from_cache_records(raw_records: list[dict[str, Any]], satno: int) -> list[Any]:
     """Cached NOTSO dicts as ``NOTSORecord`` objects, for one satellite.
 
     The cache holds raw dicts, so they go back through the same text parser the
     pasted-text path uses. One grammar, one set of results, whichever source
     the operator correlated from. A JCO record can name several objects, so
-    its text is built for the satellite under analysis (audit F-046).
+    its text is built for the satellite under analysis (audit F-046). The
+    Decision Engine's NOTSO prior reads its records through this too (SPC-130).
     """
     from spectre.astro.notso import parse_notso_text
     from spectre.data.notso_cache import message_text
@@ -1066,13 +1350,36 @@ def _load_notsos(state: Any, pol: Any, notso_text: str) -> tuple[list[Any], list
         )
     # Each cache record carries a msgText field (the full notification text),
     # or the text is reconstructed from its fields.
-    notsos = _notsos_from_cache_records(raw_records, pol.satno)
+    notsos = notsos_from_cache_records(raw_records, pol.satno)
     if not notsos:
         return HTMLResponse(
             f'<p class="error-msg">Cache has {len(raw_records)} record(s) for SATNO '
             f'{pol.satno} but none could be parsed. Try pasting the text manually.</p>'
         )
     return notsos, [], f"local cache ({len(raw_records)} records)"
+
+
+def notso_behaviour_profile(pol: Any, notsos: list[Any]) -> tuple[list[Any], Any | None]:
+    """*notsos* correlated with every detection in the analysed history *pol*, and the behaviour profile over its
+    window, None when the history spans no window.
+
+    One rule for the NOTSO panel and the Decision Engine's NOTSO prior (SPC-130). A NOTSO follows human analysis and
+    is deliberately withheld for small routine burns, so the routine per-burn ceiling for the object's regime is the
+    line below which no notice is expected.
+    """
+    from spectre.astro.notso import correlate_notsos_with_manoeuvres, extract_behaviour_profile
+
+    reportable_m_s, _ = per_event_station_keeping_m_s(str(getattr(pol, "regime", "") or ""))
+    # notso.py is an astro module and works in km/s; the calibration is m/s.
+    # This is the conversion, in that direction, and it is the only one on this path.
+    reportable_km_s = reportable_m_s / 1000.0
+    correlations = correlate_notsos_with_manoeuvres(notsos, _all_detections(pol), pol.satno)
+    start, end = _analysis_window(pol)
+    if not (start and end):
+        return correlations, None
+    return correlations, extract_behaviour_profile(
+        pol.satno, correlations, start, end, reportable_threshold_km_s=reportable_km_s,
+    )
 
 
 @router.post("/notso-correlate", response_class=HTMLResponse)
@@ -1086,11 +1393,6 @@ async def pol_notso_correlate(
       1. Operator-pasted text (``notso_text`` form field, if non-empty).
       2. Local NOTSO cache for the current satno (automatic if text is empty).
     """
-    from spectre.astro.notso import (
-        correlate_notsos_with_manoeuvres,
-        extract_behaviour_profile,
-    )
-
     state = get_session_state(current_user)
     pol = getattr(state, "last_pol_analysis", None)
 
@@ -1108,28 +1410,7 @@ async def pol_notso_correlate(
     notsos, rejects, source_label = loaded
 
     try:
-        # A NOTSO follows human analysis and is deliberately withheld for
-        # small routine burns, so the routine per-burn ceiling for this
-        # object's regime is the line below which no notice is expected.
-        reportable_m_s, _ = per_event_station_keeping_m_s(
-            str(getattr(pol, "regime", "") or ""),
-        )
-        # notso.py is an astro module and works in km/s; the calibration is
-        # m/s. This is the conversion, in that direction, and it is the only
-        # one on this path.
-        reportable_km_s = reportable_m_s / 1000.0
-        correlations = correlate_notsos_with_manoeuvres(
-            notsos, _all_detections(pol), pol.satno
-        )
-
-        start, end = _analysis_window(pol)
-        profile = (
-            extract_behaviour_profile(
-                pol.satno, correlations, start, end,
-                reportable_threshold_km_s=reportable_km_s,
-            )
-            if (start and end) else None
-        )
+        correlations, profile = notso_behaviour_profile(pol, notsos)
 
         state.append_log(
             f"[NOTSO] Correlated {len(notsos)} NOTSOs ({source_label}) for {pol.satno}: "

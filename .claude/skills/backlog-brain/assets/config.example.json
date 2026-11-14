@@ -1,0 +1,16 @@
+{
+ "schema": 1,
+ "project": {"name": "My Project", "ref_prefix": "PRJ-"},
+ "releases": {
+  "naming": "V{major}.{minor}", "start": "V1.0",
+  "floor_min": 720, "cap_min": 840, "target_min": 810,
+  "overhead_min": 0, "pace": 1.0, "gate_savings": true, "fill_to_floor": true
+ },
+ "gates": [
+  {"key": "review", "label": "code review", "minutes": 25, "triggers": ["src/*", "lib/*"]}
+ ],
+ "people": [{"id": "me", "name": "Me", "hours_per_week": 20}],
+ "agents": {"max_concurrent": 2},
+ "working": {"hours_per_day": 8, "days_per_week": 5},
+ "risk_paths": []
+}

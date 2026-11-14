@@ -90,7 +90,7 @@
     <button class="gcat-ctab {% if loop.first %}active{% endif %}"
             role="tab"
             data-cat="{{ cat_key }}"
-            onclick="gcatCatTab(this)"
+            data-action="gcatCatTab"
             title="{{ cat.desc }}">
       <span class="gcat-ctab-pip gcat-pip-{{ cat.color }}"></span>
       {{ cat.label }}
@@ -126,7 +126,7 @@
                 hx-target="#gcat-table-area"
                 hx-swap="innerHTML"
                 hx-indicator="#gcat-load-ind"
-                onclick="gcatSelectDs(this)"
+                data-action="gcatSelectDs"
                 title="{{ ds.desc }}">
           <span class="gcat-ds-label">{{ ds.label }}</span>
           <span class="gcat-ds-rows {% if is_cached %}gcat-rows-loaded{% endif %}">
@@ -164,35 +164,4 @@
 
 </div>{# end .gcat-wrap #}
 
-<script>
-/* ── GCAT panel JavaScript ──────────────────────────────────── */
-
-/** Switch visible category group in the dataset nav. */
-function gcatCatTab(btn) {
-  var cat = btn.dataset.cat;
-  document.querySelectorAll('.gcat-ctab').forEach(function(b) {
-    b.classList.toggle('active', b === btn);
-  });
-  document.querySelectorAll('.gcat-nav-group').forEach(function(g) {
-    g.classList.toggle('active', g.dataset.catGroup === cat);
-  });
-}
-
-/** Mark the clicked dataset button active; clear others. */
-function gcatSelectDs(btn) {
-  document.querySelectorAll('.gcat-ds-btn').forEach(function(b) {
-    b.classList.remove('active');
-  });
-  btn.classList.add('active');
-}
-
-/** Clear search and reload the current dataset from page 1.
- *  Called by the ✕ button in the table toolbar. */
-function gcatClearSearch(dsKey) {
-  htmx.ajax('GET', '/gcat/table?dataset=' + encodeURIComponent(dsKey) + '&q=&page=1', {
-    target: '#gcat-table-area',
-    swap: 'innerHTML',
-    indicator: '#gcat-load-ind'
-  });
-}
-</script>
+{# Category tabs, dataset buttons and the clear control are in /static/js/gcat.js (SPC-199). #}

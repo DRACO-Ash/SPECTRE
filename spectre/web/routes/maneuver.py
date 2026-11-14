@@ -10,6 +10,7 @@ CW, tactical and assessment methods. Orbital event detection uses SGP4 via
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import math
 from collections.abc import Callable
@@ -21,8 +22,13 @@ from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from spectre.astro import targeting
+from spectre.astro.along_track import error_rate_words
 from spectre.astro.constants import regimes_compatible
+from spectre.astro.elset_approach import elset_position_error_km
+from spectre.astro.elset_check import HELD_KEPT, tle_epoch
 from spectre.astro.events import EventType, find_orbital_events
+from spectre.astro.flight import baseline, fly
 from spectre.astro.maneuvers import (
     InterceptSolution,
     bielliptic_intercept,
@@ -42,6 +48,7 @@ from spectre.astro.maneuvers import (
     lambert_intercept,
     manoeuvre_detect_intercept,
     min_time_intercept_wrapper,
+    miss_not_read,
     nmc_intercept,
     phasing_intercept,
     plane_change_intercept,
@@ -51,6 +58,7 @@ from spectre.astro.maneuvers import (
 )
 from spectre.astro.propagator import TLE_ERRORS, regime_from_tle
 from spectre.data.intel import get_intel, satno_from_tle
+from spectre.domain import realism
 from spectre.domain.manoeuvre_calibration import (
     DEFAULT_SWEEP_BUDGET_M_S,
     Posture,
@@ -60,6 +68,7 @@ from spectre.domain.manoeuvre_calibration import (
     per_event_station_keeping_m_s,
     to_km_s,
 )
+from spectre.domain.manoeuvre_evidence import Evidence, current_evidence, shipped_evidence
 from spectre.domain.models import (
     BurnLocation,
     BurnResult,
@@ -70,6 +79,7 @@ from spectre.domain.models import (
 from spectre.web.auth import require_login
 from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, INTENT_LABELS, dominant_axis
 from spectre.web.deps import render
+from spectre.web.elsets import RefusedElset
 from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
@@ -82,6 +92,18 @@ router = APIRouter(prefix="/plan/maneuver")
 _INTERCEPT_RESULT_TEMPLATE = "partials/intercept_result.html"
 _ALL_INTERCEPTS_TEMPLATE = "partials/all_intercepts_result.html"
 _HOP_TYPE_LABEL = "Hop Type"
+#: The Intercept Engine's default delta-V budget, m/s: the most any satellite in the NOTSO record spent on station in
+#: 14 days, 171.8 m/s by COSMOS 2589 (SPC-234). Owner ruling 2026-11-12, overruling R7 for the engine
+#: (docs/DELTA-V-RESEARCH-ASSIMILATION.md). Read from the shipped record, so a newer export moves it. The threat sweep
+#: keeps DEFAULT_SWEEP_BUDGET_M_S.
+ENGINE_DEFAULT_BUDGET_M_S: float = shipped_evidence().fleet.largest_window_m_s
+#: The satellite that spent it, named from the same record, its catalogue number when the record has no name.
+ENGINE_BUDGET_HOLDER: str = realism.record_holder(shipped_evidence())
+#: What a flown miss the search could not compute reads as (SPC-238): never NaN as a number, never as arriving.
+NOT_COMPUTED_TEXT = "not computed"
+#: What a hop's miss is: the closest it brings red to the target, not the separation asked for or the distance it
+#: travels (charming-dirac d2e6513).
+_LABEL_CLOSEST_APPROACH = "Closest approach"
 
 # Human-readable altitude hint for each orbit regime — used in error messages.
 _REGIME_ALT_HINT: dict[str, str] = {
@@ -318,6 +340,20 @@ def _banded(
 #: wording is written once: two methods heading the same quantity
 #: differently would read as two different quantities.
 _LABEL_MISS_DISTANCE: str = "Miss Distance"
+
+
+def _km_text(miss: float, places: int = 1) -> str:
+    """*miss* in km to *places* decimals, or "not computed" when it is not a number (SPC-238)."""
+    return f"{miss:.{places}f} km" if math.isfinite(miss) else NOT_COMPUTED_TEXT
+
+
+def _comes_within(result: InterceptResult, miss: float) -> str:
+    """"RED comes within 12.3 km of BLUE", or that its closest approach was not computed (SPC-238)."""
+    if math.isfinite(miss):
+        return f"{result.red_name} comes within {miss:.1f} km of {result.blue_name}"
+    return f"{result.red_name}'s closest approach to {result.blue_name} was {NOT_COMPUTED_TEXT}"
+
+
 _LABEL_TRANSFER_TYPE: str = "Transfer Type"
 #: The transfer flown by the three methods that solve the same two-point
 #: boundary value problem.
@@ -338,7 +374,7 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
         lambda result, dv, miss: (
             [
                 {"label": _HOP_TYPE_LABEL, "value": "R-Bar (radial)"},
-                {"label": "Separation", "value": f"{miss:.2f} km"},
+                {"label": _LABEL_CLOSEST_APPROACH, "value": _km_text(miss)},
                 {"label": "Burns", "value": "1 radial impulse"},
             ]
         ),
@@ -346,7 +382,7 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
         lambda result, dv, miss: (
             [
                 {"label": _HOP_TYPE_LABEL, "value": "V-Bar (along-track)"},
-                {"label": "Total Advance", "value": f"{miss:.1f} km"},
+                {"label": _LABEL_CLOSEST_APPROACH, "value": _km_text(miss)},
                 {"label": "Burns", "value": "2 radial (entry + correction)"},
                 {"label": "Signature", "value": "Low — mimics perturbation drift"},
             ]
@@ -355,7 +391,7 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
         lambda result, dv, miss: (
             [
                 {"label": _HOP_TYPE_LABEL, "value": "H-Bar (orbit-normal)"},
-                {"label": "Total Advance", "value": f"{miss:.1f} km"},
+                {"label": _LABEL_CLOSEST_APPROACH, "value": _km_text(miss)},
                 {"label": "Burns", "value": "Normal burns at node crossings"},
                 {"label": "Signature", "value": "Low — ACS/propellant settling cover"},
             ]
@@ -363,42 +399,42 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
     InterceptMethod.LAMBERT:
         lambda result, dv, miss: (
             [
-                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
+                {"label": _LABEL_MISS_DISTANCE, "value": _km_text(miss, 2)},
                 {"label": _LABEL_TRANSFER_TYPE, "value": _TRANSFER_LAMBERT_ARC},
             ]
         ),
     InterceptMethod.PROXIMITY:
         lambda result, dv, miss: (
             [
-                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
+                {"label": _LABEL_MISS_DISTANCE, "value": _km_text(miss, 2)},
                 {"label": _LABEL_TRANSFER_TYPE, "value": _TRANSFER_LAMBERT_ARC},
             ]
         ),
     InterceptMethod.RENDEZVOUS:
         lambda result, dv, miss: (
             [
-                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
+                {"label": _LABEL_MISS_DISTANCE, "value": _km_text(miss, 2)},
                 {"label": _LABEL_TRANSFER_TYPE, "value": _TRANSFER_LAMBERT_ARC},
             ]
         ),
     InterceptMethod.HOHMANN:
         lambda result, dv, miss: (
             [
-                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
+                {"label": _LABEL_MISS_DISTANCE, "value": _km_text(miss, 2)},
                 {"label": "Burn Count", "value": str(len(result.burns))},
             ]
         ),
     InterceptMethod.BIELLIPTIC:
         lambda result, dv, miss: (
             [
-                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
+                {"label": _LABEL_MISS_DISTANCE, "value": _km_text(miss, 2)},
                 {"label": "Burn Count", "value": str(len(result.burns))},
             ]
         ),
     InterceptMethod.PHASING:
         lambda result, dv, miss: (
             [
-                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
+                {"label": _LABEL_MISS_DISTANCE, "value": _km_text(miss, 2)},
                 {"label": _LABEL_TRANSFER_TYPE, "value": "Phasing orbit"},
             ]
         ),
@@ -470,14 +506,14 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
     InterceptMethod.COLA:
         lambda result, dv, miss: (
             [
-                {"label": "Achieved Miss", "value": f"{miss:.2f} km"},
+                {"label": "Achieved Miss", "value": _km_text(miss, 2)},
                 {"label": "Strategy", "value": "Optimal COLA manoeuvre"},
             ]
         ),
     InterceptMethod.EVASION:
         lambda result, dv, miss: (
             [
-                {"label": "Achieved Miss", "value": f"{miss:.2f} km"},
+                {"label": "Achieved Miss", "value": _km_text(miss, 2)},
                 {"label": "Type", "value": "Defensive evasion"},
             ]
         ),
@@ -506,7 +542,7 @@ def _method_insights(
     if builder is None:
         return (
             [
-                {"label": _LABEL_MISS_DISTANCE, "value": f"{miss:.2f} km"},
+                {"label": _LABEL_MISS_DISTANCE, "value": _km_text(miss, 2)},
             ]
         )
     return builder(result, dv, miss)
@@ -521,6 +557,11 @@ def _method_insights(
 def _lambert_summary(
     result: InterceptResult, dv: float, miss: float, tof_label: str, _arrival: str,
 ) -> str:
+    if not math.isfinite(miss):
+        return (
+            f"Lambert transfer to {result.blue_name}: {dv:.0f} m/s total \u0394V in {tof_label}; "
+            f"its closest approach was {NOT_COMPUTED_TEXT}."
+        )
     return (
         f"Lambert transfer achieves {miss:.1f} km close approach to {result.blue_name} "
         f"with {dv:.0f} m/s total \u0394V in {tof_label}."
@@ -546,20 +587,19 @@ _SummaryBuilder = Callable[[InterceptResult, float, float, str, str], str]
 _METHOD_SUMMARY_BUILDERS: dict[InterceptMethod, _SummaryBuilder] = {
     InterceptMethod.RBAR_HOP:
         lambda result, dv, miss, tof_label, arrival: (
-            f"R-Bar hop places {result.red_name} {miss:.1f} km radially from "
-            f"{result.blue_name} using {dv:.0f} m/s \u0394V in {tof_label}."
+            f"R-Bar hop: {_comes_within(result, miss)} using {dv:.0f} m/s \u0394V in {tof_label}."
         ),
     InterceptMethod.VBAR_HOP:
         lambda result, dv, miss, tof_label, arrival: (
-            f"V-Bar hop sequence advances {result.red_name} {miss:.1f} km along V-bar "
-            f"toward {result.blue_name} via {len(result.burns)} burns "
+            f"V-Bar hop sequence along V-bar: {_comes_within(result, miss)} "
+            f"via {len(result.burns)} burns "
             f"({dv:.0f} m/s total \u0394V, {tof_label} TOF). "
             f"Low observability — each hop mimics natural drift."
         ),
     InterceptMethod.HBAR_HOP:
         lambda result, dv, miss, tof_label, arrival: (
-            f"H-Bar hop sequence advances {result.red_name} {miss:.1f} km in orbit-normal "
-            f"toward {result.blue_name} via {len(result.burns)} normal burns "
+            f"H-Bar hop sequence in orbit-normal: {_comes_within(result, miss)} "
+            f"via {len(result.burns)} normal burns "
             f"({dv:.0f} m/s total \u0394V, {tof_label} TOF). "
             f"Low observability — consistent with ACS activity."
         ),
@@ -763,6 +803,16 @@ async def orbital_events(
     })
 
 
+#: The longest coast or time of flight the panel takes, hours: a year. An element set's error grows by 1 to 2 km a
+#: day (spectre/astro/along_track.py), so beyond a year no figure means anything, and the flown search's sample
+#: limit would be passed long before (review of SPC-234).
+_MAX_HOURS = 8760.0
+#: The largest approach distance the panel takes, m: 100,000 km, wider than any two objects at or below GEO can be
+#: apart (about 84,000 km). It sets the radius a red approach must come within, so a larger figure would make every
+#: plan arrive (review of SPC-234).
+_MAX_STANDOFF_M = 1.0e8
+
+
 class _InterceptForm(BaseModel):
     """The intercept panel's fields, bound from the form by name.
 
@@ -775,13 +825,13 @@ class _InterceptForm(BaseModel):
     blue_sat: str
     method: str
     manoeuvre_start: str = ""
-    coast_hours: float = 1.0
-    intercept_hours: float = 6.0
-    target_distance_m: float = 0.0
+    coast_hours: float = Field(default=1.0, ge=0.0, le=_MAX_HOURS, allow_inf_nan=False)
+    intercept_hours: float = Field(default=6.0, gt=0.0, le=_MAX_HOURS, allow_inf_nan=False)
+    target_distance_m: float = Field(default=0.0, ge=0.0, le=_MAX_STANDOFF_M, allow_inf_nan=False)
     revolutions: int = Field(default=1, ge=1, le=50)
     hops: int = Field(default=3, ge=1, le=20)
     drift_days: str = ""
-    max_dv_m_s: float = Field(default=DEFAULT_SWEEP_BUDGET_M_S, ge=0.0, le=100000.0)
+    max_dv_m_s: float = Field(default=ENGINE_DEFAULT_BUDGET_M_S, ge=0.0, le=100000.0, allow_inf_nan=False)
     intercept_data_mode: str = ""
 
 
@@ -827,7 +877,7 @@ async def apply_intercept(
         })
 
     # Re-fetch TLEs if a per-panel data mode override was requested.
-    red_tle, blue_tle, effective_dm = await _resolve_provenance(
+    red_tle, blue_tle, effective_dm, elset_notes = await _resolve_provenance(
         red_tle, blue_tle, form.intercept_data_mode, state,
     )
 
@@ -890,7 +940,7 @@ async def apply_intercept(
         f"total ΔV={result.total_delta_v_m_s:.0f} m/s, "
         f"{len(result.burns)} burn(s) [{burn_summary}], "
         f"arrival={result.arrival_epoch.strftime('%Y-%m-%d %H:%M UTC')}, "
-        f"miss={result.intercept_range_km:.1f} km"
+        f"miss={_km_text(result.intercept_range_km)}"
     )
     logger.info(
         "apply_intercept: %s for operator %s (%s → %s total_dv=%s m/s, burns=%s)",
@@ -908,6 +958,7 @@ async def apply_intercept(
         "intel": intel,
         "pair": pair,
         "intercept_data_mode": effective_dm,
+        "elset_notes": elset_notes,
     })
 
 
@@ -960,6 +1011,24 @@ class _Shaping(NamedTuple):
     revolutions: int = 1
     hops: int = 3
     drift_days: float | None = None
+    #: Search the burn point, time of flight, revolutions and hops for the cheapest approach, rather than solving
+    #: once with the typed values (SPC-234).
+    search: bool = False
+
+
+def _shaping_form(
+    revolutions: Annotated[int, Form(ge=1, le=50)] = 1,
+    hops: Annotated[int, Form(ge=1, le=20)] = 3,
+    drift_days: Annotated[str, Form()] = "",
+    targeting_mode: Annotated[str, Form()] = "search",
+) -> _Shaping:
+    """The panel's counts and its targeting choice, read as one dependency (SPC-234).
+
+    The route was at the Code Quality gate's limit of 13 parameters, so the targeting choice joins these here rather
+    than becoming a fourteenth. A form that does not say searches, which is what the panel offers first.
+    """
+    shaping = _shaping_from_form(revolutions, hops, drift_days)
+    return shaping._replace(search=targeting_mode.strip().lower() != "typed")
 
 
 class _InterceptArgs(NamedTuple):
@@ -1032,62 +1101,296 @@ def _missing_tle_labels(
     return missing
 
 
+#: Where a method's row belongs (SPC-234). Only a red approach is a red course of action: it is searched, flown,
+#: banded for realism and can set the worst case. COLA, Evasion and Formation are burns that move away (Formation and
+#: Evasion are blue's own, by their solvers' documentation), and were ranked as red threats beside the approaches.
+#: The rest, J2 drift among them, are scored assessments.
+_RED_APPROACH = "Red approach"
+_BLUE_DEFENCE = "Avoidance and defence"
+_ASSESSMENT = "Assessment"
+_GROUP_ORDER: dict[str, int] = {_RED_APPROACH: 0, _BLUE_DEFENCE: 1, _ASSESSMENT: 2}
+
+#: Each red approach, with the choices the targeting search tries for it. J2 drift is not one: it reports the RAAN
+#: gap natural precession closes, a score in degrees, often over years.
+_SEARCH_AXES: dict[InterceptMethod, tuple[str, ...]] = {
+    InterceptMethod.LAMBERT: (targeting.BURN, targeting.TOF),
+    InterceptMethod.RBAR_HOP: (targeting.BURN, targeting.TOF),
+    InterceptMethod.CW_DRIFT: (targeting.BURN, targeting.TOF),
+    InterceptMethod.PHASING: (targeting.BURN, targeting.REVS),
+    InterceptMethod.VBAR_HOP: (targeting.BURN, targeting.HOP),
+    InterceptMethod.HBAR_HOP: (targeting.BURN, targeting.HOP),
+    InterceptMethod.HOHMANN: (targeting.BURN,),
+    InterceptMethod.BIELLIPTIC: (targeting.BURN,),
+    InterceptMethod.PLANE_CHANGE: (targeting.BURN,),
+    InterceptMethod.NMC: (targeting.BURN,),
+    InterceptMethod.GEO_DRIFT: (targeting.BURN,),
+    InterceptMethod.MIN_TIME: (targeting.BURN,),
+}
+_DEFENCE_METHODS = frozenset({InterceptMethod.COLA, InterceptMethod.EVASION, InterceptMethod.FORMATION})
+
+#: The burn point name for a plan solved with the typed values.
+_TYPED = "Typed coast"
+
+#: The element-set error band beside a flown closest approach (SPC-202's model, SPC-234).
+_ELSET_BAND_NOTE = (
+    "element-set error {sigma:.1f} km (1 sigma), {low:.1f} to {high:.1f} km: red's {red:.1f} km and blue's "
+    "{blue:.1f} km along track at the closest approach, in quadrature; the sweep's rule of thumb, tuned, not sourced: "
+    "red's {red_rate}, blue's {blue_rate}"
+)
+
+
+def _group_of(method: InterceptMethod) -> str:
+    if method in _SEARCH_AXES:
+        return _RED_APPROACH
+    return _BLUE_DEFENCE if method in _DEFENCE_METHODS else _ASSESSMENT
+
+
+@dataclasses.dataclass(frozen=True)
+class _Outcome:
+    """One method's row before assessment: its result or its failure, and for a red approach how it was targeted."""
+
+    method: InterceptMethod
+    result: InterceptResult | None
+    error: str | None
+    targeted: targeting.Targeted | None = None
+
+
+class _Plan(NamedTuple):
+    """What every red approach in one batch shares."""
+
+    points: list[tuple[str, datetime]]
+    period_s: float
+    fastest_budget_m_s: float
+    approach_km: float
+
+
+def approach_radius_km(target_km: float) -> float:
+    """How close a plan must come to count: the operator's standoff, or the default radius."""
+    return target_km if target_km > 0 else realism.CLOSE_APPROACH_KM
+
+
+def _batch_plan(args: _InterceptArgs, fastest_budget_m_s: float) -> _Plan:
+    """The red satellite's revolution and, when searching, its burn points within the next one.
+
+    A red set SGP4 cannot propagate to the start (decayed, say) leaves the search only "now", with no revolution
+    to scale its times of flight by, so each method reports its own error in its row rather than the whole batch
+    failing (review of SPC-234).
+    """
+    radius = approach_radius_km(args.target_km)
+    try:
+        period_s = targeting.revolution_s(args.red_tle, args.start)
+        points = targeting.burn_points(args.red_tle, args.start, period_s) if args.shaping.search else []
+    except TLE_ERRORS:
+        return _Plan([(targeting.NOW, args.start)], 0.0, fastest_budget_m_s, radius)
+    return _Plan(points, period_s, fastest_budget_m_s, radius)
+
+
+def _solver_for(method: InterceptMethod, args: _InterceptArgs, budget_m_s: float) -> targeting.Solve:
+    """Solve *method* for one targeting choice, the typed values filling the rest.
+
+    Solved inside miss_not_read: the plan the search keeps is flown once by spectre.astro.flight, through the same
+    function the solvers fly with, so no burn is flown twice for one figure.
+    """
+    def solve(choice: targeting.Choice) -> InterceptSolution:
+        shaping = args.shaping._replace(
+            revolutions=choice.revolutions or args.shaping.revolutions,
+            hops=choice.hops or args.shaping.hops,
+        )
+        with miss_not_read():
+            return _run_intercept(
+                method, args.red_tle, args.blue_tle, args.start, choice.coast_s,
+                args.tof_s if choice.tof_s is None else choice.tof_s,
+                args.target_km, budget_m_s, shaping=shaping,
+            )
+    return solve
+
+
+def _measure_for(method: InterceptMethod, args: _InterceptArgs, approach_km: float) -> targeting.Measure:
+    """How *method*'s closest approach is measured: every red approach is flown, the V-bar and H-bar hops too, now
+    that their solvers list every burn of the sequence (V0.40 review); they read their linear model's figure before.
+
+    A plan that arrives is also measured against the closest the target comes over the same window with no burn, so
+    a target already within the radius is not an arrival. Only an arriving plan needs it, so only it pays for the
+    second flight.
+    """
+    def measured(sol: InterceptSolution) -> targeting.Measured:
+        flight = fly(sol, args.red_tle, args.blue_tle)
+        miss, at = flight.miss_km, flight.at
+        coast = baseline(sol, args.red_tle, args.blue_tle).miss_km if targeting.arrives(miss, approach_km) else math.nan
+        return targeting.Measured(miss, at, coast)
+    return measured
+
+
+def _candidates_for(method: InterceptMethod, args: _InterceptArgs, plan: _Plan) -> list[targeting.Choice]:
+    """The choices to compare: the search's, or the one the operator typed."""
+    if args.shaping.search:
+        return targeting.choices(_SEARCH_AXES[method], plan.points, args.start, plan.period_s)
+    burn_at = args.start + _timedelta(seconds=args.coast_s)
+    return [targeting.Choice(
+        _TYPED, burn_at, args.coast_s, args.tof_s, args.shaping.revolutions, args.shaping.hops,
+    )]
+
+
+def _target(method: InterceptMethod, args: _InterceptArgs, plan: _Plan) -> targeting.Targeted:
+    """The best plan for one red approach, its miss replaced by the one measured.
+
+    A minimum-time plan spends its whole budget, so when searching it is given a realistic one; the operator's typed
+    maximum would make it report that maximum and nothing about the satellite.
+    """
+    fastest = method is InterceptMethod.MIN_TIME and args.shaping.search
+    budget_m_s = plan.fastest_budget_m_s if fastest else args.max_dv_m_s
+    found = targeting.search(
+        _solver_for(method, args, budget_m_s), _measure_for(method, args, plan.approach_km),
+        _candidates_for(method, args, plan), plan.approach_km,
+    )
+    measured = dataclasses.replace(found.solution, miss_distance_km=found.closest_km)
+    return dataclasses.replace(found, solution=measured)
+
+
 def _run_all_methods(
     args: _InterceptArgs,
     red_name: str,
     blue_name: str,
-) -> list[tuple[InterceptMethod, InterceptResult | None, str | None]]:
+    plan: _Plan,
+) -> list[_Outcome]:
     """Run every method of the batch, keeping each one's failure beside it.
 
-    A closure would have carried the route's nesting into its own branching and
-    charged the route for it, which is how the batch came to be reported by the
-    Code Quality gate in the first place.
+    A red approach is searched and flown (see ``_target``); every other method is solved once with the panel's
+    values, as before. A closure would have carried the route's nesting into its own branching and charged the route
+    for it, which is how the batch came to be reported by the Code Quality gate in the first place.
     """
-    out: list[tuple[InterceptMethod, InterceptResult | None, str | None]] = []
+    out: list[_Outcome] = []
     for method in _ALL_METHODS_SEQUENCE:
         try:
-            sol = _run_intercept(
+            targeted = _target(method, args, plan) if method in _SEARCH_AXES else None
+            sol = targeted.solution if targeted else _run_intercept(
                 method, args.red_tle, args.blue_tle,
                 args.start, args.coast_s, args.tof_s, args.target_km, args.max_dv_m_s,
                 shaping=args.shaping,
             )
             result = _solution_to_result(sol, red_name, blue_name, method)
-            out.append((method, result, None))
+            out.append(_Outcome(method, result, None, targeted))
         # BLE001: any solver failure is reported per method, not raised.
         except Exception as exc:  # noqa: BLE001
-            out.append((method, None, str(exc)))
+            out.append(_Outcome(method, None, str(exc)))
     return out
 
 
-def _items_from_solutions(
-    raw: list[tuple[InterceptMethod, InterceptResult | None, str | None]],
-    red_regime: str,
-    budget_m_s: float,
-) -> list[dict[str, Any]]:
+def _batch(args: _InterceptArgs, red_name: str, blue_name: str, fastest_budget_m_s: float) -> list[_Outcome]:
+    """The whole batch, as the executor runs it: the red satellite's burn points, then every method."""
+    return _run_all_methods(args, red_name, blue_name, _batch_plan(args, fastest_budget_m_s))
+
+
+def _duration(seconds: float | None) -> str:
+    return format_tof_label(seconds / _SECONDS_PER_HOUR) if seconds is not None else ""
+
+
+def _elset_band(red_tle: str, blue_tle: str, at: datetime | None, miss_km: float) -> dict[str, Any] | None:
+    """Both element sets' 1-sigma along-track error at the closest approach, as the band beside the miss (SPC-202).
+
+    None when the miss was not computed or either set's epoch does not read.
+    """
+    epochs = [tle_epoch(next((ln for ln in t.splitlines() if ln.startswith("1 ")), "")) for t in (red_tle, blue_tle)]
+    red_epoch, blue_epoch = epochs
+    if at is None or red_epoch is None or blue_epoch is None or not math.isfinite(miss_km):
+        return None
+    red_km = elset_position_error_km(red_tle, red_epoch, at)
+    blue_km = elset_position_error_km(blue_tle, blue_epoch, at)
+    sigma = math.hypot(red_km, blue_km)
+    low, high = max(miss_km - sigma, 0.0), miss_km + sigma
+    return {
+        "sigma_km": sigma, "low_km": low, "high_km": high, "red_km": red_km, "blue_km": blue_km,
+        "note": _ELSET_BAND_NOTE.format(sigma=sigma, low=low, high=high, red=red_km, blue=blue_km,
+                                        red_rate=error_rate_words(red_tle), blue_rate=error_rate_words(blue_tle)),
+    }
+
+
+class _Assessing(NamedTuple):
+    """What each row is judged against."""
+
+    red_regime: str
+    budget_m_s: float
+    red_satno: str | None
+    red_name: str
+    evidence: Evidence
+    red_tle: str
+    blue_tle: str
+
+
+def _targeting_view(method: InterceptMethod, t: targeting.Targeted, judged: _Assessing) -> dict[str, Any]:
+    """What the row shows of the choice the search kept and how it was measured."""
+    axes = _SEARCH_AXES[method]
+    choice = t.choice
+    after = None if t.closest_at is None else (t.closest_at - choice.burn_at).total_seconds()
+    return {
+        "burn_point": choice.burn_point,
+        "burn_at": choice.burn_at,
+        "coast": _duration(choice.coast_s),
+        "tof": _duration(choice.tof_s) if targeting.TOF in axes else "",
+        "revolutions": choice.revolutions if targeting.REVS in axes else None,
+        "hops": choice.hops if targeting.HOP in axes else None,
+        "closest_km": t.closest_km,
+        "closest_text": _km_text(t.closest_km),
+        "closest_after": _duration(after),
+        "approach": t.approach,
+        "already_within": t.already_within,
+        "band": _elset_band(judged.red_tle, judged.blue_tle, t.closest_at, t.closest_km),
+        "tried": t.tried,
+        "refused": t.refused,
+    }
+
+
+def _items_from_solutions(raw: list[_Outcome], judged: _Assessing) -> list[dict[str, Any]]:
     """Turn each method's outcome into one row of the comparison table.
 
-    A method that failed keeps its row and carries its error, so the panel
-    accounts for all twenty-three rather than quietly listing fewer than it ran.
+    A method that failed keeps its row and carries its error, so the panel accounts for all twenty-three rather than
+    quietly listing fewer than it ran. A red approach also carries its targeting and its realism band; it counts
+    towards the worst case only if it is an approach and is not beyond the NOTSO record. A row that does not count is
+    kept and labelled, never dropped (owner ruling, 2026-11-12).
     """
     items: list[dict[str, Any]] = []
-    for method, result, error in raw:
-        if result is not None:
-            intel = _compute_intercept_intel(result, red_regime, budget_m_s)
-            items.append({"method": method, "result": result, "intel": intel, "error": None})
-        else:
-            items.append({"method": method, "result": None, "intel": None, "error": error})
+    for o in raw:
+        item: dict[str, Any] = {
+            "method": o.method, "result": o.result, "error": o.error, "intel": None,
+            "group": _group_of(o.method), "targeting": None, "realism": None, "counts": False,
+        }
+        if o.result is not None:
+            item["intel"] = _compute_intercept_intel(o.result, judged.red_regime, judged.budget_m_s)
+        if o.result is not None and o.targeted is not None:
+            band = realism.assess(o.result.total_delta_v_m_s, judged.red_satno, judged.red_name, judged.evidence)
+            item["targeting"] = _targeting_view(o.method, o.targeted, judged)
+            item["realism"] = band
+            item["counts"] = o.targeted.approach and not band.discounted
+        items.append(item)
     return items
 
 
-def _sort_key(item: dict[str, Any]) -> tuple[int, float]:
-    """Rank one row by threat level, then by the delta-v it costs.
+def _sort_key(item: dict[str, Any]) -> tuple[int, int, int, float]:
+    """Rank one row: red approaches that count, then by threat, then by delta-v.
 
-    A method whose solver failed sorts behind every assessment.
+    A red approach that never comes within the approach radius, or costs more than anything in the NOTSO record,
+    follows those that count; avoidance, defence and the assessments follow the red approaches. A method whose solver
+    failed sorts behind every row that solved.
     """
     if item["result"] is None:
-        return (99, 0.0)
+        return (99, 0, 0, 0.0)
     level = item["intel"]["threat_level"]
-    return (_THREAT_SORT_ORDER.get(level, 5), item["result"].total_delta_v_m_s)
+    return (
+        _GROUP_ORDER[item["group"]],
+        0 if item["counts"] else 1,
+        _THREAT_SORT_ORDER.get(level, 5),
+        item["result"].total_delta_v_m_s,
+    )
+
+
+def _most_likely(items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The cheapest red approach that counts, a satellite's own record first."""
+    counted = [i for i in items if i["counts"]]
+    return min(
+        counted,
+        key=lambda i: (realism.BAND_ORDER[i["realism"].band], i["result"].total_delta_v_m_s),
+        default=None,
+    )
 
 
 @router.post("/apply-all-intercepts", response_model=None)
@@ -1095,14 +1398,12 @@ async def apply_all_intercepts(
     request: Request,
     red_sat: Annotated[str, Form()],
     blue_sat: Annotated[str, Form()],
+    shaping: Annotated[_Shaping, Depends(_shaping_form)],
     manoeuvre_start: Annotated[str, Form()] = "",
-    coast_hours: Annotated[float, Form()] = 1.0,
-    intercept_hours: Annotated[float, Form()] = 6.0,
-    target_distance_m: Annotated[float, Form()] = 0.0,
-    revolutions: Annotated[int, Form(ge=1, le=50)] = 1,
-    hops: Annotated[int, Form(ge=1, le=20)] = 3,
-    drift_days: Annotated[str, Form()] = "",
-    max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0)] = DEFAULT_SWEEP_BUDGET_M_S,
+    coast_hours: Annotated[float, Form(ge=0.0, le=_MAX_HOURS, allow_inf_nan=False)] = 1.0,
+    intercept_hours: Annotated[float, Form(gt=0.0, le=_MAX_HOURS, allow_inf_nan=False)] = 6.0,
+    target_distance_m: Annotated[float, Form(ge=0.0, le=_MAX_STANDOFF_M, allow_inf_nan=False)] = 0.0,
+    max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0, allow_inf_nan=False)] = ENGINE_DEFAULT_BUDGET_M_S,
     intercept_data_mode: Annotated[str, Form()] = "",
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
@@ -1111,6 +1412,10 @@ async def apply_all_intercepts(
     Runs every method in turn, in one executor job, using shared parameters,
     computes intelligence assessments for each successful result, and returns
     a sortable table where every row can expand to show the full analysis.
+    Each red approach is searched for its cheapest plan that reaches the
+    target (or solved with the typed values), flown to measure its closest
+    approach, and banded against what NOTSOs record satellites spending on
+    station (SPC-234).
     """
     state = get_session_state(current_user)
 
@@ -1134,7 +1439,7 @@ async def apply_all_intercepts(
         })
 
     # Re-fetch TLEs if a per-panel data mode override was requested.
-    red_tle, blue_tle, effective_dm = await _resolve_provenance(
+    red_tle, blue_tle, effective_dm, elset_notes = await _resolve_provenance(
         red_tle, blue_tle, intercept_data_mode, state,
     )
 
@@ -1167,16 +1472,19 @@ async def apply_all_intercepts(
     target_km = target_distance_m / 1000.0
 
     args = _InterceptArgs(
-        red_tle, blue_tle, manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s,
-        _shaping_from_form(revolutions, hops, drift_days),
+        red_tle, blue_tle, manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s, shaping,
     )
+    evidence = current_evidence()
+    red_satno = str(satno_from_tle(red_tle) or "") or None
+    fastest = realism.realistic_budget_m_s(red_satno, evidence)
 
     loop = asyncio.get_running_loop()
     raw = await loop.run_in_executor(
-        None, lambda: _run_all_methods(args, red_sat.strip(), blue_sat.strip())
+        None, lambda: _batch(args, red_sat.strip(), blue_sat.strip(), fastest[0])
     )
 
-    items = _items_from_solutions(raw, red_regime, max_dv_m_s)
+    judged = _Assessing(red_regime, max_dv_m_s, red_satno, red_sat.strip(), evidence, red_tle, blue_tle)
+    items = _items_from_solutions(raw, judged)
     items.sort(key=_sort_key)
 
     # Replace history with current batch so trade-space shows the full comparison
@@ -1204,6 +1512,12 @@ async def apply_all_intercepts(
         "blue_name": blue_sat.strip(),
         "intercept_history": state.intercept_history,
         "intercept_data_mode": effective_dm,
+        "elset_notes": elset_notes,
+        "most_likely": _most_likely(items),
+        "searched": shaping.search,
+        "evidence": evidence.fleet,
+        "approach_km": approach_radius_km(target_km),
+        "fastest_budget": fastest,
     })
 
 
@@ -1231,7 +1545,9 @@ async def trade_space_data(
             point["score"] = round(r.score)
             point["provenance"] = r.provenance
         else:
-            point["miss_km"] = round(r.intercept_range_km, 2)
+            # None, not NaN, which no JSON parser reads, when the flown search could not run (SPC-238).
+            miss = r.intercept_range_km
+            point["miss_km"] = round(miss, 2) if math.isfinite(miss) else None
         points.append(point)
     return JSONResponse(content=points)
 
@@ -1257,10 +1573,14 @@ async def clear_history(
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 class _Fetched(NamedTuple):
-    """An element set and the UDL dataMode it is known to have."""
+    """An element set and the UDL dataMode it is known to have, and the sentence refusing what UDL answered when the
+    acceptance check refused it and the set held was kept (SPC-201), or the one naming each newer set refused before
+    the set fetched was taken (SPC-243), which is shown beside the badge, not in it."""
 
     tle: str
     mode: str
+    refused: str = ""
+    passed_over: str = ""
 
 
 def _held_mode(state: object, tle: str) -> str:
@@ -1304,26 +1624,55 @@ async def _refetch_tles(
             data_mode=data_mode,
             source=getattr(state, "udl_tle_source", ""),
         )
-        return _Fetched(*result) if result else _Fetched(tle, _held_mode(state, tle))
+        if isinstance(result, RefusedElset):
+            return _Fetched(tle, _held_mode(state, tle), result.sentence(f"SATNO {satno}", outcome=HELD_KEPT))
+        if not result:
+            return _Fetched(tle, _held_mode(state, tle))
+        return _Fetched(result.tle, result.data_mode, passed_over=result.passed_over_note(f"SATNO {satno}"))
 
     new_red, new_blue = await asyncio.gather(_try_fetch(red_tle), _try_fetch(blue_tle))
     return new_red, new_blue
 
 
+_UDL_DATA_MODES = frozenset({"REAL", "SIMULATED", "EXERCISE", "TEST"})
+
+
+def _with_refusals(label: str, *fetched: _Fetched) -> str:
+    """*label*, followed by each sentence refusing a set UDL answered with, when the held set was kept (SPC-201)."""
+    refusals = [f.refused for f in fetched if f.refused]
+    return " ".join([f"{label}.", *refusals]) if refusals else label
+
+
+class _Provenance(NamedTuple):
+    """The element sets to fly, the badge's value, and the notes shown beside it: each sentence naming newer sets
+    refused before a set fetched was taken (SPC-243). A live set keeps the badge at its mode, so REAL stays green."""
+
+    red_tle: str
+    blue_tle: str
+    label: str
+    notes: tuple[str, ...] = ()
+
+
 async def _resolve_provenance(
     red_tle: str, blue_tle: str, requested: str, state: object,
-) -> tuple[str, str, str]:
+) -> _Provenance:
     """The element sets to fly and the badge naming their actual provenance.
 
     The badge used to show the requested mode, defaulting to REAL, even when
     nothing was fetched and the sets were the operator's own (audit F-133).
     """
-    if requested.strip():
-        red, blue = await _refetch_tles(red_tle, blue_tle, requested.strip().upper(), state)
+    mode = requested.strip().upper()
+    if mode in _UDL_DATA_MODES:
+        red, blue = await _refetch_tles(red_tle, blue_tle, mode, state)
     else:
         red, blue = _Fetched(red_tle, _held_mode(state, red_tle)), _Fetched(blue_tle, _held_mode(state, blue_tle))
-    label = red.mode if red.mode == blue.mode else f"red {red.mode}, blue {blue.mode}"
-    return red.tle, blue.tle, label
+    label = _with_refusals(red.mode if red.mode == blue.mode else f"red {red.mode}, blue {blue.mode}", red, blue)
+    if mode and mode not in _UDL_DATA_MODES:
+        # Never sent to UDL (SPC-025), and said, so the held sets are not
+        # mistaken for a fresh fetch in the mode asked for.
+        label = (f"refused data mode {mode[:20]!r}: it must be REAL, SIMULATED, EXERCISE or TEST; "
+                 f"flown with the held sets ({label})")
+    return _Provenance(red.tle, blue.tle, label, tuple(f.passed_over for f in (red, blue) if f.passed_over))
 
 
 # ── Intercept solver dispatch ────────────────────────────────────────────────

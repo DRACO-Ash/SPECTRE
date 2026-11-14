@@ -35,6 +35,7 @@ from typing import Any, NamedTuple
 from scipy.stats import t as student_t
 from sgp4.api import Satrec
 
+from spectre.astro.catalogue import catalogue_number
 from spectre.astro.constants import (
     MU_EARTH,
     R_EARTH,
@@ -50,6 +51,7 @@ from spectre.astro.dv_estimation import (
     secular_rates_deg_day,
     snapshot_from_record,
 )
+from spectre.astro.elset_check import check_elset
 
 # ── Physical constants ────────────────────────────────────────────────────────
 
@@ -354,6 +356,8 @@ class PolAnalysis:
     duplicate_epoch_sets:   int = 0   # the same epoch again, dropped
     bad_provenance_sets:    int = 0   # provenance in an unusable shape, dropped
     other_object_sets:      int = 0   # another object's element set, dropped
+    refused_element_sets:   int = 0   # refused by the element-set acceptance check (SPC-201), dropped
+    refused_failures:       tuple[str, ...] = ()  # what the check found in them, each once
     breakdowns_truncated:   int = 0   # detections past the forensic budget
     # Newest archived epoch when the archive pull hit its record cap, so the
     # history may have a gap between it and the current element set.
@@ -775,41 +779,40 @@ class ParseCounts(NamedTuple):
     """Element sets the parser dropped, by reason.
 
     Only malformed pairs were counted; duplicates, unusable provenance and
-    other objects' sets dropped silently (audits F-205, F-206).
+    other objects' sets dropped silently (audits F-205, F-206). A set the
+    acceptance check refuses is counted as refused, and each failure it named
+    is kept once in *refusals*, never the set's text (SPC-201).
     """
 
     malformed: int = 0
     duplicate_epoch: int = 0
     bad_provenance: int = 0
     other_object: int = 0
-
-
-# Alpha-5 catalogue numbers: a letter, I and O excluded, stands for 10 to 33.
-_ALPHA5 = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+    refused: int = 0
+    refusals: tuple[str, ...] = ()
 
 
 def _catalogue_number(l1: str) -> int:
-    """The catalogue number in columns 3-7 of line 1, alpha-5 included."""
-    field = l1[2:7].strip()
-    if field[:1].isalpha():
-        return (_ALPHA5.index(field[0].upper()) + 10) * 10_000 + int(field[1:])
-    return int(field)
+    """The catalogue number in columns 3-7 of line 1, Alpha-5 included.
 
-
-def _record_from_pair(l1: str, l2: str, seen: set[str]) -> TLERecord | None:
-    """Parse one pair, or None when it is unusable or a duplicate epoch.
-
-    A history block routinely carries the same element set twice from two
-    providers. A malformed pair raises ValueError or ZeroDivisionError, which
-    the caller catches and counts so that it drops out rather than stopping
-    the parse.
+    Read by the one shared reader, so the history and ``satno_from_tle`` agree
+    on every field (SPC-026). An unreadable field raises ValueError, which the
+    caller counts as a malformed pair.
     """
-    rec = _satrec_to_record(f"{l1}\n{l2}")
+    number = catalogue_number(l1[2:7])
+    if number is None:
+        raise ValueError(f"line 1 carries no readable catalogue number: {l1[2:7]!r}")
+    return number
+
+
+def _first_at_its_epoch(rec: TLERecord, seen: set[str]) -> bool:
+    """Whether *rec* is the first set at its epoch: a history block routinely carries the same element set twice
+    from two providers, and the second is dropped."""
     key = rec.epoch.strftime("%Y%j%H%M%S")
     if key in seen:
-        return None
+        return False
     seen.add(key)
-    return rec
+    return True
 
 
 def _apply_metadata(
@@ -843,6 +846,7 @@ def parse_tle_history(
     satno: int | None = None,
     metadata: dict[str, tuple[str, str]] | None = None,
     rms_metadata: dict[str, float | None] | None = None,
+    now: datetime | None = None,
 ) -> list[TLERecord]:
     """Parse a block of historical TLEs into chronologically-sorted TLERecords.
 
@@ -854,27 +858,41 @@ def parse_tle_history(
         Maps TLE line-1 strings to RMS fit residuals from UDL (optional).
         Stored on each record as ``rms_residual`` for quality-based selection
         in :func:`~spectre.astro.tle_filter.filter_tle_history`.
+    now:
+        The time the history is read at: a set dated more than FUTURE_EPOCH_TOLERANCE after it is refused (SPC-226).
     """
-    records, _ = parse_tle_history_counted(tle_text, satno, metadata, rms_metadata)
+    records, _ = parse_tle_history_counted(tle_text, satno, metadata, rms_metadata, now)
     return records
 
 
-def _drop_reason(
+# PLR0913: one argument per thing a pair is judged on, the clock among them.
+def _drop_reason(  # noqa: PLR0913
     l1: str, l2: str, satno: int | None, seen: set[str],
-    apply_metadata: Callable[[TLERecord, str], bool],
-) -> tuple[TLERecord | None, str]:
-    """The record for one pair, or None and the ParseCounts field it counts under."""
+    apply_metadata: Callable[[TLERecord, str], bool], *, now: datetime | None = None,
+) -> tuple[TLERecord | None, str, tuple[str, ...]]:
+    """The record for one pair, or None, the ParseCounts field it counts under and, when the acceptance check refused
+    it, what the check found.
+
+    A malformed pair raises ValueError or ZeroDivisionError, caught and counted so that it drops out rather than
+    stopping the parse. The check runs before the duplicate test, so a corrupted set never takes the epoch of the
+    sound set it was copied from (evaluation probe P-14 changed one digit and kept the epoch). With *now*, a set dated
+    in the future is refused there too, counted and named as the check names it (SPC-226).
+    """
     try:
         if satno is not None and _catalogue_number(l1) != satno:
-            return None, "other_object"
-        rec = _record_from_pair(l1, l2, seen)
+            return None, "other_object", ()
+        rec = _satrec_to_record(f"{l1}\n{l2}")
     except (ValueError, ZeroDivisionError):
-        return None, "malformed"
-    if rec is None:
-        return None, "duplicate_epoch"
+        return None, "malformed", ()
+    # The record keeps each line to its 69 columns (text past them is not element-set data), so that is what is checked.
+    check = check_elset(f"{l1[:_TLE_LINE_COLUMNS]}\n{l2[:_TLE_LINE_COLUMNS]}", now=now)
+    if not check.accepted:
+        return None, "refused", check.failures
+    if not _first_at_its_epoch(rec, seen):
+        return None, "duplicate_epoch", ()
     if not apply_metadata(rec, l1):
-        return None, "bad_provenance"
-    return rec, ""
+        return None, "bad_provenance", ()
+    return rec, "", ()
 
 
 def parse_tle_history_counted(
@@ -882,6 +900,7 @@ def parse_tle_history_counted(
     satno: int | None = None,
     metadata: dict[str, tuple[str, str]] | None = None,
     rms_metadata: dict[str, float | None] | None = None,
+    now: datetime | None = None,
 ) -> tuple[list[TLERecord], ParseCounts]:
     """As :func:`parse_tle_history`, also counting what was dropped and why.
 
@@ -889,22 +908,28 @@ def parse_tle_history_counted(
     out of the whole parse, so one bad element set lost the analysis (audit
     F-083). Each now drops out and is counted. When *satno* is given, an
     element set for another object is dropped and counted; the parameter was
-    accepted and ignored (audit F-206).
+    accepted and ignored (audit F-206). A set the element-set acceptance
+    check refuses is dropped and counted, with what it found (SPC-201): the
+    history feeds custody, the burn-normality verdict and the sweep, and a
+    corrupted set read as a burn that never happened. With *now*, a set dated more than FUTURE_EPOCH_TOLERANCE after
+    it is refused and counted the same way, named by the check (SPC-226, evaluation F-38).
     """
     records: list[TLERecord] = []
     seen: set[str] = set()
     dropped: dict[str, int] = {}
+    refusals: list[str] = []
     for l1, l2 in _tle_line_pairs(tle_text):
-        rec, reason = _drop_reason(
-            l1, l2, satno, seen, lambda r, line1: _apply_metadata(r, line1, metadata, rms_metadata),
+        rec, reason, failures = _drop_reason(
+            l1, l2, satno, seen, lambda r, line1: _apply_metadata(r, line1, metadata, rms_metadata), now=now,
         )
+        refusals += failures
         if rec is None:
             dropped[reason] = dropped.get(reason, 0) + 1
         else:
             records.append(rec)
 
     records.sort(key=lambda r: r.epoch)
-    return records, ParseCounts(**dropped)
+    return records, ParseCounts(**dropped, refusals=tuple(dict.fromkeys(refusals)))
 
 
 def _screen_pairs(

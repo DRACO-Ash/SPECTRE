@@ -16,6 +16,19 @@
   --text-dim:      var(--spectre-text-secondary);
   --text-bright:   var(--spectre-color-pure-white);
 
+  /* ── Names the panels were written against (SPC-029) ──────────
+     Steel defined these four until the token bridge dropped them, and
+     the dark theme never did, so every use fell back to the inherited
+     value: transparent panels and tiles, no emphasis, no muting. Each is
+     restated as the role Steel gave it. They resolve on <html>, where
+     data-theme sits, so they follow the theme with no second definition.
+     --bg-secondary was #edf1f6 beside a #f0f4f8 page: the page surface,
+     a tile recessed into its panel in both themes.                */
+  --text-primary:  var(--text);
+  --text-muted:    var(--text-dim);
+  --panel-bg:      var(--surface);
+  --bg-secondary:  var(--bg);
+
   /* ── Operational status — mapped to spectre-theme tokens ─────── */
   --green:         var(--spectre-color-nominal-green);
   --green-dim:     var(--spectre-color-nominal-green-bg);
@@ -661,6 +674,14 @@ input:focus, textarea:focus, select:focus {
 }
 textarea { resize: vertical; }
 
+/* Chromium on Windows paints a dark-scheme select's open list from the
+   options' own colours, not the select's; left to the user agent they can be
+   text the same colour as the list. Both follow the theme instead. */
+option, optgroup {
+  background-color: var(--bg);
+  color: var(--text);
+}
+
 /* ── Keyboard focus on the non-input controls ─────────────────────
    Everything that opts into keyboard operation with
    tabindex="0" onkeydown="spectreActivate(event)" — the expandable sweep,
@@ -691,6 +712,15 @@ th[tabindex="0"]:focus-visible,
 .htab:focus-visible {
   outline: 2px solid var(--spectre-focus-ring);
   outline-offset: -2px;
+}
+
+/* The drawn game tree's collapse control (SPC-190) is an SVG group, where
+   Chromium draws no outline it can be relied on to show, so focus thickens
+   and recolours its circle instead. */
+.tree-dtoggle:focus { outline: none; }
+.tree-dtoggle:focus-visible circle {
+  stroke: var(--spectre-focus-ring);
+  stroke-width: 3;
 }
 
 /* The engine tab bar is var(--navy-deep) in BOTH themes, so it keeps the
@@ -793,6 +823,12 @@ th[tabindex="0"]:focus-visible,
   transition: color 0.15s, border-color 0.15s;
 }
 .btn-logout:hover { color: var(--text); border-color: var(--text-dim); }
+/* Logout had no focus rule, so it drew the browser's own ring, and under
+   Steel's color-scheme: light that is the light-mode ring measured at 1.03:1
+   to 1.07:1 on dark surfaces (see the ring note above). It now draws the
+   console's ring, as .spectre-btn does: 4.95:1 on the dark bar, and 5.85:1
+   on Steel's bar, which re-points the token for everything on it (SPC-035). */
+.btn-logout:focus-visible { outline: none; box-shadow: var(--spectre-shadow-focus); }
 
 .btn-sm { padding: 0.22rem 0.5rem; font-size: 0.7rem; }
 .btn-xs { padding: 0.1rem 0.35rem; font-size: 0.62rem; }
@@ -2365,3 +2401,8 @@ button[disabled] {
 ::-webkit-scrollbar-track { background: var(--bg); border-radius: 3px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+/* ── Splash already seen this session (SPC-199) ─────────────────
+   theme-boot.js marks the page before first paint, so the splash never
+   paints on a later load; operator.js then removes it. */
+html.spectre-splash-seen #spectre-splash { display: none !important; }

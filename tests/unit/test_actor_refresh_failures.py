@@ -15,6 +15,7 @@ import pytest
 
 from spectre.domain.models import ThreatActor
 from spectre.web.routes import threat
+from spectre.web.routes.udl import FetchedElset
 
 
 async def test_each_failed_refresh_is_noted(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -25,7 +26,7 @@ async def test_each_failed_refresh_is_noted(monkeypatch: pytest.MonkeyPatch) -> 
             return None
         if satno == 2:
             raise ConnectionError("UDL timed out")
-        return ("TLE", "REAL")
+        return FetchedElset("TLE", "REAL", "18th SPCS")
 
     monkeypatch.setattr(udl, "fetch_tle_for_satno", _fetch)
     state = SimpleNamespace(
