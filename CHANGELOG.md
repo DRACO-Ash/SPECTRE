@@ -9,6 +9,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- CI: the PostgreSQL test job now uses actions/setup-python 7.1.0, as the other five jobs do. It was the one job left on 5.6.0 when that bump landed.
+
 ## [0.45.0] - 2026-11-14
 
 **A refused newer element set no longer blocks the UDL fetch, and every place a set is shown says which newer one was passed over and why.**
