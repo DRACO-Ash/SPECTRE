@@ -48,8 +48,9 @@ jobs:
   test:
     name: Tests (pytest)
     runs-on: ubuntu-latest
-    # The suite alone took 27 min on a hosted runner at 0.42.0 (PR 35); 60 leaves room.
-    timeout-minutes: 60
+    # The suite alone took 27 min on a hosted runner at 0.42.0 (PR 35) and 41 min at 0.46.0
+    # (PR 43). The same suite overran 60 min in the quality job, so this job has 90 as well.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -313,8 +314,10 @@ jobs:
     # base is master itself, so every leg measured an empty diff (F-278).
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    # It runs the whole suite under coverage, then the gate: 30 min cancelled it at 0.42.0 (PR 35).
-    timeout-minutes: 60
+    # It runs the whole suite under coverage, then the gate: 30 min cancelled it at 0.42.0 (PR 35),
+    # and 60 min at 0.46.0 (PR 43), its suite finishing 2 s before the cut. Measured on hosted
+    # runners: 34 min (PR 37), 52 min (PR 35), over 60 min (PR 43). 90 still stops a hung job.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
