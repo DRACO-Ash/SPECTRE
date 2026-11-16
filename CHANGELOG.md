@@ -9,8 +9,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-11-16
+
+**The Pree scoring core is in SPECTRE: it scores how threatening the observed evidence is, and says how much of that evidence was there to read.**
+
+### Added
+- `spectre.domain.pree_scoring`, taken from the Pree service at commit `9584063` (SPC-245). It answers a different question from `threat_assessment`: that module decides whether an object can reach an asset; this one scores how threatening the observed evidence is, from approach geometry, relative velocity, manoeuvre cadence against the object's own baseline, photometric departure and RF activity. An indicator not observed is left out of the weighting and reported as `TBC, re-verify`, never defaulted to zero, a mean or a "safe" value, and it lowers the confidence tier, so a score of 97 at LOW confidence cannot be read as 97 at HIGH. The module uses the standard library only, and a test fails if that stops being true. It is not yet shown on any screen: wiring it to the threat screen, and sourcing its weights and bounds, are SPC-246.
+
 ### Changed
-- CI: the PostgreSQL test job now uses actions/setup-python 7.1.0, as the other five jobs do. It was the one job left on 5.6.0 when that bump landed.
+- The taken module's relative-velocity sentence reads in metres per second, the value converted rather than relabelled, as the house units rule requires. Scores are unchanged: the arithmetic still runs on the km/s input. A test pins the factor of 1000, because the house rule's own check cannot see a label changed without its value.
+- The taken module's empty-evidence check reads `<= 0.0` in place of an exact float comparison, which the quality gate refuses. Behaviour is unchanged: every weight is a positive constant. The module's provenance note lists it as the fourth of four edits made to Pree's copy.
+- CI: the PostgreSQL test job uses actions/setup-python 7.1.0, as the other five jobs do (merged to master in pull request 37).
 
 ## [0.45.0] - 2026-11-14
 

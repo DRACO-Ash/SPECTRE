@@ -1418,3 +1418,14 @@ A refused newer element set no longer blocks the UDL fetch; the Dependabot updat
 | DAST | **HYGIENE** | A new note naming a passed-over set, its provider, epoch and why, on the panel, list cards, screen, intercept panels, refresh and burn watch notes | Provider and object names come from UDL and are autoescaped, tested with a hostile name; no set text reaches a page or log. | Then a page reflects a field unescaped; the report names the page. |
 | SCA | **EVIDENCED** | Dependabot updates (Actions, mypy, pytest, pytest-asyncio, types-pyyaml, pip-tools) recompiled with `scripts/lock.sh`'s command | `pip-audit` on both lock files: no known vulnerabilities. | Then pip-audit names the package; recompile its pin with `--upgrade-package`. |
 | Other gates | **HYGIENE** | Epoch-mode UDL query asks for up to 100 sets, not 10 | No Dockerfile or image change. | n/a. |
+
+## 0.46.0
+
+The Pree scoring core taken into the domain layer; the PostgreSQL CI job's setup-python carried.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | New `spectre/domain/pree_scoring.py` (standard library only, no I/O) and its 24 tests | `scripts/sonar_rules.py`, `scripts/check-quality.sh` against the previous head and against master: results in the release commit. 100% line coverage of the new module. | Then the named rule points at a line in the new module; fix it there and in Pree together, so the two copies stay diffable. |
+| DAST | **HYGIENE** | None: no route, template or screen calls the module | No web surface changed. | n/a. |
+| SCA | **HYGIENE** | No dependency added | The module imports the standard library only, and a test fails if that changes. | n/a. |
+| Other gates | **HYGIENE** | CI's PostgreSQL job on actions/setup-python 7.1.0 (pull request 37) | Passed in pull request 37's own CI run. | n/a. |

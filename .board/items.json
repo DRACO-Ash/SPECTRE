@@ -2732,5 +2732,37 @@
    "spectre/astro/elset_check.py",
    "spectre/web/routes/udl.py"
   ]
+ },
+ {
+  "ref": "SPC-245",
+  "priority": "med",
+  "order": 10,
+  "group": "port",
+  "minutes": 60,
+  "task": "Take the Pree scoring core (spectre.domain.pree_scoring) from branch claude/vendor-pree-scoring-core into a release",
+  "note": "Owner ask, 2026-11-15: port the Pree scoring core into a release. Commit b860a2f (3 November) applied to master unchanged bar its changelog text: the module and its 24 tests, from Pree at commit 9584063. Scores evidence threat on five indicators, leaves an unobserved indicator out of the weighting as 'TBC, re-verify' and lowers the confidence tier. Not wired to any screen.",
+  "files": [
+   "spectre/domain/pree_scoring.py",
+   "tests/unit/test_pree_scoring.py"
+  ],
+  "state": "built",
+  "est": 60,
+  "version": "0.46.0",
+  "actualNote": "not measured: a port of a finished commit, so no honest per-item time exists"
+ },
+ {
+  "ref": "SPC-246",
+  "priority": "med",
+  "order": 11,
+  "group": "port",
+  "minutes": 360,
+  "needs_owner": true,
+  "human_minutes": 20,
+  "task": "Decide whether and where the Pree evidence score is shown, and source its weights and bounds before it is",
+  "note": "Raised building SPC-245. pree_scoring is in the domain layer but no screen or record calls it. Its five weights (0.30, 0.20, 0.25, 0.15, 0.10), its normalisation bounds (1 to 500 km, 2 km/s, 4 manoeuvres, 3 sigma) and its confidence floors (0.85, 0.60, 0.30) are unsourced judgements, and SPECTRE's rule since SPC-196 is that a judgement input is registered and labelled where it is shown. Needs the owner's call on where it appears (threat screen beside threat_assessment is Claude's suggestion, not a ruling) and a source or an analyst's sign-off for each figure, or a 'training only' label as SPC-207 used. The indicators also need inputs SPECTRE does not hold today: photometry and RF.",
+  "files": [
+   "spectre/domain/pree_scoring.py",
+   "spectre/web/routes/threat.py"
+  ]
  }
 ]
