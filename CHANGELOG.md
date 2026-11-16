@@ -20,6 +20,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The taken module's relative-velocity sentence reads in metres per second, the value converted rather than relabelled, as the house units rule requires. Scores are unchanged: the arithmetic still runs on the km/s input. A test pins the factor of 1000, because the house rule's own check cannot see a label changed without its value.
 - The taken module's empty-evidence check reads `<= 0.0` in place of an exact float comparison, which the quality gate refuses. Behaviour is unchanged: every weight is a positive constant. The module's provenance note lists it as the fourth of four edits made to Pree's copy.
 - CI: the PostgreSQL test job uses actions/setup-python 7.1.0, as the other five jobs do (merged to master in pull request 37).
+- CI: the test and quality gate jobs may run for 90 minutes, up from 60. The quality gate's run of the whole suite under coverage overran 60 minutes on this release's pull request, finishing 2 seconds before the cut; on hosted runners it has taken from 34 to over 60 minutes.
 
 ## [0.45.0] - 2026-11-14
 
