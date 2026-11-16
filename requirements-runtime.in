@@ -20,5 +20,5 @@ sgp4>=2.22
 numpy>=2.0
 python-dotenv>=1.0
 pandas>=2.0
-scipy>=1.11
+scipy>=1.18.1
 scikit-learn>=1.9.1
