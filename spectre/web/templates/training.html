@@ -4,6 +4,9 @@
 {% block scripts %}
 {# The training page's tabs and the fragments it swaps in, from a first-party file (SPC-199). #}
 <script src="/static/js/training.js" defer></script>
+{# SPECTRE: Orbital Watch (SPC-248): the campaign, alert, HUD and debrief, from first-party files. #}
+<link rel="stylesheet" href="/static/css/mission.css" />
+<script src="/static/js/mission.js" defer></script>
 {% endblock %}
 
 {% block nav_brand %}
@@ -39,7 +42,7 @@
    stays in view. #}
 <div id="training-mode-banner"
      role="note"
-     aria-label="Training mode active: scenario objects are synthetic"
+     aria-label="Training mode active: separate from operations"
      style="background:linear-gradient(90deg,#92400e,#b45309,#92400e);
             border-bottom:2px solid #f59e0b;
             padding:0.35rem 1rem;
@@ -47,8 +50,8 @@
             font-size:0.68rem; font-weight:700; color:#fef3c7;
             letter-spacing:0.06em; text-transform:uppercase; position:relative">
   <span style="font-size:1rem; line-height:1" aria-hidden="true">⚠</span>
-  TRAINING MODE ACTIVE — All scenarios use synthetic data.
-  Scenario objects join your planning lists and are removed when the scenario ends or you leave training.
+  TRAINING MODE ACTIVE — Separate from operations: nothing here touches your operational lists, time or UDL session.
+  Missions use real catalogue objects; element sets marked SYNTHETIC are not live tracking data.
   <span id="training-banner-status"
         style="margin-left:auto; font-weight:400; letter-spacing:0; text-transform:none; font-size:0.65rem; color:#fde68a">
     {% include "partials/training_banner_status.html" %}
@@ -58,6 +61,14 @@
 {# Whenever a response raises training-changed, every progress panel below is fetched again and swapped into its
    place (partials/training_refresh.html), so the page never needs a manual reload (audit 1-18, G-4). #}
 <div hidden hx-get="/training/refresh" hx-trigger="training-changed from:body" hx-swap="none"></div>
+
+{# What the mission HUD reports aloud: an objective met, all met (mission.js). Outside every tab, so it is heard
+   whichever tab is showing. #}
+<p id="mission-announce" class="visually-hidden" aria-live="polite"></p>
+{# Shown when a mission request finds the sign-in has expired, instead of the login page landing in the HUD. #}
+<p id="mission-session-ended" class="mission-session-ended" role="alert" hidden>
+  Your session ended. <a href="/login">Sign in again.</a>
+</p>
 
 {# ── Training layout ──────────────────────────────────────────────────────── #}
 <div style="display:grid; grid-template-columns:260px 1fr; gap:0; height:calc(100vh - 80px); overflow:hidden">
@@ -73,8 +84,9 @@
     {# Nav tabs #}
     <div style="display:flex; flex-direction:column; gap:0.2rem; margin-bottom:0.75rem">
       {% set nav_items = [
+        ("campaign",   "★ Campaign"),
         ("dashboard",  "📊 Dashboard"),
-        ("scenarios",  "📋 Free-Play"),
+        ("scenarios",  "📋 Classic scenarios"),
         ("challenges", "🎯 Challenges"),
         ("tutorials",  "📖 Tutorials"),
         ("console",    "⚙ SPECTRE Console"),
@@ -92,6 +104,13 @@
       </button>
       {% endfor %}
     </div>
+
+    {# Mission sound: off until the operator turns it on; short generated tones, no audio files (mission.js). #}
+    <button type="button" id="mission-sound-toggle" class="mission-sound" aria-pressed="false"
+            data-action="missionSound">
+      <svg class="mission-sound__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path class="mission-sound__waves" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>
+      Mission sound <span class="mission-sound__state" aria-hidden="true">off</span>
+    </button>
 
     {# Return to SPECTRE — always visible at bottom of sidebar #}
     <form method="post" action="/training/leave" class="inline-form"
@@ -116,8 +135,20 @@
   {# ── Main area ─────────────────────────────────────────────────────────── #}
   <main id="training-main" style="overflow-y:auto; padding:0.75rem">
 
+    {# Campaign tab: SPECTRE: Orbital Watch (SPC-248). An alert or a debrief lands in #mission-stage and takes the
+       screen; the campaign map below returns when the stage is cleared (mission.js). #}
+    <div class="training-panel active mission-panel" id="tpanel-campaign" data-stage="">
+      <div id="mission-stage" class="mission-stage"></div>
+      {# Fetched on load, and again on training-changed while the tab shows; a change while it is hidden is fetched
+         when it is next shown (mission.js), so an objective met in the console does not re-render a hidden map. #}
+      <div id="mission-campaign" class="mission-campaign-region"
+           hx-get="/training/m/campaign" hx-trigger="load, mission-campaign-refresh" hx-swap="innerHTML">
+        <p class="mission-loading"><span class="spinner"></span> Loading the campaign</p>
+      </div>
+    </div>
+
     {# Dashboard tab #}
-    <div class="training-panel active" id="tpanel-dashboard">
+    <div class="training-panel" id="tpanel-dashboard" style="display:none">
       <div id="training-dashboard"
            hx-get="/training/dashboard"
            hx-trigger="load"
@@ -132,7 +163,7 @@
     <div class="training-panel" id="tpanel-scenarios" style="display:none">
       <div style="font-size:0.75rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
                   letter-spacing:0.06em; margin-bottom:0.6rem">
-        Free-Play Scenarios
+        Classic scenarios
       </div>
       <div id="scenario-list">
         {% include "partials/training_scenario_list.html" %}
@@ -170,12 +201,27 @@
                   padding:0.3rem 0.75rem; font-size:0.6rem; font-weight:700; color:#f59e0b;
                   letter-spacing:0.05em; text-transform:uppercase; display:flex; align-items:center; gap:0.5rem">
         <span>&#9888;</span>
-        SPECTRE Console — Training Session Active · Synthetic data pre-loaded · No operational systems affected
+        SPECTRE Console — Training · Separate from operations · Check each element set&#39;s data mode
       </div>
-      <iframe id="training-console-frame"
-              style="width:100%; height:calc(100% - 1.6rem); border:none; display:block"
-              title="SPECTRE Operator Console: Training Session">
-      </iframe>
+      {# The mission HUD docks beside the frame, outside it, so the console keeps its whole page (SPC-248). #}
+      <div class="mission-console-row">
+        <iframe id="training-console-frame"
+                style="width:100%; height:100%; border:none; display:block"
+                title="SPECTRE Operator Console: Training Session">
+        </iframe>
+        {# Below 1680 px the HUD overlays the frame instead, and the handle collapses it to the frame's edge. #}
+        <div id="mission-hud-wrap" class="mission-hud-wrap" data-collapsed="false" hidden>
+          <button type="button" id="mission-hud-handle" class="mission-hud-handle" aria-expanded="true"
+                  aria-controls="mission-hud-dock" data-action="missionHudToggle">
+            <span class="mission-hud-handle__label">HUD</span>
+            <span id="mission-hud-handle-count" class="mission-hud-handle__count"></span>
+            <span class="visually-hidden mission-hud-handle__verb">Hide the mission HUD</span>
+          </button>
+          <aside id="mission-hud-dock" class="mission-hud-dock" aria-label="Mission HUD"></aside>
+          <p id="mission-on-watch" class="mission-on-watch" aria-hidden="true" hidden>On watch</p>
+        </div>
+        <div id="mission-fx" class="mission-fx" aria-hidden="true"></div>
+      </div>
     </div>
 
   </main>

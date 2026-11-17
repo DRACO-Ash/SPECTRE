@@ -253,8 +253,8 @@ class TestRecommendedNextStep:
 
     def test_level_3_names_the_pass_count(self):
         rec = recommended_next_step(_progress(current_level=2, total_points=500, scenarios_passed=1))
-        assert "pass 3 scored scenarios (you have passed 1)" in rec
-        assert "Start a scenario" in rec
+        assert "pass 3 scored scenarios or missions (you have passed 1)" in rec
+        assert "Earn a star on a mission" in rec
 
     def test_level_4_names_the_axis_gate_and_how_it_grows(self):
         rec = recommended_next_step(_progress(current_level=3, total_points=1300,
@@ -279,7 +279,7 @@ class TestNextLevelGates:
         gates = next_level_gates(_progress(current_level=2, total_points=500, scenarios_passed=1))
         assert [(g.label, g.met) for g in gates] == [
             ("400 total points (you have 500)", True),
-            ("Pass 3 scored scenarios (you have passed 1)", False),
+            ("Pass 3 scored scenarios or missions (you have passed 1)", False),
         ]
 
     def test_none_at_the_highest_level(self):

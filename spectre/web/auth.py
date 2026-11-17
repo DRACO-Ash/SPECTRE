@@ -245,6 +245,18 @@ def _bound_to(user: User, claims: SessionClaims) -> bool:
 # ── FastAPI dependency ────────────────────────────────────────────────────────
 
 
+def to_login(request: Request) -> HTTPException:
+    """Send a request with no valid sign-in to the login page.
+
+    A page load is redirected (302). An htmx request is answered 401 with HX-Redirect, so the page goes to the login
+    page: a 302 under it was followed by the XMLHttpRequest, and the login page's HTML was swapped into whatever the
+    request targeted (a polling mission HUD, for one) instead of the page leaving (0.48.0 shell review).
+    """
+    if request.headers.get("hx-request") == "true":
+        return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, headers={"HX-Redirect": _LOGIN_PATH})
+    return HTTPException(status_code=status.HTTP_302_FOUND, headers={"Location": _LOGIN_PATH})
+
+
 async def require_login(
     request: Request,
     spectre_session: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
@@ -257,37 +269,25 @@ async def require_login(
     """
 
     if not spectre_session:
-        raise HTTPException(
-            status_code=status.HTTP_302_FOUND,
-            headers={"Location": _LOGIN_PATH},
-        )
+        raise to_login(request)
 
     claims = _decode_session(spectre_session)
     if claims is None:
-        raise HTTPException(
-            status_code=status.HTTP_302_FOUND,
-            headers={"Location": _LOGIN_PATH},
-        )
+        raise to_login(request)
     username = claims.username
 
     result = await db.execute(select(User).where(User.username == username))
     user: User | None = result.scalar_one_or_none()
     if user is None:
         logger.warning("Session for unknown user: %s", log_safe(username))
-        raise HTTPException(
-            status_code=status.HTTP_302_FOUND,
-            headers={"Location": _LOGIN_PATH},
-        )
+        raise to_login(request)
 
     if not _bound_to(user, claims):
         logger.info(
             "Refused a session ended by logout or password change, or issued to a deleted namesake: %s",
             log_safe(username),
         )
-        raise HTTPException(
-            status_code=status.HTTP_302_FOUND,
-            headers={"Location": _LOGIN_PATH},
-        )
+        raise to_login(request)
 
     user.session_key = claims.key
     request.state.session_current = True

@@ -22,7 +22,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Float, Integer, String, Text
+from sqlalchemy import DateTime, Float, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from spectre.web.database import Base
@@ -189,7 +189,95 @@ class ChallengeResult(Base):
         self.debrief_json = json.dumps(value)
 
 
+class MissionAttempt(Base):
+    """One attempt at an Orbital Watch mission (SPC-248), open while it is flown, then finished or abandoned.
+
+    Everything the attempt was scored against is kept on it: the objects bound to each role with the element sets
+    used, the mission clock, and every computed quantity, so scoring uses exactly the figures the mission computed at
+    start and the debrief can say what the best answer was. *objectives* holds each objective's state: its status
+    (open, met or failed), the answer given, the points awarded, whether a hint was taken, and whether the met tick
+    has been announced to the HUD. A mission's best stars, best points and attempt count are read from its finished
+    rows.
+    """
+
+    __tablename__ = "training_mission_attempts"
+    #: At most one open attempt per account: a second concurrent start fails to insert rather than leaving two.
+    __table_args__ = (
+        Index("uq_training_mission_open_per_user", "user_id", unique=True,
+              sqlite_where=text("status = 'open'"), postgresql_where=text("status = 'open'")),
+    )
+
+    id:         Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id:    Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    username:   Mapped[str] = mapped_column(String(64), nullable=False)
+    mission_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    #: open, finished or abandoned.
+    status:     Mapped[str] = mapped_column(String(16), default="open", nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False,
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: When the operator took the watch: the first HUD after the start. The mission's time runs from here, so reading
+    #: the alert does not count against par; None until then.
+    watched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    seconds:    Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    score:      Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    stars:      Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    hints_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    #: Raised by every write, which names the version it read: two requests settling at once cannot both write
+    #: (compare and set, spectre.web.routes.missions).
+    version:    Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    #: The mission clock, ISO 8601 UTC.
+    clock_iso:  Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    #: The bound roles, the computed quantities, the objective states and the inject, each as JSON.
+    roles_json:      Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    quantities_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    objectives_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    extra_json:      Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+
+    @staticmethod
+    def _read(text: str) -> dict[str, Any]:
+        try:
+            return dict(json.loads(text))
+        except (ValueError, TypeError):
+            return {}
+
+    @property
+    def roles(self) -> dict[str, Any]:
+        return self._read(self.roles_json)
+
+    @roles.setter
+    def roles(self, value: dict[str, Any]) -> None:
+        self.roles_json = json.dumps(value)
+
+    @property
+    def quantities(self) -> dict[str, Any]:
+        return self._read(self.quantities_json)
+
+    @quantities.setter
+    def quantities(self, value: dict[str, Any]) -> None:
+        self.quantities_json = json.dumps(value)
+
+    @property
+    def objectives(self) -> dict[str, Any]:
+        return self._read(self.objectives_json)
+
+    @objectives.setter
+    def objectives(self, value: dict[str, Any]) -> None:
+        self.objectives_json = json.dumps(value)
+
+    @property
+    def extra(self) -> dict[str, Any]:
+        return self._read(self.extra_json)
+
+    @extra.setter
+    def extra(self, value: dict[str, Any]) -> None:
+        self.extra_json = json.dumps(value)
+
+
 # Every table keyed on an account, deleted with it (routes/admin.py).
-TRAINING_TABLES: tuple[type[TrainingProgress] | type[TrainingSession] | type[ChallengeResult], ...] = (
-    TrainingProgress, TrainingSession, ChallengeResult,
+TRAINING_TABLES: tuple[
+    type[TrainingProgress] | type[TrainingSession] | type[ChallengeResult] | type[MissionAttempt], ...
+] = (
+    TrainingProgress, TrainingSession, ChallengeResult, MissionAttempt,
 )

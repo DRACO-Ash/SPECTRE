@@ -393,8 +393,10 @@ def _axis_gate(cond: LevelUnlockCondition, p: ProgressSnapshot) -> LevelGate:
 
 
 def _scenario_count_gate(cond: LevelUnlockCondition, p: ProgressSnapshot) -> LevelGate:
-    return LevelGate(f"Pass {cond.count} scored scenarios (you have passed {p.scenarios_passed})",
-                     p.scenarios_passed >= (cond.count or 0), "Start a scenario and reach its pass score.")
+    # A first mission pass counts here too (spectre.web.routes.missions), as the gate says (SPC-248).
+    return LevelGate(f"Pass {cond.count} scored scenarios or missions (you have passed {p.scenarios_passed})",
+                     p.scenarios_passed >= (cond.count or 0),
+                     "Earn a star on a mission, or reach a scored scenario's pass score.")
 
 
 def _challenge_count_gate(cond: LevelUnlockCondition, p: ProgressSnapshot) -> LevelGate:
@@ -422,7 +424,7 @@ def next_level_gates(progress: object) -> list[LevelGate]:
         return []
     need = next_lv.total_points_required
     gates = [LevelGate(f"{need:,} total points (you have {p.total_points:,})", p.total_points >= need,
-                       "Points come from tutorials, scenario passes and challenge passes.")]
+                       "Points come from tutorials, mission and scenario passes, and challenge passes.")]
     cond = next_lv.unlock_condition
     gate = _CONDITION_GATES.get(cond.condition_type)
     if gate is not None:

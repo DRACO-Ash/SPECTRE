@@ -1,0 +1,124 @@
+{# SPECTRE: Orbital Watch, the campaign map (SPC-248; docs/training-game-design.md sections 6 and 7).
+   GET /training/m/campaign, and POST /training/m/{id}/abandon, land this in #mission-campaign on the Campaign tab.
+   A mission node starts the mission (POST start), whose alert lands in #mission-stage above (mission.js).
+   Context: chapters [{id, title, blurb, rank_required, locked, lock_reason, missions: [{id, title, alert_line,
+   par_seconds, stars, best_score (best_points, its older name, is read when absent), locked, lock_reason,
+   needs_udl}]}], rank {level, title, points, next_title,
+   next_conditions}, medals_count, running_mission {id, title} or None (the attempt the server holds open: its
+   strip offers the way back to it, and starting any other mission asks first, since that ends it) #}
+{% from "partials/_mission_marks.html" import clock, star_row, insignia %}
+{% set ns = namespace(next_id=None, stars=0, slots=0) %}
+{% set running = running_mission | default(none) %}
+{% for chapter in chapters %}{% for m in chapter.missions %}
+  {% set ns.stars = ns.stars + (m.stars | int) %}{% set ns.slots = ns.slots + 3 %}
+  {% if ns.next_id is none and not m.locked and not chapter.locked and (m.stars | int) == 0 %}{% set ns.next_id = m.id %}{% endif %}
+{% endfor %}{% endfor %}
+<div class="mission-campaign" data-rank-level="{{ rank.level }}"{% if running %} data-running="{{ running.id }}"{% endif %}>
+
+  {% if running %}
+  <div id="mission-resume" class="mission-resume">
+    <span class="mission-resume__pulse" aria-hidden="true"></span>
+    <span>Mission running: <strong id="mission-resume-title">{{ running.title }}</strong></span>
+    <button type="button" class="mission-btn mission-btn--primary" data-action="missionResume"
+            data-mission-id="{{ running.id }}" data-mission-title="{{ running.title }}">Back to the watch</button>
+  </div>
+  {% endif %}
+
+  <header class="mission-campaign__head">
+    <div class="mission-campaign__brand">
+      <p class="mission-eyebrow">SPECTRE training</p>
+      <h2 class="mission-campaign__title">Orbital Watch</h2>
+      <p class="mission-campaign__tag">Real satellites. Computed geometry. Your watch.</p>
+      <p class="mission-campaign__tally">
+        <span class="mission-campaign__tally-figure">{{ ns.stars }}<span class="mission-campaign__tally-of">/{{ ns.slots }}</span></span>
+        <span class="mission-campaign__tally-label">stars</span>
+        {%- if medals_count %}
+        <span class="mission-campaign__tally-figure">{{ medals_count }}</span>
+        <span class="mission-campaign__tally-label">medals</span>
+        {%- endif %}
+      </p>
+    </div>
+
+    <section class="mission-rank" aria-labelledby="mission-rank-title">
+      {{ insignia(rank.level, rank.title, "lg") }}
+      <div class="mission-rank__body">
+        <p class="mission-eyebrow">Your rank</p>
+        <h3 id="mission-rank-title" class="mission-rank__title">{{ rank.title }}</h3>
+        <p class="mission-rank__points">Level {{ rank.level }} <span aria-hidden="true">·</span> <strong>{{ rank.points }}</strong> points</p>
+        {% if rank.next_title %}
+        <p class="mission-rank__next-title">To make {{ rank.next_title }}</p>
+        <ul class="mission-rank__conditions">
+          {% for condition in rank.next_conditions %}<li>{{ condition }}</li>{% endfor %}
+        </ul>
+        {% else %}
+        <p class="mission-rank__next-title">Top rank reached</p>
+        {% endif %}
+      </div>
+    </section>
+  </header>
+
+  {% for chapter in chapters %}
+  {% set chapter_stars = chapter.missions | sum(attribute="stars") %}
+  <section class="mission-chapter{% if chapter.locked %} is-locked{% endif %}" data-chapter-id="{{ chapter.id }}"
+           aria-labelledby="mission-chapter-{{ chapter.id }}">
+    <header class="mission-chapter__head">
+      <div>
+        <p class="mission-eyebrow">Chapter {{ loop.index }}
+          <span class="mission-chapter__rank">{% if chapter.rank_required is number %}Level {{ chapter.rank_required }}{% else %}{{ chapter.rank_required }}{% endif %}</span></p>
+        <h3 id="mission-chapter-{{ chapter.id }}" class="mission-chapter__title">{{ chapter.title }}</h3>
+        <p class="mission-chapter__blurb">{{ chapter.blurb }}</p>
+      </div>
+      <p class="mission-chapter__tally"><span class="mission-chapter__tally-figure">{{ chapter_stars }}</span>/{{ chapter.missions | length * 3 }}<span class="visually-hidden"> stars</span><span aria-hidden="true"> &#9733;</span></p>
+    </header>
+    {% if chapter.locked %}
+    <p class="mission-lock mission-lock--chapter">
+      <svg class="mission-lock__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
+      <span><span class="visually-hidden">Locked: </span>{{ chapter.lock_reason }}</span>
+    </p>
+    {% endif %}
+
+    <ol class="mission-track">
+      {% for m in chapter.missions %}
+      {% set locked = m.locked or chapter.locked %}
+      {% set state = "locked" if locked else ("done" if (m.stars | int) > 0 else "open") %}
+      {% set best = m.best_score | default(m.best_points | default(0)) %}
+      <li class="mission-node" data-mission-id="{{ m.id }}" data-state="{{ state }}" data-stars="{{ m.stars | int }}"
+          data-best-points="{{ best | int }}"{% if m.id == ns.next_id %} data-next="true"{% endif %}{% if running and running.id == m.id %} data-running="true"{% endif %}>
+        {% if locked %}
+        <div class="mission-node__face">
+          <span class="mission-node__disc" aria-hidden="true">
+            <svg class="mission-lock__icon" viewBox="0 0 24 24" focusable="false"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
+          </span>
+          <span class="mission-node__title">{{ m.title }}</span>
+        </div>
+        {% elif running and running.id == m.id %}
+        <button type="button" class="mission-node__face mission-node__button" data-action="missionResume"
+                data-mission-id="{{ m.id }}" data-mission-title="{{ m.title }}"
+                aria-describedby="mission-node-{{ m.id }}-meta">
+          <span class="mission-node__disc" aria-hidden="true">{{ loop.index }}</span>
+          <span class="mission-node__title"><span class="visually-hidden">Back to mission {{ loop.index }}, running: </span>{{ m.title }}</span>
+        </button>
+        {% else %}
+        <button type="button" class="mission-node__face mission-node__button"
+                hx-post="/training/m/{{ m.id }}/start" hx-target="#mission-stage" hx-swap="innerHTML"
+                hx-disabled-elt="this"{% if running %}
+                hx-confirm="{{ running.title }} is still running. End it and start {{ m.title }}{{ '' if m.title.endswith('?') else '?' }}"{% endif %}
+                aria-describedby="mission-node-{{ m.id }}-meta">
+          <span class="mission-node__disc" aria-hidden="true">{{ loop.index }}</span>
+          <span class="mission-node__title"><span class="visually-hidden">Start mission {{ loop.index }}: </span>{{ m.title }}</span>
+        </button>
+        {% endif %}
+        {{ star_row(m.stars | int) }}
+        <p class="mission-node__meta" id="mission-node-{{ m.id }}-meta">Par {{ clock(m.par_seconds) }}{% if best %} <span aria-hidden="true">·</span> Best {{ best }}{% endif %}</p>
+        {% if m.needs_udl %}<p class="mission-badge mission-badge--udl">Needs UDL</p>{% endif %}
+        {% if locked and m.lock_reason %}
+        <p class="mission-node__lock"><span class="visually-hidden">Locked: </span>{{ m.lock_reason }}</p>
+        {% elif not locked and m.alert_line %}
+        <p class="mission-node__teaser">{{ m.alert_line }}</p>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </section>
+  {% endfor %}
+</div>

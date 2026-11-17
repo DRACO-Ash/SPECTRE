@@ -9,6 +9,28 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-11-17
+
+**SPECTRE: Orbital Watch. Training becomes a game of short missions flown in the real console against real satellites, with every figure computed and every objective checked by the console.**
+
+The owner asked for training that is fully gamified, "75% more fun", and driven by real data (`docs/training-game-design.md`; SPC-248). This is part 1: the mission engine, the game's screens, and Chapters 1 and 2.
+
+### Added
+- The Campaign tab, first in the training page: chapters of missions with stars, a rank insignia with the full conditions for the next rank, and a resume strip for a running mission.
+- Seven missions on real catalogue objects from the watchlist. Chapter 1, First Watch: Know your asset (SKYNET 5A), Who is near?, The sweep, Read a threat. Chapter 2, Shadows in the Belt: The tug (SJ-21), The inspector (SY-12 01), The listener (Luch / Olymp-2). Each opens with an alert of one line, the red object's intel card quoted with its source, the data note and a first action.
+- Every briefing figure and every accepted answer is computed when the mission starts, from the element sets the training console holds (live from UDL when connected, otherwise the bundled sets, marked SYNTHETIC), with SGP4 and the console's own code; screening questions are graded on the operator's own latest screening of that asset. No figure is typed into the mission file, and loading refuses one that is.
+- An EXERCISE inject applies a stated burn to a real orbit and re-fits an element set to the burned state (within 0.05 km); it is labelled EXERCISE wherever it shows and never presented as observed behaviour.
+- The mission HUD beside the console (over its right edge below 1,500 px, folding to a handle while you work): objectives tick themselves within a second of the operator doing the thing, with a points burst, combos for objectives met back to back, a clock against par with a mark at your best time, hints with their cost and a spotlight on the control to use, and "Close" or "Way off" on a missed number. No objective is self-certified, and every answer is final.
+- The debrief: up to three stars revealed one by one with their reasons (every objective met; inside par; no hints and every answer within half its tolerance), points, the best answer and why, and the stars flying home to the campaign. A mission's first pass pays 150 points and counts toward Level 3; replays pay nothing.
+- Opt-in sound (short generated tones, off by default); all motion stops under reduced motion, which keeps the reward as a still chip; keyboard play and WCAG AA contrast in both themes.
+- A mission harness test that plays every mission by its own words in the real console and checks every control it names, every figure against an independent computation, and every debrief answer.
+
+### Changed
+- Attempts settle each answer, hint and finish atomically, and the database holds one open mission per account.
+- An htmx request with no valid sign-in gets 401 with a redirect to the login page instead of a page the requesting panel would swallow.
+- Asset Screening records its last result in the planning state, so a mission can read the operator's own screening.
+- Level 3's condition reads "Pass 3 scored scenarios or missions". The training banners and dashboard say what is true: training is separate from operations, missions use real objects, classic scenarios are synthetic.
+
 ## [0.47.0] - 2026-11-17
 
 **Training no longer touches operations, and the console faults the training audit found are fixed: element cards, honest Intercept Engine results, and your own satellite as the one that manoeuvres.**

@@ -1940,7 +1940,7 @@ def _section_14_training(doc: Document) -> None:
         [
             ["1", "Cadet", "0", "None"],
             ["2", "Observer", "100", "Complete the Orientation tutorial"],
-            ["3", "Planner", "400", "Pass 3 scenarios"],
+            ["3", "Planner", "400", "Pass 3 scored scenarios or missions"],
             ["4", "Analyst", "1,200", "300 points on the Decision Quality axis"],
             ["5", "Operator", "3,000", "Pass 3 challenges"],
             ["6", "Instructor", "8,000", "1,000 points on the Operational Tempo axis"],
@@ -1970,9 +1970,30 @@ def _section_14_training(doc: Document) -> None:
     _add_bullet(doc, "The debrief lists every objective, met or not, with your answer. The accepted answer is shown "
                      "for objectives you met and after a passed scored attempt, never after an Explore run.")
     _add_bullet(doc, "Abandon and Reset cancel the attempt without counting it, so the first-try bonus is kept.")
+
+    _add_heading_h2(doc, "Orbital Watch Missions")
+    _add_body(doc,
+        "The Campaign tab, first in the training page, holds Orbital Watch: short missions flown in the real "
+        "console against real catalogue objects from the watchlist. Chapter 1, First Watch, and Chapter 2, Shadows "
+        "in the Belt, are available; a chapter opens at its rank, and each mission needs a star on the one before."
+    )
+    _add_bullet(doc, "Alert: one line of situation, the red object's intel card quoted with its source, the data note "
+                     "(live from UDL, or the bundled sets marked SYNTHETIC) and the first action. An EXERCISE badge "
+                     "marks a stated burn applied to a real orbit for the exercise; it is never observed behaviour.")
+    _add_bullet(doc, "Take the watch: the clock starts and the mission HUD sits beside the console (over its right "
+                     "edge below 1,500 px, folding to a handle while you work). Objectives tick themselves when you do "
+                     "the thing in the console; answers are checked against figures computed from the loaded element "
+                     "sets, and each is final. Hint shows its cost and can spotlight the control to use.")
+    _add_bullet(doc, "Debrief: up to three stars (every objective met; inside par; no hints and every answer within "
+                     "half its tolerance), points, the best answer and why. A mission's first pass pays 150 points and "
+                     "counts toward the Level 3 condition; replays pay nothing.")
+    _add_bullet(doc, "Questions about a screening are graded on your own latest Asset Screening of that asset, so "
+                     "screen it first. Ranges and times of closest approach are given in the briefing, computed with "
+                     "SGP4, because the console has no direct readout of them.")
     _add_callout(doc,
-        "The scenarios are being rebuilt as missions on real catalogue objects with computed answers (the training "
-        "redesign, docs/training-game-design.md). Until then they use synthetic objects, labelled SYNTHETIC."
+        "Classic scenarios remain under their own tab with synthetic objects until they are retired. Offline, the "
+        "bundled watchlist element sets are synthetic and place every GEO object near one longitude (SPC-251); "
+        "connect UDL in the training console for live geometry."
     )
 
 

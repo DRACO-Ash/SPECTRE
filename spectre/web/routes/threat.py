@@ -115,7 +115,7 @@ from spectre.web.elsets import ElsetAge, RefusedElset, elset_age, limit_hours_fo
 from spectre.web.format_units import format_tof_label
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
-from spectre.web.planning_state import get_session_state
+from spectre.web.planning_state import ScreeningRecord, get_session_state
 from spectre.web.routes.gcat import catalogue_entry
 from spectre.web.routes.pol import (
     HeldHistory,
@@ -3610,6 +3610,11 @@ async def threat_screen(
     method_refusals = run.refusals
     elapsed = time.monotonic() - t0
 
+    # What a training mission's screening_run check reads (SPC-248).
+    state.last_screening = ScreeningRecord(
+        asset_satno, asset_name, now, tuple((v.actor_satno, v.actor_name, v.verdict_label) for v in screening.ranked),
+        considered=len(actors), budget_m_s=max_dv_m_s, manual=bool(manual_asset_tle),
+    )
     state.append_log(
         f"[SCREEN] {asset_name}: {len(actors)} candidate actor(s), "
         f"{len(run.verdicts)} within {max_dv_m_s:g} m/s, {elapsed:.1f}s "

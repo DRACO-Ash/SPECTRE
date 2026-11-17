@@ -1,0 +1,381 @@
+# SPECTRE: Orbital Watch, Chapters 1 and 2 (SPC-248; docs/training-game-design.md, sections 4 to 9).
+#
+# Every role is a real catalogue number on the watchlist (spectre/data/hrr_default.json), or the watchlist object of a
+# side nearest another role at the mission clock. Every figure is a named quantity the engine computes at start
+# (spectre/training/quantities.py); no figure is typed here, and loading refuses a text with a digit in it outside a
+# placeholder. A placeholder is a role (its object's name), a quantity (with a format spec), or {clock}.
+#
+# A question about Asset Screening (candidates, the first-ranked actor, an actor's verdict or rank) is read from the
+# operator's own latest screening of that asset, at the default Max ΔV, once they have run it: the screen ranks at the
+# wall clock, and its first-ranked actor can change within minutes, so a screening the engine ran at start could mark
+# a correct reading wrong. Loading refuses such a question unless a screening_run of its asset comes before it.
+#
+# An objective's controls are the console's own names for what its text tells the operator to use; loading checks the
+# text names each, and the mission harness (tests/browser/test_mission_harness.py) checks each exists in the console,
+# that each hint's spotlight shows when the hint is offered, and plays every mission by its words.
+#
+# The console has no readout of the range between two objects, or of their closest approach without a burn, on
+# element sets older than the staleness limit (the Decision Engine computes both only from current sets, at the wall
+# clock). So no answer asks for one: ranges and closest approaches are computed figures in the alert, the brief and the
+# debrief, and the answers are what the console shows.
+
+chapters:
+  - id: first_watch
+    title: First Watch
+    blurb: The console, your asset, and who is near it.
+    rank_required: 1
+  - id: shadows
+    title: Shadows in the Belt
+    blurb: Inspectors, tugs and listeners beside blue assets in the geostationary belt.
+    rank_required: 2
+
+missions:
+  # ── Chapter 1: First Watch ────────────────────────────────────────────────
+  - id: know_your_asset
+    chapter: first_watch
+    title: Know your asset
+    par_seconds: 150
+    roles:
+      asset: {satno: "30793", side: blue}
+    quantities:
+      lon: {fn: subsat_longitude, args: {role: asset}}
+      lon_text: {fn: longitude_words, args: {role: asset}}
+      inc: {fn: inclination_deg, args: {role: asset}}
+      regime: {fn: regime_options, args: {role: asset}}
+    alert: "{asset} is on your Blue list. Find where it sits."
+    brief:
+      - "Mission clock: {clock}. The console's scenario time is set to it."
+      - "Each element card reads its figures at that time."
+    first_action:
+      say: "Open Assets, then Blue, and open the card for {asset}."
+      controls: [Assets, Blue]
+    objectives:
+      - id: longitude
+        kind: answer
+        text: "Read the Sub-satellite lon. of {asset} from its card, in degrees east or west."
+        quantity: lon
+        tolerance: 0.05
+        unit: deg
+        points: 100
+        controls: ["Sub-satellite lon."]
+        explain: "SGP4's position at the mission clock, against Greenwich sidereal time."
+        hint: {say: "Assets, then Blue: open the card for {asset}.", spotlight: "button.atab[data-panel=\"at-blue\"]", cost: 25}
+      - id: inclination
+        kind: answer
+        text: "Read the Inclination of {asset}, in degrees."
+        quantity: inc
+        tolerance: 0.01
+        unit: deg
+        points: 100
+        controls: [Inclination]
+        explain: "The mean inclination the element set states."
+        hint: {say: "The card for {asset} lists Inclination under Eccentricity.", spotlight: "#blue-list .elset-grid", cost: 25}
+      - id: regime
+        kind: choice
+        text: "Which regime is {asset} in? Its card says, under Regime."
+        options_from: regime
+        points: 100
+        controls: [Regime]
+        explain: "The regime follows from the set's perigee and apogee altitudes."
+        hint: {say: "Read Regime on the card for {asset}.", spotlight: "#blue-list details.elset-card summary", cost: 25}
+    debrief:
+      best: "{asset} sat at {lon_text} at {clock}, inclined {inc:.2f} degrees."
+      why: "The card reads the element set at the console's scenario time, which the mission set to its clock."
+
+  - id: who_is_near
+    chapter: first_watch
+    title: Who is near?
+    par_seconds: 180
+    roles:
+      asset: {satno: "30793", side: blue}
+    quantities:
+      candidates: {fn: screening_candidates, args: {asset: asset}}
+      top: {fn: screening_top_options, args: {asset: asset}}
+    alert: "Who could reach {asset}? Screen it."
+    brief:
+      - "Asset Screening ranks every red object that could reach one blue asset."
+      - "It screens at the wall clock, on the element sets the console holds, so its ranking moves through the day."
+    first_action:
+      say: "Open Asset Screening, choose {asset} as Blue Asset, then Screen Asset."
+      controls: [Asset Screening, Blue Asset, Screen Asset]
+    objectives:
+      - id: screened
+        kind: condition
+        text: "Screen {asset}: Asset Screening, Blue Asset {asset}, then Screen Asset, at the default Max ΔV."
+        check: {type: screening_run, asset: asset}
+        points: 50
+        controls: [Asset Screening, Blue Asset, Screen Asset]
+        hint: {say: "The Asset Screening tab is beside Threat Sweep.", spotlight: "button.htab[data-panel=\"hero-screen\"]", cost: 25}
+      - id: candidates
+        kind: answer
+        text: "How many candidate actors did it screen? The line under its heading says."
+        quantity: candidates
+        tolerance: 0.5
+        unit: count
+        points: 100
+        controls: [candidate actor]
+        explain: "Every red object in a regime that could reach the asset, less any that cannot act."
+        hint: {say: "Read the number before candidate actor(s).", spotlight: "#threat-screen-results .threat-sweep-summary", cost: 25}
+      - id: top
+        kind: choice
+        text: "Which red object does it rank first, as MOST DANGEROUS ACTOR?"
+        options_from: top
+        points: 100
+        controls: [MOST DANGEROUS ACTOR]
+        explain: "Graded on your own screening: the composite verdict ranks it first, geometry and capability together."
+        hint: {say: "The first card in the results names it.", spotlight: "#threat-screen-results .spectre-band-badge", cost: 25}
+    debrief:
+      best: "Asset Screening ranked every red object that could reach {asset}, at the wall clock."
+      why: "It ranks on the composite verdict, and names the earliest arrival apart when the two disagree."
+
+  - id: the_sweep
+    chapter: first_watch
+    title: The sweep
+    par_seconds: 210
+    roles:
+      interceptor: {satno: "49330", side: red}
+    quantities:
+      red_in_regime: {fn: red_count_in_regime, args: {role: interceptor}}
+    alert: "{interceptor} is on your Red list. Sweep the belt from it."
+    brief:
+      - "Threat Sweep asks what one red satellite could reach, cheapest first."
+      - "Target Group lists the watchlist in its regime, by side and rank."
+    first_action:
+      say: "Open Threat Sweep and choose {interceptor} as Red Satellite."
+      controls: [Threat Sweep, Red Satellite]
+    objectives:
+      - id: swept
+        kind: condition
+        text: "Choose a Target Group, then Sweep Targets."
+        check: {type: sweep_run, red: interceptor}
+        points: 50
+        controls: [Target Group, Sweep Targets]
+        hint: {say: "Target Group appears once {interceptor} is the Red Satellite.", spotlight: "#ts-tgt-group", cost: 25}
+      - id: red_count
+        kind: answer
+        text: "How many red objects, {interceptor} among them, are in its regime? Add up the Red HRR rows in Target Group."
+        quantity: red_in_regime
+        tolerance: 0.5
+        unit: count
+        points: 100
+        controls: [Red HRR, Target Group]
+        explain: "Target Group counts the watchlist objects in the red satellite's own regime, itself included, by side and rank."
+        hint: {say: "Open Target Group: Red HRR lists each rank with its count.", spotlight: "#ts-tgt-group", cost: 25}
+    debrief:
+      best: "{red_in_regime} red objects, {interceptor} among them, are in the regime of {interceptor}."
+      why: "The sweep filters its targets to the interceptor's regime, so these are the red objects it compares."
+
+  - id: read_a_threat
+    chapter: first_watch
+    title: Read a threat
+    par_seconds: 270
+    roles:
+      threat: {satno: "43874", side: red}
+      nearest: {nearest_to: threat, side: blue}
+    quantities:
+      regime: {fn: regime_options, args: {role: threat}}
+      level: {fn: intel_level_options, args: {role: threat}}
+      range_now: {fn: range_km, args: {a: threat, b: nearest, hours: 0}}
+      verdict: {fn: screening_verdict_options, args: {asset: nearest, actor: threat}}
+    alert: "{threat} is on your Red list. Read the threat."
+    brief:
+      - "Nearest blue asset at the mission clock: {nearest}, {range_now:.1f} km away."
+      - "Choosing a red satellite in Threat Sweep shows its intelligence card."
+      - "Asset Screening grades at the wall clock, not the mission clock."
+    first_action:
+      say: "Open Threat Sweep and choose {threat} as Red Satellite."
+      controls: [Threat Sweep, Red Satellite]
+    objectives:
+      - id: regime
+        kind: choice
+        text: "Which regime is {threat} in? Its card on the Red list says, under Regime."
+        options_from: regime
+        points: 100
+        controls: [Red, Regime]
+        hint: {say: "Assets, then Red: open the card for {threat} and read Regime.", spotlight: "#red-list details.elset-card summary", cost: 25}
+      - id: level
+        kind: choice
+        text: "What threat level does its intelligence card give?"
+        options_from: level
+        points: 100
+        controls: [UNCLASS // PAIR]
+        explain: "The level is the analyst judgement the record carries, quoted with its source."
+        hint: {say: "Threat Sweep: choose {threat} as Red Satellite; its card, UNCLASS // PAIR, shows under the orbit line.", spotlight: "#ts-red-sat", cost: 25}
+      - id: screened
+        kind: condition
+        text: "Screen {nearest}, the nearest blue asset: Asset Screening, then Screen Asset, at the default Max ΔV."
+        check: {type: screening_run, asset: nearest}
+        points: 50
+        controls: [Asset Screening, Screen Asset]
+        hint: {say: "Open Asset Screening and choose {nearest} as Blue Asset.", spotlight: "button.htab[data-panel=\"hero-screen\"]", cost: 25}
+      - id: verdict
+        kind: choice
+        text: "What Verdict does that screening give {threat}?"
+        options_from: verdict
+        points: 100
+        controls: [Verdict]
+        explain: "Graded on your own screening: the verdict joins geometric access and assessed capability."
+        hint: {say: "Find {threat} in the ranked table.", spotlight: "#threat-screen-results table", cost: 25}
+    debrief:
+      best: "{threat} was {range_now:.1f} km from {nearest} at {clock}."
+      why: "Intelligence says what it is; screening says what it could do to the asset nearest it."
+
+  # ── Chapter 2: Shadows in the Belt ─────────────────────────────────────────
+  - id: the_tug
+    chapter: shadows
+    title: The tug
+    par_seconds: 330
+    roles:
+      tug: {satno: "49330", side: red}
+      target: {nearest_to: tug, side: blue}
+    quantities:
+      range_now: {fn: range_km, args: {a: tug, b: target, hours: 0}}
+      range_day: {fn: range_km, args: {a: tug, b: target, hours: 24}}
+      trend: {fn: range_trend, args: {a: tug, b: target, hours: 24}}
+      rank: {fn: screening_rank, args: {asset: target, actor: tug}}
+    alert: "{tug} sits {range_now:.1f} km from {target}."
+    brief:
+      - "A day on, the range is {range_day:.1f} km: {trend}. Both ranges are at the mission clock."
+      - "Plan both sides: what {tug} could do, and what {target} could do."
+      - "Asset Screening ranks at the wall clock, not the mission clock."
+    first_action:
+      say: "Open Intercept Engine: Red Satellite {tug}, Blue Satellite {target}."
+      controls: [Intercept Engine, Red Satellite, Blue Satellite]
+    objectives:
+      - id: red_plans
+        kind: condition
+        text: "Calculate All Intercepts with Manoeuvring satellite Red: what {tug} could do."
+        check: {type: intercept_run, red: tug, blue: target, manoeuvring: red}
+        points: 50
+        controls: [Calculate All Intercepts, Manoeuvring satellite]
+        hint: {say: "Open Intercept Engine; the button is under its form.", spotlight: "button.htab[data-panel=\"hero-engine\"]", cost: 25}
+      - id: blue_plans
+        kind: condition
+        text: "Run it again with Manoeuvring satellite Blue: the options of {target}."
+        check: {type: intercept_run, red: tug, blue: target, manoeuvring: blue}
+        points: 50
+        controls: [Manoeuvring satellite]
+        hint: {say: "Set Manoeuvring satellite to Blue, then Calculate All Intercepts.", spotlight: "#ie-manoeuvring", cost: 25}
+      - id: screened
+        kind: condition
+        text: "Screen {target} in Asset Screening, at the default Max ΔV."
+        check: {type: screening_run, asset: target}
+        points: 50
+        controls: [Asset Screening]
+        hint: {say: "Open Asset Screening, choose {target} as Blue Asset, then Screen Asset.", spotlight: "button.htab[data-panel=\"hero-screen\"]", cost: 25}
+      - id: rank
+        kind: answer
+        text: "At what # does it rank {tug}? Give zero if {tug} is not in the table."
+        quantity: rank
+        tolerance: 0.5
+        unit: count
+        points: 100
+        controls: ["#"]
+        explain: "Graded on your own screening of the asset nearest the tug."
+        hint: {say: "Find {tug} in the ranked table and read its #.", spotlight: "#threat-screen-results table", cost: 25}
+    debrief:
+      best: "{tug} was {range_now:.1f} km from {target}, and {range_day:.1f} km a day later: {trend}."
+      why: "Both sides' options matter: the Intercept Engine plans either satellite's burn against the other."
+
+  - id: the_inspector
+    chapter: shadows
+    title: The inspector
+    par_seconds: 330
+    roles:
+      inspector: {satno: "50321", side: red}
+      target: {nearest_to: inspector, side: blue}
+    inject: {role: inspector, burn_m_s: [0.0, -0.1, 2.0], at: start}
+    quantities:
+      period: {fn: period_min, args: {role: inspector}}
+      drift: {fn: drift_options, args: {role: inspector}}
+      drift_deg: {fn: longitude_drift, args: {role: inspector}}
+      tca_km: {fn: closest_approach_km, args: {a: inspector, b: target, hours: 24}}
+      tca_utc: {fn: closest_approach_utc, args: {a: inspector, b: target, hours: 24}}
+    alert: "EXERCISE: {inspector} has burned. It passes {target} at {tca_km:.1f} km."
+    brief:
+      - "Closest approach in the next day: {tca_km:.1f} km at {tca_utc}."
+      - "Its element set is the burned one: its card shows what changed."
+    first_action:
+      say: "Open Assets, then Red, and open the card for {inspector}."
+      controls: [Assets, Red]
+    objectives:
+      - id: period
+        kind: answer
+        text: "Read the Period of {inspector} from its card, in minutes."
+        quantity: period
+        tolerance: 0.02
+        unit: min
+        points: 100
+        controls: [Period]
+        explain: "The burn changed its mean motion, so its period."
+        hint: {say: "Assets, then Red: open the card for {inspector}.", spotlight: "#red-list details.elset-card summary", cost: 25}
+      - id: drift
+        kind: choice
+        text: "Which way does {inspector} now drift in longitude?"
+        options_from: drift
+        points: 100
+        explain: "By SGP4, its sub-satellite longitude moves {drift_deg:+.3f} degrees over one sidereal day, east positive."
+        hint: {say: "Compare its Period with a sidereal day: shorter gains on the turning Earth and moves east, longer falls behind and moves west.", spotlight: "#red-list .elset-grid", cost: 25}
+      - id: evade
+        kind: condition
+        text: "Plan the way out for {target}: Intercept Engine, Manoeuvring satellite Blue, Calculate All Intercepts."
+        check: {type: intercept_run, red: inspector, blue: target, manoeuvring: blue}
+        points: 50
+        controls: [Intercept Engine, Manoeuvring satellite, Calculate All Intercepts]
+        hint: {say: "Open Intercept Engine: Red Satellite {inspector}, Blue Satellite {target}, Manoeuvring satellite Blue.", spotlight: "button.htab[data-panel=\"hero-engine\"]", cost: 25}
+    debrief:
+      best: "After the burn its period was {period:.2f} min; it passed {target} at {tca_km:.1f} km, {tca_utc}."
+      why: >-
+        An exercise inject: a stated burn on the element set the console held for {inspector}, refitted, and never
+        observed behaviour; the EXERCISE line names where that set came from. The closest
+        approach is given to a tenth of a kilometre: the refitted set holds the burned state to tens of metres at the
+        burn, and parts from a numerical flight of the burned orbit by up to about two tenths of a kilometre in a day.
+
+  - id: the_listener
+    chapter: shadows
+    title: The listener
+    par_seconds: 270
+    roles:
+      listener: {satno: "55841", side: red}
+      nearest: {nearest_to: listener, side: blue}
+    quantities:
+      threat: {fn: intel_threat_options, args: {role: listener}}
+      range_now: {fn: range_km, args: {a: listener, b: nearest, hours: 0}}
+      rank: {fn: screening_rank, args: {asset: nearest, actor: listener}}
+    alert: "{listener} is on your Red list. Who is it listening to?"
+    brief:
+      - "Nearest blue asset at the mission clock: {nearest}, {range_now:.1f} km away."
+      - "Its intelligence card shows in Threat Sweep when it is the Red Satellite."
+      - "Asset Screening ranks at the wall clock, not the mission clock."
+    first_action:
+      say: "Open Threat Sweep and choose {listener} as Red Satellite."
+      controls: [Threat Sweep, Red Satellite]
+    objectives:
+      - id: assessed
+        kind: choice
+        text: "What does its intelligence card assess {listener} as?"
+        options_from: threat
+        points: 100
+        controls: [UNCLASS // PAIR]
+        explain: "Quoted from the record, with its source; the other options are what its red neighbours are assessed as."
+        hint: {say: "Threat Sweep: choose {listener} as Red Satellite and read its card, UNCLASS // PAIR.", spotlight: "#ts-red-sat", cost: 25}
+      - id: screened
+        kind: condition
+        text: "Screen {nearest}, the nearest blue asset, in Asset Screening, at the default Max ΔV."
+        check: {type: screening_run, asset: nearest}
+        points: 50
+        controls: [Asset Screening]
+        hint: {say: "Open Asset Screening, choose {nearest} as Blue Asset, then Screen Asset.", spotlight: "button.htab[data-panel=\"hero-screen\"]", cost: 25}
+      - id: rank
+        kind: answer
+        text: "At what # does it rank {listener}? Give zero if {listener} is not in the table."
+        quantity: rank
+        tolerance: 0.5
+        unit: count
+        points: 100
+        controls: ["#"]
+        explain: "Graded on your own screening of the asset nearest the listener."
+        hint: {say: "Find {listener} in the ranked table and read its #.", spotlight: "#threat-screen-results table", cost: 25}
+    debrief:
+      best: "{listener} sat {range_now:.1f} km from {nearest} at {clock}."
+      why: "A listener needs no burn to matter: its record and its neighbours say what it is for."

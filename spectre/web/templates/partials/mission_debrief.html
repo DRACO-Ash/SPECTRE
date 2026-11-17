@@ -1,0 +1,134 @@
+{# SPECTRE: Orbital Watch, the debrief (SPC-248; docs/training-game-design.md section 5, step 4).
+   POST /training/m/{id}/finish lands this in #mission-stage on the Campaign tab, and mission.js then clears the HUD.
+   The stars are revealed one by one with their reasons (all at once under prefers-reduced-motion); the points
+   count up. Detail sits behind More, so the screen holds one idea: how the mission went.
+   Context: mission {id, title}, stars, star_reasons [{star, earned, why}], score (points, its older name, is read
+   when score is absent), seconds, par_seconds, hints_used,
+   objectives [{text, status, given, accepted, explanation}], best_answer_note, unlocked [title], next_mission
+   {id, title} or None, rank_up {level, title} or None; and, each optional: rank_points_earned (the training rank
+   points this run paid, a second currency beside the mission's score), rank_note (why it paid none, for a replay),
+   chapter_complete {title, stars, max_stars} or None (when absent, mission.js works it out from the campaign map:
+   this run earned a star on the last mission of its chapter), next_lock_reason (why the next mission is locked) #}
+{% from "partials/_mission_marks.html" import clock, star, insignia %}
+{% set rank_points = rank_points_earned | default(none) %}
+{% set run_score = score | default(points | default(0)) %}
+{% set chapter = chapter_complete | default(none) %}
+<section id="mission-debrief" class="mission-debrief" data-mission-id="{{ mission.id }}" data-stars="{{ stars }}"
+         data-points="{{ run_score }}" data-reveal="pending" data-init="missionDebrief"
+         {%- if next_mission %} data-next-mission-id="{{ next_mission.id }}"{% endif %}
+         aria-labelledby="mission-debrief-title">
+
+  <header class="mission-debrief__head">
+    <p class="mission-eyebrow">{% if stars %}Mission complete{% else %}Mission ended{% endif %}</p>
+    <h2 id="mission-debrief-title" class="mission-debrief__title" tabindex="-1">{{ mission.title }}</h2>
+    <p class="visually-hidden">{{ stars }} of 3 stars</p>
+  </header>
+
+  <ol class="mission-starline">
+    {% for reason in star_reasons | sort(attribute="star") %}
+    <li class="mission-star-slot{% if reason.earned %} is-earned{% endif %}" data-star="{{ reason.star }}">
+      <span class="mission-star-slot__burst" aria-hidden="true"></span>
+      {{ star(reason.earned, "xl") }}
+      <p class="mission-star-slot__state">{% if reason.earned %}Star {{ reason.star }}{% else %}Missed{% endif %}</p>
+      <p class="mission-star-slot__why">{{ reason.why }}</p>
+    </li>
+    {% endfor %}
+  </ol>
+
+  <dl class="mission-stats">
+    <div class="mission-stat mission-stat--points">
+      <dt>Score</dt>
+      <dd><output id="mission-debrief-points">{{ run_score }}</output></dd>
+    </div>
+    <div class="mission-stat{% if seconds <= par_seconds %} is-under-par{% endif %}">
+      <dt>Time</dt>
+      <dd>{{ clock(seconds) }} <span class="mission-stat__sub">par {{ clock(par_seconds) }}</span></dd>
+    </div>
+    <div class="mission-stat">
+      <dt>Hints</dt>
+      <dd>{{ hints_used }}</dd>
+    </div>
+  </dl>
+
+  {% if rank_points is not none %}
+  <p id="mission-rank-points" class="mission-rank-points{% if not rank_points %} is-none{% endif %}">
+    <span class="mission-rank-points__figure">+{{ rank_points }} rank points</span>
+    {%- if rank_note | default(none) %}<span class="mission-rank-points__note">{{ rank_note }}</span>{% endif %}
+  </p>
+  {% endif %}
+
+  {% if chapter %}
+  <section id="mission-chapter-complete" class="mission-chapter-done" aria-labelledby="mission-chapter-done-title">
+    <p class="mission-eyebrow">Chapter complete</p>
+    <h3 id="mission-chapter-done-title" class="mission-chapter-done__title">{{ chapter.title }}</h3>
+    <p class="mission-chapter-done__stars">
+      <span class="mission-chapter-done__figure">{{ chapter.stars }}</span><span class="mission-chapter-done__of">/{{ chapter.max_stars }}</span>
+      <span aria-hidden="true">&#9733;</span><span class="visually-hidden"> stars in this chapter</span>
+    </p>
+    {% if next_lock_reason | default(none) %}
+    <p class="mission-chapter-done__next">
+      <svg class="mission-lock__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
+      <span>Next: {{ next_lock_reason }}</span>
+    </p>
+    {% endif %}
+  </section>
+  {% elif next_lock_reason | default(none) %}
+  <p id="mission-next-lock" class="mission-chapter-done__next">
+    <svg class="mission-lock__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
+    <span>Next: {{ next_lock_reason }}</span>
+  </p>
+  {% endif %}
+
+  {% if rank_up %}
+  <section class="mission-promotion" aria-labelledby="mission-promotion-title">
+    {{ insignia(rank_up.level, rank_up.title, "xl") }}
+    <div>
+      <p class="mission-eyebrow">Promoted</p>
+      <h3 id="mission-promotion-title" class="mission-promotion__title">{{ rank_up.title }}</h3>
+      <p class="mission-promotion__level">Level {{ rank_up.level }}</p>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="mission-best" aria-labelledby="mission-best-title">
+    <h3 id="mission-best-title" class="mission-eyebrow">The best answer</h3>
+    <p class="mission-best__text">{{ best_answer_note }}</p>
+  </section>
+
+  {% if unlocked %}
+  <section class="mission-unlocked" aria-labelledby="mission-unlocked-title">
+    <h3 id="mission-unlocked-title" class="mission-eyebrow">Unlocked</h3>
+    <ul class="mission-unlocked__list">
+      {% for title in unlocked %}<li>{{ title }}</li>{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <details class="mission-more">
+    <summary>More: how each objective went</summary>
+    <ol class="mission-more__list">
+      {% for o in objectives %}
+      <li class="mission-more__item" data-status="{{ o.status }}">
+        <p class="mission-more__text">{{ o.text }}
+          <span class="mission-more__status">{% if o.status == "met" %}Met{% elif o.status == "failed" %}Missed{% else %}Not done{% endif %}</span></p>
+        {% if o.given is not none %}
+        <p class="mission-more__answer">You gave <strong>{{ o.given }}</strong>{% if o.accepted is not none %}. Accepted: <strong>{{ o.accepted }}</strong>{% endif %}</p>
+        {% endif %}
+        {% if o.explanation %}<p class="mission-more__why">{{ o.explanation }}</p>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </details>
+
+  <div class="mission-debrief__actions">
+    {% if next_mission %}
+    <button type="button" id="mission-next" class="mission-btn mission-btn--primary mission-btn--xl"
+            hx-post="/training/m/{{ next_mission.id }}/start" hx-target="#mission-stage" hx-swap="innerHTML">
+      Next mission: {{ next_mission.title }}
+      <svg class="mission-btn__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+    </button>
+    {% endif %}
+    <button type="button" id="mission-to-campaign" class="mission-btn mission-btn--ghost"
+            data-action="missionToCampaign">Back to the campaign</button>
+  </div>
+</section>

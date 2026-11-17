@@ -1,7 +1,6 @@
 pace 1.00 from settings (nothing measured yet)
 
-V0.48: SPC-248 training redesign part 1 (mission engine on real data, HUD, Chapters 1-2)
-V0.49: SPC-249 training redesign part 2 (Chapters 3-5, challenges, medals, intel cards, Scramble)
+V0.49: SPC-249 training redesign part 2 (Chapters 3-5, challenges, medals, intel cards, Scramble) and SPC-251 (bundled GEO longitudes, Chapter 2 re-tuned)
 
 waiting: SPC-080 - needs an owner answer
 

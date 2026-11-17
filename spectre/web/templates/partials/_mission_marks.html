@@ -1,0 +1,41 @@
+{# SPECTRE: Orbital Watch, the marks the campaign, HUD and debrief share (SPC-248): a clock figure, the row of three
+   stars and the rank insignia. Macros only: this file renders nothing on its own and reads no context. #}
+
+{# Seconds as m:ss, the way the HUD clock and every par time read. #}
+{% macro clock(seconds) -%}
+{%- set s = seconds | int -%}
+{{ '%d:%02d' % (s // 60, s % 60) }}
+{%- endmacro %}
+
+{# One star, filled when earned. Decorative: the text beside it says what it means. #}
+{% macro star(earned, size="sm") -%}
+<svg class="mission-star mission-star--{{ size }}{% if earned %} is-earned{% endif %}" viewBox="0 0 24 24"
+     aria-hidden="true" focusable="false">
+  <polygon points="12,1.8 15.1,8.4 22.2,9.2 16.9,14.1 18.3,21.2 12,17.6 5.7,21.2 7.1,14.1 1.8,9.2 8.9,8.4"/>
+</svg>
+{%- endmacro %}
+
+{# Three stars, the first *count* filled, with the count in words for a screen reader. #}
+{% macro star_row(count, size="sm") -%}
+<span class="mission-stars mission-stars--{{ size }}">
+  <span class="visually-hidden">{{ count }} of 3 stars</span>
+  {%- for i in range(3) %}{{ star(i < count, size) }}{% endfor %}
+</span>
+{%- endmacro %}
+
+{# The rank insignia: one chevron per level up to Operator (level 5), a star above that. #}
+{% macro insignia(level, title, size="md") -%}
+{%- set lv = level | int -%}
+<svg class="mission-insignia mission-insignia--{{ size }}" viewBox="0 0 64 72" role="img"
+     aria-label="Rank insignia: level {{ lv }}, {{ title }}" focusable="false">
+  <path class="mission-insignia__shield" d="M32 3 L60 18 L60 54 L32 69 L4 54 L4 18 Z"/>
+  {%- if lv > 5 %}
+  <polygon class="mission-insignia__star"
+           points="32,18 36.6,28.4 47.9,29.6 39.4,37.2 41.8,48.4 32,42.6 22.2,48.4 24.6,37.2 16.1,29.6 27.4,28.4"/>
+  {%- else %}
+  {%- for i in range([lv, 1] | max) %}
+  <path class="mission-insignia__chevron" d="M17 {{ 46 - i * 8 }} L32 {{ 54 - i * 8 }} L47 {{ 46 - i * 8 }}"/>
+  {%- endfor %}
+  {%- endif %}
+</svg>
+{%- endmacro %}

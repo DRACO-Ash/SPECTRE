@@ -66,7 +66,7 @@
     <span id="training-console-strip" role="note"
           style="font-size:0.72rem; font-weight:800; padding:0.25rem 0.65rem; letter-spacing:0.06em;
                  background:#b45309; border:1px solid #f59e0b; border-radius:4px; color:#fef3c7; white-space:nowrap">
-      ⚠ TRAINING CONSOLE: synthetic, not operational
+      ⚠ TRAINING CONSOLE: not operational{% if training_sets %} · {{ training_sets }}{% endif %}
     </span>
     {% endif %}
     <span class="nav-user">{{ user.username }} [{{ user.role }}]</span>

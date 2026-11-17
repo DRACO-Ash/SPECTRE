@@ -1,0 +1,201 @@
+{# SPECTRE: Orbital Watch, the mission HUD (SPC-248; docs/training-game-design.md section 5, steps 2 and 3).
+   Beside the console frame, outside it, in #mission-hud-dock (training.html); below 1680 px it overlays the frame
+   as a collapsible panel instead, so the console keeps its full width (mission.css). GET /training/m/{id}/hud
+   answers it, and so do the answer, choose and hint posts; each response replaces this whole section, a 422 too,
+   so its error shows in place (mission.js lets htmx swap it).
+   It asks again every 2 s, on training-changed, and on mission-poke, which mission.js raises shortly after any
+   request the console frame makes, so a condition met in the console ticks within a second. No request is ever
+   aborted (htmx reports an abort as an error): a poll waits while a post is in flight (mission.js), a poll answered
+   after a post has replaced the HUD is dropped, and a post answered after a poll replaced it lands on the new HUD.
+   Each form and button syncs on itself (hx-sync is inherited, and the HUD's own would drop a post behind a poll).
+   hx-disabled-elt disables a form's buttons while it posts, so a double click sends one answer.
+   mission.js reads the data-* below for the points burst (just_met), the clock against par and your best, the
+   score, the spotlight a hint draws inside the console frame, the tones, and where focus goes after a post.
+   Every control has a stable id, so htmx returns focus to it after each swap and mission.js carries what the
+   operator typed across a poll. htmx sends a named form as a field of its own (and the answer form's "value"
+   reads as its input element), so each form leaves its own name out with hx-params.
+   Context: mission {id, title}, clock {started_at_iso, par_seconds}, objectives [{id, text, kind, status, points,
+   points_awarded, hint_available, hint_cost, hint_text, spotlight, options [{id, label}], answer_unit,
+   miss_band}], score, hints_used, all_met, just_met [objective id], error, exercise, best_seconds, star_lost (a
+   miss on this run has cost its stars: Restart offers a fresh run, POST /training/m/{id}/restart) #}
+{% from "partials/_mission_marks.html" import clock as fmt_clock %}
+{% set met_count = objectives | selectattr("status", "equalto", "met") | list | length %}
+{% set open_count = objectives | selectattr("status", "equalto", "open") | list | length %}
+{% set base = "/training/m/" ~ mission.id %}
+{% set best = best_seconds | default(none) %}
+<section id="mission-hud" class="mission-hud{% if all_met %} is-all-met{% endif %}"
+         data-mission-id="{{ mission.id }}" data-score="{{ score }}" data-hints-used="{{ hints_used }}"
+         data-all-met="{{ 'true' if all_met else 'false' }}" data-open="{{ open_count }}"
+         data-met="{{ met_count }}" data-total="{{ objectives | length }}"
+         data-init="missionHud" aria-labelledby="mission-hud-title"
+         hx-get="{{ base }}/hud" hx-trigger="every 2s, training-changed from:body, mission-poke from:body"
+         hx-swap="outerHTML" hx-sync="this:drop">
+
+  <header class="mission-hud__head">
+    <p class="mission-eyebrow">Mission</p>
+    <h2 id="mission-hud-title" class="mission-hud__title" tabindex="-1">{{ mission.title }}</h2>
+  </header>
+
+  {% if exercise | default(none) %}
+  <p class="mission-exercise mission-exercise--hud">
+    <span class="mission-exercise__badge">Exercise</span>
+    <span class="mission-exercise__text">{{ exercise }}</span>
+  </p>
+  {% endif %}
+
+  <div class="mission-gauges">
+    <div id="mission-clock" class="mission-gauge mission-clock"
+         data-started-at="{{ clock.started_at_iso }}" data-par-seconds="{{ clock.par_seconds }}">
+      <svg class="mission-clock__ring" viewBox="0 0 44 44" aria-hidden="true" focusable="false">
+        <circle class="mission-clock__track" cx="22" cy="22" r="18"/>
+        <circle class="mission-clock__arc" cx="22" cy="22" r="18" pathLength="100"/>
+        {%- if best is not none and clock.par_seconds %}
+        {%- set at = [[(best / clock.par_seconds * 100) | round(1), 0] | max, 99] | min %}
+        <circle class="mission-clock__ghost" cx="22" cy="22" r="18" pathLength="100"
+                stroke-dasharray="1.5 98.5" stroke-dashoffset="{{ -at + 0.75 }}"/>
+        {%- endif %}
+      </svg>
+      <p class="mission-gauge__body">
+        <span class="mission-gauge__label">Clock</span>
+        <span id="mission-clock-time" class="mission-gauge__value">0:00</span>
+        <span class="mission-gauge__sub">Par {{ fmt_clock(clock.par_seconds) }}{% if best is not none %}<span class="mission-clock__best"> <span aria-hidden="true">·</span> Best {{ fmt_clock(best) }}</span>{% endif %}</span>
+      </p>
+    </div>
+    <div class="mission-gauge mission-score">
+      <p class="mission-gauge__body">
+        <span class="mission-gauge__label">Score</span>
+        <output id="mission-score-value" class="mission-gauge__value">{{ score }}</output>
+        <span class="mission-gauge__sub">{{ hints_used }} hint{{ "" if hints_used == 1 else "s" }} used</span>
+      </p>
+    </div>
+  </div>
+
+  <div class="mission-progress">
+    <label class="mission-progress__label" for="mission-progress-bar">
+      <strong>{{ met_count }}</strong> of {{ objectives | length }} objectives met
+    </label>
+    <progress id="mission-progress-bar" class="mission-progress__bar" max="{{ [objectives | length, 1] | max }}"
+              value="{{ met_count }}">{{ met_count }} of {{ objectives | length }}</progress>
+  </div>
+
+  {% if error | default(none) %}
+  <p id="mission-hud-error" class="mission-hud__error" role="alert">{{ error }}</p>
+  {% endif %}
+
+  {% if star_lost | default(false) %}
+  <div id="mission-star-lost" class="mission-star-lost">
+    <p class="mission-star-lost__text">A miss costs the stars on this run</p>
+    <button type="button" id="mission-restart" class="mission-btn mission-btn--hint"
+            hx-post="{{ base }}/restart" hx-target="#mission-stage" hx-swap="innerHTML"
+            hx-disabled-elt="this" hx-sync="this:drop"
+            hx-confirm="Restart this mission? This run ends and its clock starts again.">Restart for the stars</button>
+  </div>
+  {% endif %}
+
+  {% if all_met %}
+  <p class="mission-hud__complete">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 12.5l5 5L20 6.5"/></svg>
+    All objectives met
+  </p>
+  {% endif %}
+
+  <ol class="mission-objectives">
+    {% for o in objectives %}
+    {% set open = o.status == "open" %}
+    {% set text_id = "mission-objective-" ~ o.id ~ "-text" %}
+    {% set band = o.miss_band | default(none) %}
+    <li class="mission-objective" data-objective-id="{{ o.id }}" data-status="{{ o.status }}" data-kind="{{ o.kind }}"
+        data-points-awarded="{{ o.points_awarded }}"{% if o.id in just_met %} data-just-met="true"{% endif %}{% if o.hint_text %} data-hint-shown="true"{% if o.spotlight %} data-spotlight="{{ o.spotlight }}"{% endif %}{% endif %}>
+      <span class="mission-objective__mark" aria-hidden="true">
+        {%- if o.status == "met" -%}
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+        {%- elif o.status == "failed" -%}
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M7 7l10 10M17 7L7 17"/></svg>
+        {%- else -%}
+        {{ loop.index }}
+        {%- endif -%}
+      </span>
+      <div class="mission-objective__body">
+        <p id="{{ text_id }}" class="mission-objective__text">{{ o.text }}<span class="visually-hidden"> ({% if o.status == "met" %}met{% elif o.status == "failed" %}missed{% else %}open{% endif %})</span></p>
+        <p class="mission-objective__points">
+          {%- if o.status == "met" %}+{{ o.points_awarded }} score{% elif o.status == "failed" %}No score{% else %}{{ o.points }} score{% endif -%}
+          {%- if o.status == "failed" and band in ("close", "far") %}
+          <span class="mission-miss mission-miss--{{ band }}">{{ "Close" if band == "close" else "Way off" }}</span>
+          {%- endif -%}
+        </p>
+
+        {% if open and o.kind == "answer" %}
+        <form name="mission-answer" hx-params="not mission-answer" class="mission-answer" hx-post="{{ base }}/answer"
+              hx-target="#mission-hud" hx-swap="outerHTML"
+              hx-disabled-elt="find button" hx-sync="this:drop">
+          <input type="hidden" name="objective_id" value="{{ o.id }}">
+          <label class="mission-answer__label" for="mission-answer-{{ o.id }}">Your answer{% if o.answer_unit %} ({{ o.answer_unit }}){% endif %}</label>
+          <div class="mission-answer__row">
+            <span class="mission-answer__field">
+              <input id="mission-answer-{{ o.id }}" name="value" type="text" autocomplete="off" spellcheck="false"
+                     required aria-describedby="{{ text_id }}"{% if o.answer_unit %} inputmode="decimal"{% endif %}>
+              {% if o.answer_unit %}<span class="mission-answer__unit" aria-hidden="true">{{ o.answer_unit }}</span>{% endif %}
+            </span>
+            <button type="submit" id="mission-answer-submit-{{ o.id }}" class="mission-btn mission-btn--primary">Submit<span class="visually-hidden"> answer to objective {{ loop.index }}</span></button>
+          </div>
+        </form>
+        {% endif %}
+
+        {% if open and o.kind == "choice" and o.options %}
+        <form name="mission-choose" hx-params="not mission-choose" class="mission-choose" hx-post="{{ base }}/choose"
+              hx-target="#mission-hud" hx-swap="outerHTML"
+              hx-disabled-elt="find button" hx-sync="this:drop">
+          <input type="hidden" name="objective_id" value="{{ o.id }}">
+          <fieldset class="mission-choice" aria-labelledby="{{ text_id }}">
+            {% for option in o.options %}
+            <label class="mission-choice__option" for="mission-choice-{{ o.id }}-{{ option.id }}">
+              <input type="radio" id="mission-choice-{{ o.id }}-{{ option.id }}" name="option_id" value="{{ option.id }}" required /> {{ option.label }}
+            </label>
+            {% endfor %}
+          </fieldset>
+          <button type="submit" id="mission-choose-submit-{{ o.id }}" class="mission-btn mission-btn--primary">Lock in<span class="visually-hidden"> choice for objective {{ loop.index }}</span></button>
+        </form>
+        {% endif %}
+
+        {% if o.hint_text %}
+        <div class="mission-hint">
+          <p class="mission-hint__text"><strong>Hint</strong> {{ o.hint_text }}</p>
+          {% if o.spotlight and open %}
+          <button type="button" id="mission-show-{{ o.id }}" class="mission-btn mission-btn--hint"
+                  data-action="missionSpotlight" data-spotlight="{{ o.spotlight }}">Show me<span class="visually-hidden"> the control for objective {{ loop.index }}</span></button>
+          {% endif %}
+        </div>
+        {% elif open and o.hint_available %}
+        {% set cost = o.hint_cost | default(0) %}
+        <form name="mission-hint" hx-params="not mission-hint" class="mission-hint-form" hx-post="{{ base }}/hint"
+              hx-target="#mission-hud" hx-swap="outerHTML"
+              hx-disabled-elt="find button" hx-sync="this:drop">
+          <input type="hidden" name="objective_id" value="{{ o.id }}">
+          <button type="submit" id="mission-hint-{{ o.id }}" class="mission-btn mission-btn--hint" data-cost="{{ cost }}">
+            Hint{% if cost %} <span class="mission-btn__cost" aria-hidden="true">(-{{ cost }})</span>{% endif %}<span class="visually-hidden"> for objective {{ loop.index }}{% if cost %}, costs {{ cost }} score{% endif %}</span>
+          </button>
+        </form>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+
+  <footer class="mission-hud__foot">
+    {% if open_count == 0 %}
+    <button type="button" id="mission-finish" class="mission-btn mission-btn--primary mission-btn--xl mission-btn--block"
+            hx-post="{{ base }}/finish" hx-target="#mission-stage" hx-swap="innerHTML"
+            hx-disabled-elt="this" hx-sync="this:drop">Debrief</button>
+    {% else %}
+    <button type="button" id="mission-finish" class="mission-btn mission-btn--quiet mission-btn--block"
+            hx-post="{{ base }}/finish" hx-target="#mission-stage" hx-swap="innerHTML"
+            hx-disabled-elt="this" hx-sync="this:drop"
+            hx-confirm="End the mission now? Objectives not met score nothing.">End mission</button>
+    {% endif %}
+    <button type="button" id="mission-abandon" class="mission-btn mission-btn--ghost mission-btn--block"
+            hx-post="{{ base }}/abandon" hx-target="#mission-campaign" hx-swap="innerHTML"
+            hx-disabled-elt="this" hx-sync="this:drop"
+            hx-confirm="Abandon this mission? It will not be scored."
+            data-after-request="missionEnded">Abandon</button>
+  </footer>
+</section>

@@ -44,6 +44,7 @@ from spectre.web.routes.geometry import router as geometry_router
 from spectre.web.routes.login import router as login_router
 from spectre.web.routes.maneuver import ENGINE_BUDGET_HOLDER, ENGINE_DEFAULT_BUDGET_M_S
 from spectre.web.routes.maneuver import router as maneuver_router
+from spectre.web.routes.missions import router as missions_router
 from spectre.web.routes.operator import router as operator_router
 from spectre.web.routes.plan import router as plan_router
 from spectre.web.routes.pol import router as pol_router
@@ -430,3 +431,4 @@ app.include_router(gcat_router)
 app.include_router(decision_router)
 app.include_router(geometry_router)
 app.include_router(training_router)
+app.include_router(missions_router)

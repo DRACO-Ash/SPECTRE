@@ -24,6 +24,7 @@ training. Nothing here reads or writes the operational lists or window
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import re
@@ -46,7 +47,7 @@ from spectre.training.gamification import (
     points_to_next_level,
     recommended_next_step,
 )
-from spectre.training.models import ChallengeResult, TrainingProgress, TrainingSession
+from spectre.training.models import ChallengeResult, MissionAttempt, TrainingProgress, TrainingSession
 from spectre.training.scenarios import (
     VERDICT_LABELS,
     content_title,
@@ -221,7 +222,23 @@ async def _hub_context(owner: User, db: AsyncSession, progress: TrainingProgress
         "recent_results": (await db.execute(_recent_scored(owner.id, 5))).scalars().all(),
         "first_scenario": free_play[0] if free_play else None,
         "content_title": content_title,
+        "campaign_next": await campaign_next(db, owner, progress),
     }
+
+
+async def campaign_next(db: AsyncSession, owner: User, progress: TrainingProgress) -> dict[str, str] | None:
+    """The first mission of the Campaign the operator can fly and has no star on yet, for the Dashboard's Start Here;
+    None when every open mission has its star."""
+    from spectre.training.missions import load_campaign
+    from spectre.web.routes.missions import _bests, mission_lock
+
+    campaign = load_campaign()
+    bests = await _bests(db, owner.id)
+    for mission in campaign.missions:
+        best = bests.get(mission.id)
+        if (best is None or best.stars == 0) and not mission_lock(campaign, mission, progress, bests):
+            return {"id": mission.id, "title": mission.title}
+    return None
 
 
 # ── Main training page ────────────────────────────────────────────────────────
@@ -266,8 +283,30 @@ async def leave_training(owner: User, db: AsyncSession) -> None:
     cancel_training_tasks(owner.session_key)
     discard_training_state(owner)
     await _cancel_open_attempts(db, owner)
+    await _abandon_open_missions(db, owner)
     await _close_sessions(db, owner)
     await db.commit()
+
+
+async def _mission_running(db: AsyncSession, owner: User) -> str:
+    """The title of the mission *owner* has open, or ""."""
+    from spectre.training.missions import load_campaign
+
+    row = (await db.execute(select(MissionAttempt).where(
+        MissionAttempt.user_id == owner.id, MissionAttempt.status == "open").limit(1))).scalar_one_or_none()
+    if row is None:
+        return ""
+    mission = load_campaign().mission(row.mission_id)
+    return mission.title if mission is not None else row.mission_id
+
+
+async def _abandon_open_missions(db: AsyncSession, owner: User) -> None:
+    """Mark every mission attempt *owner* has open abandoned: its objects went with the training state (SPC-248)."""
+    await db.execute(
+        update(MissionAttempt)
+        .where(MissionAttempt.user_id == owner.id, MissionAttempt.status == "open")
+        .values(status="abandoned", finished_at=datetime.now(UTC))
+    )
 
 
 async def _close_sessions(db: AsyncSession, owner: User) -> None:
@@ -421,6 +460,14 @@ async def _start_scenario(
     locked = _scenario_locked(progress, scenario)
     if locked is not None:
         return locked
+    running = await _mission_running(db, owner)
+    if running:
+        # Its objects and time share the training state, and would be taken off the console under it (SPC-248).
+        return HTMLResponse(
+            f'<p class="error-msg" role="alert">The mission {html.escape(running)} is running, and a scenario would '
+            "take its objects and time off the console. Finish or abandon it on the Campaign tab first.</p>",
+            status_code=409,
+        )
 
     state = get_training_state(owner)
     _remove_training_objects(state)

@@ -2798,7 +2798,11 @@
    "spectre/training/",
    "spectre/web/routes/training.py",
    "spectre/web/templates/training.html"
-  ]
+  ],
+  "state": "built",
+  "est": 1440,
+  "version": "0.48.0",
+  "actualNote": "not measured: built by two worktree agents (engine, shell) against a fixed contract, each independently reviewed (engine 2 rounds, shell 2 rounds) and a final play-through, so no honest per-item time exists"
  },
  {
   "ref": "SPC-249",
@@ -2825,6 +2829,32 @@
   "note": "docs/training-game-design.md section 11, and the 0.47.0 Abandon/Reset behaviour (Claude's call).",
   "files": [
    "docs/training-game-design.md"
+  ]
+ },
+ {
+  "ref": "SPC-251",
+  "priority": "high",
+  "order": 16,
+  "group": "training",
+  "minutes": 240,
+  "task": "Fix the bundled GEO element sets so each object sits at the longitude the generator intends, and re-tune the missions that relied on the stacking",
+  "note": "Found building SPC-248 (2026-11-17); root cause found by the final 0.48 play-through: scripts/build-hrr-default.py geo() sets the mean anomaly to 360 minus the RAAN with argument of perigee 270, so RAAN + argp + M is always 630 deg and every GEO object lands at 79.72 E whatever longitude it is given. The script already carries a longitude per object (several match the cited records in spectre/data/adversary_intel.json, e.g. TJS-1 155.0 E, TJS-2 107.5 E, Luch / Olymp-K 18.1 E), so the fix honours its own stated values: set M = longitude + GMST(epoch) - RAAN - argp, regenerate hrr_default.json, and update every test that pinned the stacked geometry. The 0.48 Chapter 2 missions (The inspector's 0.35 km pass, The tug's 16.6 km range) were tuned on the stacking and must be re-designed for real spacing in the same release (0.49). Until then the game's texts claim computed, not real, geometry offline.",
+  "files": [
+   "scripts/build-hrr-default.py",
+   "spectre/data/hrr_default.json"
+  ]
+ },
+ {
+  "ref": "SPC-252",
+  "priority": "med",
+  "order": 17,
+  "group": "udl",
+  "minutes": 240,
+  "task": "Asset Screening, Threat Sweep and the Decision Engine run at the wall clock, not the session's scenario time",
+  "note": "Found building SPC-248: the element cards and the Intercept Engine use the session's scenario window, but Asset Screening, Threat Sweep and the Decision Engine compute at now. An operator who sets a scenario time sees tools disagree about where objects are. Make each honour the scenario window when one is set, and say on screen which time each result is for.",
+  "files": [
+   "spectre/web/routes/threat.py",
+   "spectre/web/routes/decision.py"
   ]
  }
 ]

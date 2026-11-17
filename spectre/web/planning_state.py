@@ -59,6 +59,26 @@ class ElsetRefresh:
     announced: bool = False
 
 
+@dataclass(frozen=True)
+class ScreeningRecord:
+    """The last Asset Screening this state ran: the asset by catalogue number, when, and what it found.
+
+    Recorded by routes.threat.threat_screen so a training mission can tell that the operator screened its asset, and
+    grade what they read from that screening (spectre.training.mission_checks.screening_run, SPC-248); nothing else
+    reads it. *ranked* holds each actor's catalogue number, name and verdict label, worst first; *considered* the
+    candidate actors screened; *budget_m_s* the Max ΔV it ran at; *manual* whether a pasted element set replaced the
+    asset's own.
+    """
+
+    asset_satno: str
+    asset_name: str
+    at: datetime
+    ranked: tuple[tuple[str, str, str], ...] = ()
+    considered: int = 0
+    budget_m_s: float = 0.0
+    manual: bool = False
+
+
 @dataclass
 class SessionState:
     """Mutable state for one operator session.
@@ -96,6 +116,8 @@ class SessionState:
     intercept_history: list[InterceptResult] = field(default_factory=list)
     # Threat sweep result.
     last_threat_assessment: ThreatAssessment | None = None
+    # The last Asset Screening, for a training mission's check that it ran (SPC-248).
+    last_screening: ScreeningRecord | None = None
     # HRR TLE cache: SATNO → TLE (persists across sweeps).
     hrr_tle_cache: dict[str, str] = field(default_factory=dict)
     # Parallel data-mode cache: SATNO → UDL dataMode tag for the cached TLE.

@@ -56,6 +56,7 @@ class TestTrainingNavigation:
 
     def test_load_first_scenario_opens_it_on_the_scenarios_tab(self, console: Console) -> None:
         page = _training(console)
+        page.click("#tnav-dashboard")   # the Campaign tab is first since 0.48.0 (SPC-248)
         first = page.locator('#tpanel-dashboard button:has-text("Load First Scenario")')
         if first.count() == 0:
             pytest.skip("this operator's dashboard offers no first scenario")

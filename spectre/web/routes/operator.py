@@ -23,7 +23,7 @@ from spectre.web.element_card import (
 )
 from spectre.web.elsets import RefusedElset, provenance, provider, refused
 from spectre.web.models import User
-from spectre.web.planning_state import SessionState, get_session_state
+from spectre.web.planning_state import SessionState, get_session_state, in_training_request
 from spectre.web.routes.udl import FetchedElset
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,19 @@ async def dashboard(
         "udl_data_mode": state.udl_data_mode,
         "udl_tle_source": state.udl_tle_source,
         "udl_available_sources": state.udl_available_sources,
+        "training_sets": training_sets(state) if in_training_request() else "",
     })
+
+
+def training_sets(state: SessionState) -> str:
+    """Where the training console's element sets came from, for its strip: "SYNTHETIC sets", "REAL sets", or the
+    modes it holds, "REAL and SYNTHETIC sets"; "" when it holds none. The strip used to say "synthetic" whatever the
+    sets were, which was untrue once the operator connected UDL in the training frame (SPC-248)."""
+    modes = {str(m) for m in state.hrr_tle_data_mode.values()}
+    modes |= {a.data_mode for a in state.blue_assets} | {t.data_mode for t in state.red_tracks}
+    if not modes:
+        return ""
+    return " and ".join(sorted(modes)) + " sets"
 
 
 # ── Asset management partials ─────────────────────────────────────────────────

@@ -1,0 +1,78 @@
+{# SPECTRE: Orbital Watch, the alert that opens a mission (SPC-248; docs/training-game-design.md section 5, step 1).
+   POST /training/m/{id}/start lands this in #mission-stage. Take the watch posts nothing: it opens the Console tab
+   and starts the HUD beside the console frame (mission.js). Stand down abandons the attempt the start opened.
+   The intel card is quoted verbatim from spectre/data/adversary_intel.json with its source; nothing is added.
+   Context: mission {id, title, chapter_title}, alert_line, brief [str], intel_card {name, satno, country, orbit,
+   assessed_threat, significance, threat_level, source} or None, data_note, exercise_inject or None, first_action #}
+<section id="mission-alert" class="mission-alert{% if exercise_inject %} is-exercise{% endif %}"
+         data-mission-id="{{ mission.id }}" data-init="missionAlert" aria-labelledby="mission-alert-title">
+  <div class="mission-klaxon" aria-hidden="true"></div>
+
+  <div class="mission-alert__grid">
+    <div class="mission-alert__main">
+      <p class="mission-alert__eyebrow">
+        <span class="mission-alert__flag"><span class="mission-alert__beacon" aria-hidden="true"></span>Alert</span>
+        <span class="mission-eyebrow">{{ mission.chapter_title }}</span>
+      </p>
+
+      {% if exercise_inject %}
+      <p class="mission-exercise">
+        <span class="mission-exercise__badge">Exercise</span>
+        <span class="mission-exercise__text">{{ exercise_inject }}</span>
+      </p>
+      {% endif %}
+
+      <h2 id="mission-alert-title" class="mission-alert__title" tabindex="-1">{{ mission.title }}</h2>
+      <p class="mission-alert__line">{{ alert_line }}</p>
+
+      {% if brief %}
+      <ul class="mission-alert__brief">
+        {% for line in brief %}<li>{{ line }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+
+      <div class="mission-first-action">
+        <p class="mission-eyebrow">First action</p>
+        <p class="mission-first-action__text">{{ first_action }}</p>
+      </div>
+
+      <div class="mission-alert__actions">
+        <button type="button" id="mission-take-watch" class="mission-btn mission-btn--primary mission-btn--xl"
+                data-action="missionTakeWatch" data-mission-id="{{ mission.id }}"
+                data-mission-title="{{ mission.title }}"{% if exercise_inject %} data-exercise="{{ exercise_inject }}"{% endif %}>
+          Take the watch
+          <svg class="mission-btn__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+        </button>
+        <button type="button" class="mission-btn mission-btn--ghost"
+                hx-post="/training/m/{{ mission.id }}/abandon" hx-target="#mission-campaign" hx-swap="innerHTML"
+                data-after-request="missionEnded">
+          Stand down
+        </button>
+      </div>
+
+      <p class="mission-data-note">
+        <svg class="mission-data-note__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></svg>
+        {{ data_note }}
+      </p>
+    </div>
+
+    {% if intel_card %}
+    <aside class="mission-intel" data-threat-level="{{ intel_card.threat_level | lower }}"
+           aria-labelledby="mission-intel-name">
+      <p class="mission-eyebrow">Intel card</p>
+      <h3 id="mission-intel-name" class="mission-intel__name">{{ intel_card.name }}</h3>
+      <dl class="mission-intel__facts">
+        <div><dt>NORAD</dt><dd>{{ intel_card.satno }}</dd></div>
+        <div><dt>Country</dt><dd>{{ intel_card.country }}</dd></div>
+        <div><dt>Orbit</dt><dd>{{ intel_card.orbit }}</dd></div>
+        <div><dt>Threat level</dt><dd><span class="mission-threat">{{ intel_card.threat_level }}</span></dd></div>
+      </dl>
+      <p class="mission-intel__assessed">{{ intel_card.assessed_threat }}</p>
+      <blockquote class="mission-intel__quote">
+        <p>{{ intel_card.significance }}</p>
+        <footer>Source: <cite>{{ intel_card.source }}</cite></footer>
+      </blockquote>
+    </aside>
+    {% endif %}
+  </div>
+</section>

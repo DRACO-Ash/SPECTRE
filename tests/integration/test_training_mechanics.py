@@ -500,10 +500,10 @@ class TestLevelConditionsAreShown:
         cookie = _operator(client, "x119_gates")
         _promote(client, "x119_gates", 2)
         home = _flat(_get(client, cookie, "/training"))
-        assert "Pass 3 scored scenarios (you have passed 0)" in home
+        assert "Pass 3 scored scenarios or missions (you have passed 0)" in home
         assert "400 total points (you have 0)" in home
         dashboard = _flat(_get(client, cookie, "/training/dashboard"))
-        assert "Level 3 (Planner) needs 400 total points (you have 0) and pass 3 scored scenarios" in dashboard
+        assert "Level 3 (Planner) needs 400 total points (you have 0) and pass 3 scored scenarios or missions" in dashboard
 
 
 class TestResetOfALockedScenario:
