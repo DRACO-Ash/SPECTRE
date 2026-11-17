@@ -321,29 +321,129 @@ def level_progress_fraction(current_level: int, total_points: int) -> float:
     return min(1.0, max(0.0, (total_points - cur_threshold) / span))
 
 
-def recommended_next_step(
-    axis_points: dict[str, float],
-    tutorials_completed: list[str],
-    current_level: int,
-) -> str:
-    """Return a human-readable recommendation based on the weakest skill axis."""
-    cfg = get_config()
-    if not axis_points:
-        return "Complete the Orientation tutorial to begin your training."
+@dataclass
+class ProgressSnapshot:
+    """What the level gates read from an operator's progress."""
+    current_level: int
+    total_points: int
+    axis_points: dict[str, float]
+    tutorials_completed: list[str]
+    scenarios_passed: int
+    challenges_passed: int
 
-    # Find the weakest axis
-    all_axes  = [a.id for a in cfg.skill_axes]
-    weakest   = min(all_axes, key=lambda a: axis_points.get(a, 0.0))
-    axis_def  = cfg.axes_by_id.get(weakest)
-    axis_label = axis_def.label if axis_def else weakest
 
-    next_lv = cfg.level_def(current_level + 1)
-    if next_lv and next_lv.unlock_condition.condition_type == "tutorial_complete":
-        tid = next_lv.unlock_condition.tutorial_id or ""
-        if tid not in tutorials_completed:
-            return f"Complete the '{tid.replace('_', ' ').title()}' tutorial to unlock Level {current_level + 1}."
+@dataclass
+class LevelGate:
+    """One condition the next level needs: what it asks, whether it is met, and how to meet it."""
+    label: str
+    met: bool
+    how: str
 
-    return (
-        f"Your weakest axis is {axis_label}. "
-        f"Focus on scenarios that reward {axis_label.lower()} to improve your score."
+
+def snapshot(progress: object) -> ProgressSnapshot:
+    """The fields of a TrainingProgress (or anything shaped like one) the gates read."""
+    return ProgressSnapshot(
+        current_level=int(getattr(progress, "current_level", 1)),
+        total_points=int(getattr(progress, "total_points", 0)),
+        axis_points=dict(getattr(progress, "axis_points", {}) or {}),
+        tutorials_completed=list(getattr(progress, "tutorials_completed", []) or []),
+        scenarios_passed=int(getattr(progress, "scenarios_passed", 0)),
+        challenges_passed=int(getattr(progress, "challenges_passed", 0)),
     )
+
+
+def _axis_sources(axis: str) -> str:
+    """How an axis grows, from the point actions' weights and the tutorials that feed it."""
+    cfg = get_config()
+    # Deferred: tutorials is a sibling that reads YAML of its own.
+    from spectre.training.tutorials import load_tutorials
+
+    earn = {
+        "scenario_completed": "passing a scored scenario",
+        "challenge_passed": "passing a challenge",
+        "challenge_passed_first_try": "passing a challenge on the first attempt",
+    }
+    parts = [
+        f"{earn.get(a.action_id, a.label.lower())} (+{a.base_points * a.axis_weights[axis]:g})"
+        for a in cfg.point_actions if a.axis_weights.get(axis, 0.0) > 0
+    ]
+    parts += [f"the {t.title} tutorial (+{t.points})" for t in load_tutorials() if t.skill_axis == axis]
+    return "; ".join(parts) if parts else "nothing yet"
+
+
+def _tutorial_gate(cond: LevelUnlockCondition, p: ProgressSnapshot) -> LevelGate:
+    # Deferred: tutorials is a sibling that reads YAML of its own.
+    from spectre.training.tutorials import get_tutorial
+
+    tid = cond.tutorial_id or ""
+    tutorial = get_tutorial(tid)
+    title = tutorial.title if tutorial else tid
+    return LevelGate(f"Complete the {title} tutorial", tid in p.tutorials_completed,
+                     "Open it in the Tutorials tab and mark it complete.")
+
+
+def _axis_gate(cond: LevelUnlockCondition, p: ProgressSnapshot) -> LevelGate:
+    axis = cond.axis or ""
+    axis_def = get_config().axes_by_id.get(axis)
+    label = axis_def.label if axis_def else axis
+    have = p.axis_points.get(axis, 0.0)
+    need = cond.min_points or 0.0
+    return LevelGate(f"{need:,.0f} {label} points (you have {have:,.0f})", have >= need,
+                     f"{label} grows by {_axis_sources(axis)}.")
+
+
+def _scenario_count_gate(cond: LevelUnlockCondition, p: ProgressSnapshot) -> LevelGate:
+    return LevelGate(f"Pass {cond.count} scored scenarios (you have passed {p.scenarios_passed})",
+                     p.scenarios_passed >= (cond.count or 0), "Start a scenario and reach its pass score.")
+
+
+def _challenge_count_gate(cond: LevelUnlockCondition, p: ProgressSnapshot) -> LevelGate:
+    return LevelGate(f"Pass {cond.count} challenges (you have passed {p.challenges_passed})",
+                     p.challenges_passed >= (cond.count or 0), "Challenges are listed in the Challenges tab.")
+
+
+#: The gate each unlock condition type sets beyond its points; the default level sets none.
+_CONDITION_GATES = {
+    "tutorial_complete": _tutorial_gate,
+    "axis_threshold": _axis_gate,
+    "scenario_count": _scenario_count_gate,
+    "challenge_count": _challenge_count_gate,
+}
+
+
+def next_level_gates(progress: object) -> list[LevelGate]:
+    """Every condition the next level needs, points first, as check_level_up tests them (audit 1-19).
+
+    Empty at the highest level.
+    """
+    p = snapshot(progress)
+    next_lv = get_config().level_def(p.current_level + 1)
+    if next_lv is None:
+        return []
+    need = next_lv.total_points_required
+    gates = [LevelGate(f"{need:,} total points (you have {p.total_points:,})", p.total_points >= need,
+                       "Points come from tutorials, scenario passes and challenge passes.")]
+    cond = next_lv.unlock_condition
+    gate = _CONDITION_GATES.get(cond.condition_type)
+    if gate is not None:
+        gates.append(gate(cond, p))
+    return gates
+
+
+def recommended_next_step(progress: object) -> str:
+    """The full condition for the next level and what to do about the first unmet part (audit 1-19).
+
+    It used to name the weakest axis, which said nothing about the gate in
+    front of the operator and hid the pass and challenge counts.
+    """
+    p = snapshot(progress)
+    next_lv = get_config().level_def(p.current_level + 1)
+    if next_lv is None:
+        return "You have reached the highest level."
+    gates = next_level_gates(progress)
+    needs = " and ".join(g.label[0].lower() + g.label[1:] for g in gates)
+    sentence = f"Level {next_lv.level} ({next_lv.title}) needs {needs}."
+    unmet = next((g for g in gates if not g.met), None)
+    if unmet is None:
+        return f"{sentence} You meet every condition: your next scored pass or completion advances you."
+    return f"{sentence} {unmet.how}"

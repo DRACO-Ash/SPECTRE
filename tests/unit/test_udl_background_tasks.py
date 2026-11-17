@@ -78,4 +78,4 @@ async def test_a_task_is_held_until_it_finishes_and_logout_cancels_it() -> None:
     await asyncio.sleep(0)  # done-callbacks run on the next turn of the loop
     assert task.cancelled()
     assert task not in udl._BACKGROUND
-    assert "alice" not in udl._SESSION_TASKS
+    assert ("alice", False) not in udl._SESSION_TASKS  # filed by sign-in and side (0.47.0 review B1)

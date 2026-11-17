@@ -368,6 +368,15 @@ class InterceptResult:
         score_kind: What the score measures, for the label.
         provenance: "physics" for a solved trajectory, "heuristic" for a score
             of uncalibrated weights.
+        chaser_side: "red" or "blue", the side the engine planned as the
+            manoeuvring satellite. red_name and blue_name always name the red
+            and the blue satellite; which of them burns is read from this and
+            the method, never from the field names (audit 4-3, 2-11).
+        search_window_s: A defensive burn's search half-width about the
+            assumed TCA, s; None for every other method.
+        edge_floor_km: Set when that search found no closest approach inside
+            its window: the least separation in it, a floor, with
+            intercept_range_km NaN (0.47.0 review, S1).
     """
 
     red_name: str
@@ -384,6 +393,9 @@ class InterceptResult:
     score_kind: str = ""
     provenance: str = "physics"
     option_id: str = field(default_factory=lambda: f"INT_{uuid.uuid4().hex[:10].upper()}")
+    chaser_side: str = "red"
+    search_window_s: float | None = None
+    edge_floor_km: float | None = None
 
 
 @dataclass

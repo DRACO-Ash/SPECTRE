@@ -38,7 +38,7 @@ other methods are solved once with the panel's values.
 | Method | Description |
 |--------|-------------|
 | **Plane Change** | Combined or pure plane change; node-crossing timing |
-| **J2 Drift** | Exploit J2 RAAN precession to align RAAN with a target |
+| **J2 Drift** | Exploit J2 RAAN precession to align RAAN with a target. The altitude change halves natural convergence; when half still takes longer than 10 years, the change that closes the gap within 10 years, either way round, is planned instead. A gap no altitude from 200 km to 2,000 km above the chaser closes within 10 years reads "not reachable within 10 years", not a failure. Planes already within 0.1 deg of each other (angle between the angular momentum vectors) read ALIGNED, and two orbits both within 1 deg of the equator, where RAAN means nothing, read NOT APPLICABLE |
 | **GEO Drift** | Longitude relocation via drift orbit; Drift (days) field |
 
 ### Defensive
@@ -48,9 +48,19 @@ Shown as "Avoidance and defence" in the batch: blue's options and burns that mov
 
 | Method | Description |
 |--------|-------------|
-| **COLA** | Collision avoidance — minimum ΔV to achieve a target miss distance |
-| **Evasion** | Defensive evasion against the threat's predicted position, within the ΔV budget |
-| **Formation Defence** | Formation-aware defensive burn |
+| **COLA** | Collision avoidance by the chaser: minimum ΔV sized for a target miss distance |
+| **Evasion** | Defensive evasion by the target against the chaser's predicted position, within the ΔV budget |
+| **Formation Defence** | Formation-aware defensive burn by the target |
+
+All three report the closest approach their burn leaves, searched within ±10 minutes of the assumed TCA (manoeuvre
+start plus coast for COLA and Formation; the manoeuvre start for Evasion, which is given no coast) and never before the
+burn: the burning satellite's two-body displacement, added to both satellites' predicted positions, sampled every 5 s
+and refined to a millisecond. When the least separation lies at the window's edge the encounter is beyond it, so the
+search is widened to a quarter revolution of the faster orbit either side (at most 12 h); if it is still at the edge,
+the row reads "no closest approach within ±N of the assumed TCA; separation at least X km at the window edge; check
+the TCA", its miss sorts with those not computed, and Evasion never counts such a candidate as reaching its miss. The burn moves the time of closest approach, so the separation at the old TCA
+instant overstated the miss in crossing geometry (a COLA asked for 1 km read 1.03 km where head-on it leaves 0.24 km).
+COLA and Formation used to report the miss they were asked for.
 
 ### Assessment
 
@@ -103,8 +113,8 @@ Delta-V is in m/s throughout.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `red_name` | `str` | The interceptor |
-| `blue_name` | `str` | The target |
+| `red_name` | `str` | The red satellite, whichever side manoeuvres |
+| `blue_name` | `str` | The blue satellite, whichever side manoeuvres |
 | `method` | `InterceptMethod` | Enum value identifying the solver (an alias names the solver it ran in `notes`) |
 | `burns` | `list[BurnResult]` | Per-burn breakdown (see below) |
 | `total_delta_v_m_s` | `float` | Sum of the burn magnitudes (m/s) |
@@ -115,6 +125,9 @@ Delta-V is in m/s throughout.
 | `score` | `float \| None` | An assessment's 0 to 100 score, the envelope's feasible count, or a drift method's angular gap; `None` for a trajectory |
 | `score_kind` | `str` | What `score` measures, with its unit where it has one |
 | `provenance` | `str` | `physics` for a solved quantity, `heuristic` for a score of uncalibrated weights, shown with a "modelled estimate" badge |
+| `search_window_s` | `float \| None` | A defensive burn's search half-width about the assumed TCA (s): 10 min, or half a revolution of the faster orbit (at most 12 h) when the least separation was at the 10 min edge; `None` for every other method |
+| `edge_floor_km` | `float \| None` | Set when even the widened search found no closest approach inside its window: the least separation in it (km), a floor, with `intercept_range_km` NaN. Shown as "no closest approach within ±N of the assumed TCA; separation at least X km at the window edge; check the TCA" |
+| `chaser_side` | `str` | `red` or `blue`: the side planned as the manoeuvring satellite (the form's Manoeuvring satellite). Evasion and Formation burn the other side; every other burn is the chaser's |
 
 Each `BurnResult`:
 
@@ -142,7 +155,16 @@ history with them and returns `partials/all_intercepts_result.html`. The counts
 and the targeting mode are read through the `_shaping_form` dependency, because
 the route is at the Code Quality gate's 13-parameter limit. A form that sends no
 targeting mode searches; `targeting_mode=typed` solves each method once with the
-typed values, as before. The ΔV budget defaults to 171.8 m/s.
+typed values, as before. The ΔV budget defaults to 171.8 m/s. `manoeuvring`
+(`red`, the default, or `blue`) names the satellite planned as the chaser: `blue`
+plans every method with the two roles swapped, and the table names the
+satellite that burns in each row. With `blue` the plans are our own: the
+table leads with the cheapest option rather than a worst case, its badge column
+reads the posture each burn's cost implies rather than a threat, it ranks by
+cost, and the Fingerprint, Manoeuvre Detect and Intent Prediction assessments,
+which read an adversary's behaviour, are left out. The table shows each row's
+miss distance, and the view stays on it after a run; the Trade-Space tab is one
+click away. The CSV export carries `chaser_side` and `burning_satellite`.
 
 `POST /plan/maneuver/apply-intercept`: one method by name, for scripted use. It
 appends its result to the history (the latest 200 are kept) and returns

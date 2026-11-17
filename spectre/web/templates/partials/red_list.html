@@ -9,7 +9,7 @@
 <ul class="asset-list">
   {% for track in red_tracks %}
   <li class="asset-item">
-    <span class="asset-name">{{ track.stk_name }}</span>
+    {% with label=track.stk_name, key=track.name, cards=(red_cards if red_cards is defined else none) %}{% include "partials/_element_card.html" %}{% endwith %}
     <button class="btn-remove"
             hx-delete="/assets/red/{{ track.name | urlencode }}"
             hx-target="#red-list"

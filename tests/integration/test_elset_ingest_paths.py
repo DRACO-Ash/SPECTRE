@@ -492,7 +492,7 @@ class TestBundledAndTrainingSets:
     def test_a_refused_training_set_is_not_loaded(self, caplog: pytest.LogCaptureFixture) -> None:
         from spectre.training.scenarios import ScenarioObject
         from spectre.web.models import SessionKey
-        from spectre.web.planning_state import get_session_state
+        from spectre.web.planning_state import get_training_state  # training writes only its own state (B1)
         from spectre.web.routes.training import _preload_training_objects
 
         line1, line2 = _ABSURD.splitlines()
@@ -501,10 +501,10 @@ class TestBundledAndTrainingSets:
         owner = SessionKey(user_id=987_654, session_id="elset-check")
         with caplog.at_level(logging.WARNING):
             _preload_training_objects(SimpleNamespace(objects=[bad]), owner)  # type: ignore[arg-type]
-        assert get_session_state(owner).red_tracks == []
+        assert get_training_state(owner).red_tracks == []
         sentence = f"The element set for TRAINING RED was refused: {_ABSURD_FAILS}. It was not stored."
         assert sentence in caplog.text
-        assert f"[TRAINING] {sentence}" in get_session_state(owner).log_entries
+        assert f"[TRAINING] {sentence}" in get_training_state(owner).log_entries
 
 
 class TestTheBinder:

@@ -31,7 +31,12 @@ from spectre.web.decision_job import jobs_ended, server_starting, server_stoppin
 from spectre.web.format_units import format_m_s, format_tof_label, is_computed
 from spectre.web.health import router as health_router
 from spectre.web.log_safety import log_safe
-from spectre.web.planning_state import set_default_elset_refusals, set_default_hrr_objects, set_default_hrr_tles
+from spectre.web.planning_state import (
+    in_training_request,
+    set_default_elset_refusals,
+    set_default_hrr_objects,
+    set_default_hrr_tles,
+)
 from spectre.web.routes.admin import router as admin_router
 from spectre.web.routes.decision import router as decision_router
 from spectre.web.routes.gcat import router as gcat_router
@@ -46,6 +51,7 @@ from spectre.web.routes.threat import router as threat_router
 from spectre.web.routes.training import router as training_router
 from spectre.web.routes.udl import _parse_created_at, elset_refusals, parse_hrr_notification
 from spectre.web.routes.udl import router as udl_router
+from spectre.web.training_frame import TrainingFrameMiddleware
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -379,9 +385,11 @@ async def _log_request(
     response = await call_next(request)
     if request.url.path not in _UNLOGGED_PATHS:
         _access_log.info(
-            "%s %s %d %.0f ms",
+            "%s %s %d %.0f ms%s",
             request.method, log_safe(request.url.path), response.status_code,
             (time.perf_counter() - started) * 1000.0,
+            # Served from the training planning state (0.47.0 review N5).
+            " training" if in_training_request() else "",
         )
     return response
 
@@ -402,6 +410,9 @@ async def _add_security_headers(
     if _is_https(request):
         response.headers.setdefault("Strict-Transport-Security", _HSTS)
     return response
+
+# Marks each request from training, so it gets the sign-in's training planning state (0.47.0 review B1).
+app.add_middleware(TrainingFrameMiddleware)
 
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 

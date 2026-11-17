@@ -7,28 +7,42 @@
    has a list before anyone logs in to UDL. Gating on the UDL session hid that
    list behind a login it does not need, which is what made the capability
    look broken on a clean deployment. #}
+{#- The session's own Blue assets (hand-added or training) follow the HRR objects, each labelled with its data mode
+    and screened from its own element set (training audit 2026-11-16, finding 2-3). The selector reloads when they
+    change and is handed the asset chosen and the budget typed, so both are kept. -#}
+{% set session_blue = session_blue if session_blue is defined else [] %}
+{% set selected = selected if selected is defined else "" %}
+{% set max_dv_m_s = max_dv_m_s if max_dv_m_s is defined else 500 %}
 {% if not has_hrr %}
 <p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
   No HRR objects loaded.
   {% if has_udl %}Fetch the HRR watchlist from the UDL panel.
   {% else %}Connect to UDL and fetch the watchlist.{% endif %}
 </p>
-{% elif not assets %}
+{% elif not assets and not session_blue %}
 <p class="label-dim" style="font-size:0.72rem; margin:0.3rem 0">
   The HRR watchlist holds no blue objects to screen.
 </p>
-{% else %}
+{% endif %}
+{% if assets or session_blue %}
 <div class="mnv-search-grid">
   <label style="font-size:0.72rem;font-weight:600;color:var(--text-dim)">Blue Asset
     <select name="asset_satno" id="scr-asset">
       {% for a in assets %}
-      <option value="{{ a.satno }}">{{ a.name }} [{{ a.satno }}]{% if a.regime %} · {{ a.regime }}{% endif %}{% if a.rank is not none %} · R{{ a.rank }}{% endif %}</option>
+      <option value="{{ a.satno }}"{% if selected and a.satno == selected %} selected{% endif %}>{{ a.name }} [{{ a.satno }}]{% if a.regime %} · {{ a.regime }}{% endif %}{% if a.rank is not none %} · R{{ a.rank }}{% endif %}</option>
       {% endfor %}
+      {% if session_blue %}
+      <optgroup label="Session Blue Assets">
+        {% for b in session_blue %}
+        <option value="{{ b.value }}"{% if b.value == selected %} selected{% endif %}>{{ b.name }}{% if b.satno %} [{{ b.satno }}]{% endif %}{% if b.regime %} · {{ b.regime }}{% endif %} · {{ b.data_mode }}</option>
+        {% endfor %}
+      </optgroup>
+      {% endif %}
     </select>
   </label>
   <label style="font-size:0.72rem;font-weight:600;color:var(--text-dim)"
          title="Delta-V the red object is assumed able to spend, in m/s: a sweep budget, not an alert threshold. The 500 m/s default is above every observed manoeuvre in the reference assessment; the largest, the SJ-21 tow of Beidou-2 G2, is about 120 m/s round trip.">Max &#916;V (m/s)
-    <input type="number" name="max_dv_m_s" value="500" step="10" min="0" />
+    <input type="number" name="max_dv_m_s" id="scr-max-dv" value="{{ '%g' | format(max_dv_m_s) }}" step="10" min="0" />
   </label>
 </div>
 <p style="margin:0.3rem 0 0; font-size:0.66rem; color:var(--text-dim)">

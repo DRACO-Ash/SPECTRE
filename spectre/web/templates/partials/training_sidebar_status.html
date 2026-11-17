@@ -1,0 +1,58 @@
+{# The training sidebar's level badge, next-level conditions, stats and recommendation. Rendered in the page and
+   again, out of band, whenever a response raises training-changed (audit 1-18, G-4).
+   Context: progress, level_def, next_lv_def, progress_pct, gates, recommendation #}
+
+{# Level badge #}
+<div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.4);
+            border-radius:6px; padding:0.6rem 0.75rem; margin-bottom:0.75rem">
+  <div style="font-size:0.6rem; color:#f59e0b; text-transform:uppercase; letter-spacing:0.07em; font-weight:700">
+    Current Level
+  </div>
+  <div style="font-size:1.3rem; font-weight:800; color:var(--text-primary); line-height:1.2">
+    <span id="training-sidebar-level">{{ progress.current_level }}</span>
+    <span style="font-size:0.75rem; font-weight:600; color:#f59e0b">{{ level_def.title if level_def else '' }}</span>
+  </div>
+  {% if next_lv_def %}
+  <div style="margin-top:0.35rem">
+    <div style="display:flex; justify-content:space-between; font-size:0.58rem; color:var(--text-dim); margin-bottom:0.15rem">
+      <span>→ Level {{ progress.current_level + 1 }}: {{ next_lv_def.title }}</span>
+      <span>{{ progress_pct }}% of points</span>
+    </div>
+    <div style="height:5px; background:var(--border); border-radius:3px; overflow:hidden">
+      <div style="height:100%; width:{{ progress_pct }}%; background:#f59e0b; border-radius:3px; transition:width 0.5s"></div>
+    </div>
+    {# Every condition the next level needs, not the points alone (audit 1-19). #}
+    <ul class="training-gates" style="list-style:none; margin:0.3rem 0 0; padding:0; font-size:0.58rem; color:var(--text-dim)">
+      {% for gate in gates %}
+      <li style="display:flex; gap:0.3rem; line-height:1.4">
+        <span style="color:{% if gate.met %}#22c55e{% else %}var(--text-dim){% endif %}" aria-hidden="true">{% if gate.met %}✓{% else %}○{% endif %}</span>
+        <span>{{ gate.label }}<span class="visually-hidden">{% if gate.met %} (met){% else %} (not met){% endif %}</span></span>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% else %}
+  <div style="font-size:0.6rem; color:#22c55e; margin-top:0.3rem; font-weight:600">★ Maximum Level</div>
+  {% endif %}
+</div>
+
+{# Quick stats #}
+<div style="font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.3rem; font-weight:700">
+  Stats
+</div>
+<div style="font-size:0.63rem; line-height:2; color:var(--text-dim)">
+  <div><span id="training-sidebar-points" style="color:var(--text-primary)">{{ progress.total_points }}</span> total points</div>
+  <div><span style="color:var(--text-primary)">{{ progress.scenarios_passed }}</span> scenarios passed</div>
+  <div><span style="color:var(--text-primary)">{{ progress.tutorials_done }}</span> tutorials complete</div>
+  <div><span style="color:var(--text-primary)">{{ progress.challenges_passed }}</span> challenges passed</div>
+  <div><span style="color:var(--text-primary)">{{ progress.time_in_training_minutes | int }}</span> min in training</div>
+</div>
+
+{# Recommendation #}
+<div style="margin-top:0.75rem; background:rgba(59,139,235,0.08); border:1px solid rgba(59,139,235,0.3);
+            border-radius:4px; padding:0.45rem 0.5rem; font-size:0.62rem; color:var(--text-dim)">
+  <strong style="color:var(--ops-blue); font-size:0.6rem; display:block; margin-bottom:0.15rem">
+    Recommended Next Step
+  </strong>
+  {{ recommendation }}
+</div>

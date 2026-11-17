@@ -1,6 +1,7 @@
 {# Post-scenario debrief screen #}
 {# Context: scenario, cr (ChallengeResult), total_score, passed, is_scored, points_earned,
-            axis_scores, axis_change, late, elapsed_min, level_up_events, newly_unlocked, cfg #}
+            axis_scores, axis_change, late, elapsed_min, level_up_events, newly_unlocked, objective_outcomes,
+            content_title, cfg #}
 
 <div style="background:var(--panel-bg); border:2px solid {% if not is_scored %}rgba(107,114,128,0.4){% elif passed %}rgba(34,197,94,0.5){% else %}rgba(239,68,68,0.4){% endif %};
             border-radius:6px; padding:0.75rem 0.9rem">
@@ -48,8 +49,13 @@
   {% if is_scored %}
   <div style="background:rgba(245,158,11,0.10); border:1px solid rgba(245,158,11,0.3);
               border-radius:4px; padding:0.4rem 0.6rem; margin-bottom:0.5rem; font-size:0.65rem">
+    {% if passed %}
     <strong style="color:#f59e0b">+{{ points_earned }} training points earned</strong>
-    {% if cr.first_try and passed and scenario.challenge %} — First Attempt Bonus included!{% endif %}
+    {% if cr.first_try and scenario.challenge %} — First Attempt Bonus included!{% endif %}
+    {% else %}
+    {# Points and axis points are awarded on a pass only (audit G-1, 1-20). #}
+    <strong style="color:#f59e0b">No training points earned</strong>: points are awarded on a pass.
+    {% endif %}
   </div>
   {% endif %}
 
@@ -69,7 +75,7 @@
   <div style="background:rgba(59,139,235,0.08); border:1px solid rgba(59,139,235,0.3);
               border-radius:4px; padding:0.4rem 0.6rem; margin-bottom:0.5rem; font-size:0.63rem">
     <strong style="color:var(--ops-blue)">Newly unlocked:</strong>
-    {{ newly_unlocked | join(', ') }}
+    {% for item in newly_unlocked %}{{ content_title(item) }}{% if not loop.last %}, {% endif %}{% endfor %}
   </div>
   {% endif %}
 
@@ -78,9 +84,31 @@
   <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.3);
               border-radius:4px; padding:0.4rem 0.6rem; margin-bottom:0.5rem; font-size:0.63rem">
     Submitted after {{ elapsed_min | round(1) }} minutes, past the {{ scenario.time_limit_minutes }}-minute
-    time limit: time-limited objectives were not scored.
+    time limit: a late submission does not pass, and time-limited objectives were not scored.
   </div>
   {% endif %}
+
+  {# Every objective, met or not, with the answer given and the one accepted (audit 1-16). #}
+  <div style="margin-bottom:0.5rem">
+    <div style="font-size:0.6rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;
+                letter-spacing:0.05em; margin-bottom:0.25rem">Objectives</div>
+    <ol id="debrief-objectives" style="margin:0; padding-left:1.2rem; font-size:0.62rem; color:var(--text-dim)">
+      {% for o in objective_outcomes %}
+      <li style="margin-bottom:0.25rem">
+        <span style="font-weight:700; color:{% if o.met %}#22c55e{% else %}#ef4444{% endif %}">
+          {% if o.met %}Met{% else %}Not met{% endif %}</span>
+        <span style="color:var(--text-primary)">{{ o.description }}</span>
+        <span style="font-family:monospace">({{ o.points }} pts)</span>{% if o.why %}<span>: {{ o.why }}</span>{% endif %}
+        {% if o.has_answer %}
+        {# The accepted answer only where it gives nothing away: a met objective, or a passed scored attempt
+           (review S3). #}
+        <div>Your answer: <strong style="color:var(--text-primary)">{{ o.given or 'none given' }}</strong>
+          {% if o.accepted %}· Accepted answer: <strong style="color:var(--text-primary)">{{ o.accepted }}</strong>{% endif %}</div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </div>
 
   {# Objective points per axis: what the ticked objectives were worth. These
      make up the score above; they are not added to the operator's axes. #}
@@ -128,7 +156,8 @@
       When you're ready, start a scored attempt to have your performance recorded.
     {% elif not passed %}
       You scored {{ total_score }} of the {{ scenario.scoring.passing_score }} needed to pass.
-      Review the objectives above and retry — there is no penalty for re-attempting.
+      {% if late %}A submission after the time limit does not pass.{% endif %}
+      Review the objectives listed above and retry — there is no penalty for re-attempting.
       Focus on the objectives you missed to improve your score.
     {% elif optimal_pct >= 95 %}
       Excellent performance — {{ optimal_pct }}% of optimal score achieved.
@@ -162,7 +191,7 @@
     {% endif %}
     <button class="btn-secondary" style="font-size:0.7rem"
             hx-get="/training/dashboard"
-            hx-target="#tpanel-dashboard"
+            hx-target="#training-dashboard"
             hx-swap="innerHTML"
             data-action="trainingTab" data-tab="dashboard">
       View Dashboard

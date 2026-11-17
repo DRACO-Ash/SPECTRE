@@ -39,8 +39,10 @@ skill_axes:
 # ── Point-Earning Actions ──────────────────────────────────────────────────────
 # Each entry maps an action_id to a base point award and the skill axes it feeds.
 # axis_weights must sum to 1.0. Only these three are awarded, by the scenario
-# submit route; tutorials award their own points from tutorials.yaml. A test
-# fails if an action here is not awarded anywhere.
+# submit route, and only on a pass: a scored submission that does not reach
+# its scenario's passing_score earns nothing (no scaling by score). Tutorials
+# award their own points from tutorials.yaml. A test fails if an action here
+# is not awarded anywhere.
 point_actions:
 
   - action_id: scenario_completed

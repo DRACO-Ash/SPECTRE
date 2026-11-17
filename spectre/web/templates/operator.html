@@ -52,13 +52,23 @@
       <option value="steel">Steel (Light)</option>
     </select>
 
+    {# Not inside the training page's own console frame, where it opened training within training (audit 1-23). #}
+    {% if not in_training_frame %}
     <a href="/training"
        style="font-size:0.72rem; font-weight:700; padding:0.25rem 0.65rem;
               background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.5);
               border-radius:4px; color:#f59e0b; text-decoration:none; white-space:nowrap"
-       title="Enter the training environment. Scenario objects are synthetic and stay in your red and blue lists until you leave training">
+       title="Enter the training environment. Scenario objects are synthetic and kept apart from your operational lists and scenario time">
       ⚡ Training
     </a>
+    {% else %}
+    {# A console served from the training planning state says so, wherever it is open (0.47.0 review S4). #}
+    <span id="training-console-strip" role="note"
+          style="font-size:0.72rem; font-weight:800; padding:0.25rem 0.65rem; letter-spacing:0.06em;
+                 background:#b45309; border:1px solid #f59e0b; border-radius:4px; color:#fef3c7; white-space:nowrap">
+      ⚠ TRAINING CONSOLE: synthetic, not operational
+    </span>
+    {% endif %}
     <span class="nav-user">{{ user.username }} [{{ user.role }}]</span>
     <form method="post" action="/logout" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -429,7 +439,7 @@
         <span class="htab-icon htab-icon-red"></span>Threat Sweep
       </button>
       <button class="htab" data-panel="hero-screen" data-action="heroTab"
-              title="Asset Screening: select a blue HRR object and rank every red object that could reach it">
+              title="Asset Screening: select a blue HRR object or a session Blue asset and rank every red object that could reach it">
         <span class="htab-icon htab-icon-blue"></span>Asset Screening
       </button>
       <button class="htab" data-panel="hero-engine" data-action="heroTab">
@@ -466,7 +476,7 @@
           <section class="panel panel-gold">
             <h2>Intercept Engine</h2>
             <p class="callout callout-gold" style="margin-bottom:0.6rem">
-              Calculate intercept manoeuvres between red and blue satellites using all 23 methods simultaneously. Configure timing and compute a ranked comparison of every trajectory solver.
+              Calculate intercept manoeuvres between red and blue satellites using all 23 methods simultaneously. Choose which satellite manoeuvres, configure timing and compute a ranked comparison of every trajectory solver.
             </p>
 
             <form id="intercept-engine-form"
@@ -477,14 +487,20 @@
                   hx-disabled-elt="find button[type=submit]">
 
               <div class="mnv-search-grid">
-                <label title="The red (threat) satellite that will execute the intercept manoeuvre">Red Satellite
+                <label title="The red (threat) satellite. It executes the intercept manoeuvre unless Manoeuvring satellite is set to Blue">Red Satellite
                   <select name="red_sat" id="ie-red-sat">
                     {% include "partials/red_options.html" %}
                   </select>
                 </label>
-                <label title="The blue (friendly) satellite to intercept">Blue Target
+                <label title="The blue (friendly) satellite. It is the target unless Manoeuvring satellite is set to Blue, when it executes the manoeuvre against the red satellite">Blue Satellite
                   <select name="blue_sat" id="ie-blue-sat">
                     {% include "partials/blue_options.html" %}
+                  </select>
+                </label>
+                <label title="The satellite every method plans the manoeuvre for. Red: red approaches blue, as before. Blue: the roles are swapped, so blue is planned approaching or avoiding red. Each row names the satellite that burns: Evasion and Formation move the other one.">Manoeuvring satellite
+                  <select name="manoeuvring" id="ie-manoeuvring">
+                    <option value="red" selected>Red</option>
+                    <option value="blue">Blue</option>
                   </select>
                 </label>
 
@@ -681,13 +697,14 @@
         <section class="panel panel-blue">
           <h2>Asset Screening</h2>
           <p class="callout callout-gold" style="margin-bottom:0.6rem">
-            Select a blue HRR object. Every red object in a regime that could reach it is screened, assessed and ranked, with the earliest possible arrival called out separately.
+            Select a blue HRR object or one of the session's Blue assets. Every red object in a regime that could reach it is screened, assessed and ranked, with the earliest possible arrival called out separately.
           </p>
 
           <form id="threat-screen-form">
             <div id="scr-asset-config"
                  hx-get="/plan/threat/screen-config"
-                 hx-trigger="load"
+                 hx-trigger="load, blueAssetsChanged from:body"
+                 hx-include="#scr-asset-config"
                  hx-swap="innerHTML">
               <p class="label-dim" style="font-size:0.72rem">Loading asset list&hellip;</p>
             </div>

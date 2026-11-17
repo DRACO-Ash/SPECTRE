@@ -480,6 +480,8 @@ _J2_FLOOR_ALT_KM = 200.0
 _J2_MAX_RAISE_KM = 2000.0
 _J2_BISECT_STEPS = 100
 _J2_FALLBACK_DAYS = 180.0
+#: Two nodal rates closer than this, deg/day, are equal: the planes never converge.
+_J2_RATES_EQUAL_DEG_DAY = 1e-10
 
 
 @dataclass
@@ -491,7 +493,7 @@ class J2DriftResult:
     differential_rate_deg_day: float  # deg/day — convergence rate
     delta_raan_deg: float             # current RAAN gap
     convergence_time_days: float      # days to natural alignment (0 if diverging)
-    accel_altitude_change_km: float   # altitude change to halve convergence time (0 if none reaches it)
+    accel_altitude_change_km: float   # altitude change to halve convergence, or meet a cap (0 if none reaches it)
     accel_convergence_days: float     # convergence time after altitude change
     accel_delta_v: float              # km/s — both Hohmann burns of the altitude change
     method: str = "j2_drift"
@@ -534,11 +536,15 @@ def j2_drift_plan(
     inc_target_deg: float,
     delta_raan_deg: float,
     mu: float = MU_EARTH,
+    cap_days: float | None = None,
 ) -> J2DriftResult:
     """Plan RAAN alignment via natural J2 precession.
 
     Computes time for natural convergence and the altitude change
-    that would accelerate it.
+    that would accelerate it. With *cap_days*, a gap whose halved convergence
+    still takes longer is solved again for the change that closes it within
+    the cap, so a plan inside the cap is found whenever one exists in the
+    altitude range (0.47.0 review, B1).
 
     Args:
         a_chaser: Chaser semi-major axis (km).
@@ -554,8 +560,10 @@ def j2_drift_plan(
     rate_t = j2_raan_rate(a_target, ecc_target, inc_target_deg, mu)
     diff_rate = rate_c - rate_t  # deg/day
 
-    # Natural convergence time
-    if abs(diff_rate) < 1e-10:
+    # Natural convergence time: none for a gap already closed, which read "not reachable" (0.47.0 review, N1).
+    if abs(delta_raan_deg) < _RAAN_CLOSED_DEG:
+        conv_days = 0.0
+    elif abs(diff_rate) < _J2_RATES_EQUAL_DEG_DAY:
         conv_days = float("inf")
     else:
         conv_days = -delta_raan_deg / diff_rate
@@ -563,7 +571,7 @@ def j2_drift_plan(
             conv_days = (360.0 - abs(delta_raan_deg)) / abs(diff_rate)
 
     delta_a, accel_days = _j2_acceleration(
-        (a_chaser, ecc_chaser, inc_chaser_deg), rate_t, delta_raan_deg, conv_days, mu,
+        (a_chaser, ecc_chaser, inc_chaser_deg), rate_t, delta_raan_deg, conv_days, mu, cap_days,
     )
     accel_dv = hohmann(a_chaser, a_chaser + delta_a, mu).total_delta_v if delta_a else 0.0
 
@@ -585,8 +593,9 @@ def _j2_acceleration(
     delta_raan_deg: float,
     conv_days: float,
     mu: float,
+    cap_days: float | None = None,
 ) -> tuple[float, float]:
-    """Altitude change (km) that closes the RAAN gap the short way in half the time.
+    """Altitude change (km) that closes the RAAN gap the short way in half the time, or within *cap_days*.
 
     *chaser* is its (semi-major axis km, eccentricity, inclination deg).
 
@@ -594,14 +603,42 @@ def _j2_acceleration(
     bisection between a floor 200 km above the surface and 2,000 km above the
     chaser. The direction follows from the differential rate the gap needs,
     not from the inclination alone (audit F-024). Natural convergence that
-    never happens is given a target of _J2_FALLBACK_DAYS. Returns (0, natural
-    time) when no altitude in that range is fast enough.
+    never happens is given a target of _J2_FALLBACK_DAYS. With *cap_days*,
+    the target is never longer than the cap, and when that target cannot be
+    met and natural convergence is beyond the cap, the cap itself is tried,
+    either way round, and the smaller change kept: halving the 18,659 day
+    convergence of a chaser 4 km above its target at 420 km, 170 deg apart,
+    asked for 9,330 days, past a 10 year cap, when a 16.5 km raise closes the
+    gap the long way round in exactly the cap (0.47.0 review, B1).
+    Returns (0, natural time) when no altitude in that range is fast enough.
     """
-    a_chaser, ecc_chaser, inc_chaser_deg = chaser
     if abs(delta_raan_deg) < _RAAN_CLOSED_DEG:
         return 0.0, conv_days
     target_days = conv_days / 2.0 if math.isfinite(conv_days) else _J2_FALLBACK_DAYS
-    needed = -math.copysign(abs(delta_raan_deg) / target_days, delta_raan_deg)
+    if cap_days is None or target_days <= cap_days:
+        short_way = -math.copysign(abs(delta_raan_deg) / target_days, delta_raan_deg)
+        delta_a = _j2_altitude_for(chaser, rate_t, short_way, mu)
+        if delta_a is not None:
+            return delta_a, target_days
+    if cap_days is not None and cap_days < conv_days:
+        # Either way round within the cap, the smaller altitude change: the long way can need less.
+        both = (-math.copysign(abs(delta_raan_deg) / cap_days, delta_raan_deg),
+                math.copysign((360.0 - abs(delta_raan_deg)) / cap_days, delta_raan_deg))
+        found = [d for d in (_j2_altitude_for(chaser, rate_t, rate, mu) for rate in both) if d is not None]
+        if found:
+            return min(found, key=abs), cap_days
+    return 0.0, conv_days
+
+
+def _j2_altitude_for(
+    chaser: tuple[float, float, float],
+    rate_t: float,
+    needed: float,
+    mu: float,
+) -> float | None:
+    """The altitude change (km) whose nodal rate differs from the target's by *needed* deg/day; None when no
+    altitude between the floor and _J2_MAX_RAISE_KM above the chaser does."""
+    a_chaser, ecc_chaser, inc_chaser_deg = chaser
 
     def excess(a: float) -> float:
         return j2_raan_rate(a, ecc_chaser, inc_chaser_deg, mu) - rate_t - needed
@@ -609,7 +646,7 @@ def _j2_acceleration(
     lo, hi = R_EARTH + _J2_FLOOR_ALT_KM, a_chaser + _J2_MAX_RAISE_KM
     f_lo = excess(lo)
     if f_lo * excess(hi) > 0.0:
-        return 0.0, conv_days
+        return None
     for _ in range(_J2_BISECT_STEPS):
         mid = 0.5 * (lo + hi)
         f_mid = excess(mid)
@@ -617,7 +654,7 @@ def _j2_acceleration(
             lo, f_lo = mid, f_mid
         else:
             hi = mid
-    return 0.5 * (lo + hi) - a_chaser, target_days
+    return 0.5 * (lo + hi) - a_chaser
 
 
 # ═══════════════════════════════════════════════════════════════════════════

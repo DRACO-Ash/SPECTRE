@@ -207,15 +207,67 @@ class TestAllIntercepts:
         assert datetime.fromisoformat(shown) == datetime.fromisoformat(epoch)
         _assert_clean(console)
 
-    def test_a_second_run_draws_the_trade_space(self, console: Console) -> None:
+    def test_a_second_run_draws_the_trade_space_and_keeps_the_table_in_view(self, console: Console) -> None:
+        """The view used to jump to Trade-Space after every run, hiding the ranked table (audit X2, 3-5, 4-9)."""
         page = _all_intercepts(console)
         with page.expect_response("**/plan/maneuver/trade-space-data", timeout=120000):
             page.click('#intercept-engine-form button[type="submit"]')
-        page.wait_for_function("document.getElementById('ts-chart-status').textContent.indexOf('plotted') > 0",
-                               timeout=30000)
-        assert "active" in (page.get_attribute("#et-trade", "class") or "")
+        # A selector wait, not a string wait_for_function: the page's policy forbids eval, which a string condition
+        # needs whenever its first check comes up false, so a slow page made the wait itself fail.
+        page.wait_for_selector("#ts-chart-status:has-text('plotted')", state="attached", timeout=30000)
+        assert "active" in (page.get_attribute("#et-calculator", "class") or "")
+        assert "active" not in (page.get_attribute("#et-trade", "class") or "")
+        assert page.is_visible("#all-intercepts-table")
+        assert "pts" in page.text_content("#ts-badge")
         drawn = page.evaluate("!!Chart.getChart(document.getElementById('tradeSpaceChart'))")
         assert drawn is True
+        page.click('.etab[data-panel="et-trade"]')
+        assert "active" in (page.get_attribute("#et-trade", "class") or "")
+        _assert_clean(console)
+
+    def test_the_table_shows_each_rows_miss_without_opening_it(self, console: Console) -> None:
+        page = _all_intercepts(console)
+        assert page.is_visible('#all-intercepts-table th:has-text("Miss Dist (km)")')
+        first = page.locator("#all-intercepts-table tr.threat-parent").first
+        assert first.get_attribute("aria-expanded") == "false"
+        miss = first.locator("td.ai-miss")
+        assert miss.is_visible() and miss.inner_text().strip() != ""
+        _assert_clean(console)
+
+    def test_blue_as_the_manoeuvring_satellite_is_named_on_every_row(self, console: Console) -> None:
+        page = console.open()
+        page.click('.htab[data-panel="hero-engine"]')
+        page.select_option("#ie-red-sat", "RED-GEO")
+        page.select_option("#ie-blue-sat", "BLUE-GEO")
+        assert page.input_value("#ie-manoeuvring") == "red", "Red stays the default"
+        page.select_option("#ie-manoeuvring", "blue")
+        page.click('#intercept-engine-form button[type="submit"]')
+        page.wait_for_selector("#all-intercepts-table", state="attached", timeout=120000)
+        page.wait_for_load_state("networkidle")
+        page.click('.etab[data-panel="et-calculator"]')
+        assert "Manoeuvring: BLUE-GEO" in page.inner_text("#ai-manoeuvring")
+        lambert = page.locator('#all-intercepts-table tr[data-sort-1="lambert"] .ai-burner')
+        assert lambert.inner_text().strip() == "BLUE-GEO burns"
+        evasion = page.locator('#all-intercepts-table tr[data-sort-1="evasion"] .ai-burner')
+        assert evasion.inner_text().strip() == "RED-GEO burns"
+        # Loading a row planned with Blue manoeuvring re-plans as Blue (0.47.0 review).
+        page.select_option("#ie-manoeuvring", "red")
+        page.locator('#all-intercepts-table tr[data-sort-1="lambert"] button:has-text("Load")').click()
+        assert page.input_value("#ie-manoeuvring") == "blue"
+        _assert_clean(console)
+
+    def test_a_descending_miss_sort_puts_dashes_last(self, console: Console) -> None:
+        """0.47.0 review: an unparseable figure read as Infinity, so a descending sort led with every dash."""
+        page = _all_intercepts(console)
+        header = page.locator('#all-intercepts-table thead th:has-text("Miss Dist (km)")')
+        header.click()
+        header.click()
+        assert header.get_attribute("aria-sort") == "descending"
+        cells = [c.strip() for c in page.locator("#all-intercepts-table tr.threat-parent td.ai-miss").all_inner_texts()]
+        # A dash, "not computed" and a window-edge floor ("≥X", no closest approach) are not figures (review S1).
+        figures = [c for c in cells if c not in {"—", "not computed"} and not c.startswith("≥")]
+        assert figures and cells[:len(figures)] == figures, f"a dash or 'not computed' sorted first: {cells}"
+        assert [float(c) for c in figures] == sorted((float(c) for c in figures), reverse=True)
         _assert_clean(console)
 
 
@@ -255,7 +307,7 @@ class TestSingleIntercept:
         page.context.grant_permissions(["clipboard-read", "clipboard-write"])
         copy = page.locator('button[data-clip]').first
         copy.click()
-        page.wait_for_function("document.querySelector('button[data-clip]').textContent.indexOf('Copied') >= 0")
+        page.wait_for_selector("button[data-clip]:has-text('Copied')")
         assert page.evaluate("navigator.clipboard.readText()") == copy.get_attribute("data-clip")
         _assert_clean(console)
 

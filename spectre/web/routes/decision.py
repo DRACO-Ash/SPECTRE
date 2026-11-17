@@ -118,7 +118,7 @@ from spectre.web.decision_trajectory import trajectory_links
 from spectre.web.deps import render
 from spectre.web.log_safety import log_safe
 from spectre.web.models import SessionKey, User
-from spectre.web.planning_state import SessionState, get_session_state
+from spectre.web.planning_state import SessionState, get_session_state, in_training_request
 from spectre.web.tree_view import tree_view
 
 logger = logging.getLogger(__name__)
@@ -1229,8 +1229,18 @@ async def _answer(
     return render(request, "partials/decision_job.html", job_view(state, job.job_id))
 
 
-def _recorder(user: User) -> Record:
-    """What writes the decision record of an evaluation *user* runs, once it finishes (SPC-192)."""
+#: What the results say in the training frame, where an evaluation writes no decision record (0.47.0 review S3).
+TRAINING_UNRECORDED = "Training: not recorded."
+
+
+def _recorder(user: User) -> Record | None:
+    """What writes the decision record of an evaluation *user* runs, once it finishes (SPC-192).
+
+    None in training: an evaluation in the training frame is an exercise, and the records are permanent operational
+    records (0.47.0 review S3).
+    """
+    if in_training_request():
+        return None
     operator = Operator(user.id, user.username)
 
     async def record(result: ScenarioResult) -> int | None:
@@ -1240,7 +1250,7 @@ def _recorder(user: User) -> Record:
 
 
 async def _evaluate_inline(
-    request: Request, state: SessionState, scenario: Scenario, strat: SelectorStrategy, record: Record,
+    request: Request, state: SessionState, scenario: Scenario, strat: SelectorStrategy, record: Record | None,
 ) -> HTMLResponse:
     """Evaluate on a worker thread, so no other session waits on it, write its decision record, and render the
     results."""
@@ -1255,9 +1265,10 @@ async def _evaluate_inline(
     except Exception:
         logger.exception("Decision evaluation failed")
         return _err("Evaluation error: the scenario could not be evaluated; the server log has the detail.")
-    record_id = await record(result)
+    record_id = None if record is None else await record(result)
     view = None if record_id is None else fresh_view(record_id, result)
-    return render(request, "partials/decision_results.html", _results_context(result, view, unrecorded=view is None))
+    unrecorded = record is not None and view is None
+    return render(request, "partials/decision_results.html", _results_context(result, view, unrecorded=unrecorded))
 
 
 def _results_context(result: ScenarioResult, record: RecordView | None, *, unrecorded: bool) -> dict[str, Any]:
@@ -1269,10 +1280,17 @@ def _results_context(result: ScenarioResult, record: RecordView | None, *, unrec
     """
     return {
         "result": result, "links": trajectory_links(result), "tree": tree_view(result),
-        "record": record, "record_note": UNRECORDED if unrecorded else "",
+        "record": record, "record_note": _record_note(unrecorded),
         # Every rule's pick side by side, and the primary rule's as the headline (SPC-194, evaluation F-03).
         "rules": compare_rules(result, primary_rule()),
     }
+
+
+def _record_note(unrecorded: bool) -> str:
+    """The line the results carry in place of a decision form, if any."""
+    if in_training_request():
+        return TRAINING_UNRECORDED
+    return UNRECORDED if unrecorded else ""
 
 
 @router.get("/job", response_class=HTMLResponse)

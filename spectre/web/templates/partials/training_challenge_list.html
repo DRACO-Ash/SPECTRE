@@ -1,0 +1,28 @@
+{# The challenges open at the operator's level, re-rendered out of band on training-changed (audit 1-18).
+   Context: challenge_scenarios #}
+{% if challenge_scenarios %}
+  {% for s in challenge_scenarios %}
+  <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:5px;
+              padding:0.6rem 0.75rem; margin-bottom:0.4rem">
+    <div style="display:flex; justify-content:space-between; align-items:baseline">
+      <strong style="font-size:0.7rem; color:var(--text-primary)">{{ s.title }}</strong>
+      <span style="font-size:0.62rem; font-weight:700; color:{{ s.difficulty_colour }}">
+        {{ s.difficulty | replace('_',' ') | upper }}
+      </span>
+    </div>
+    <div style="font-size:0.63rem; color:var(--text-dim); margin:0.2rem 0">{{ s.description }}</div>
+    <button class="btn-primary" style="font-size:0.65rem"
+            hx-get="/training/scenario/{{ s.id }}"
+            hx-target="#scenario-detail"
+            hx-swap="innerHTML"
+            data-action="trainingTab" data-tab="scenarios" data-scroll-to="scenario-detail">
+      View Challenge
+    </button>
+  </div>
+  {% endfor %}
+{% else %}
+  <p style="font-size:0.7rem; color:var(--text-dim)">
+    Challenges unlock as you advance in level.
+    Reach Level 4 to access your first challenge scenario.
+  </p>
+{% endif %}

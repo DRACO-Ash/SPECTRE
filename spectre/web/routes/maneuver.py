@@ -16,7 +16,7 @@ import math
 from collections.abc import Callable
 from datetime import UTC, datetime
 from datetime import timedelta as _timedelta
-from typing import Annotated, Any, NamedTuple
+from typing import Annotated, Any, Final, Literal, NamedTuple
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -30,7 +30,9 @@ from spectre.astro.elset_check import HELD_KEPT, tle_epoch
 from spectre.astro.events import EventType, find_orbital_events
 from spectre.astro.flight import baseline, fly
 from spectre.astro.maneuvers import (
+    DEFENCE_WINDOW_TEXT,
     InterceptSolution,
+    NotPlannedError,
     bielliptic_intercept,
     cola_intercept,
     cw_drift_intercept,
@@ -80,7 +82,7 @@ from spectre.web.auth import require_login
 from spectre.web.burn_view import DOMINANT_AXIS_FRACTION, INTENT_LABELS, dominant_axis
 from spectre.web.deps import render
 from spectre.web.elsets import RefusedElset
-from spectre.web.format_units import format_tof_label
+from spectre.web.format_units import format_m_s, format_tof_label
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
@@ -342,19 +344,103 @@ def _banded(
 _LABEL_MISS_DISTANCE: str = "Miss Distance"
 
 
+#: The two sides an engine run can plan as the manoeuvring satellite (audit 4-3, 2-11).
+RED: Final = "red"
+BLUE: Final = "blue"
+#: The defensive burns whose solver moves the satellite it is given as the target, not the chaser: Evasion and
+#: Formation burn the defended satellite (maneuvers.py). Every other burn is the chaser's (audit 3-6, 2-9).
+_TARGET_BURNS = frozenset({InterceptMethod.EVASION, InterceptMethod.FORMATION})
+
+
+def _chaser_and_target(result: InterceptResult) -> tuple[str, str]:
+    """The satellite planned as the chaser and the one it was planned against, by name."""
+    if result.chaser_side == BLUE:
+        return result.blue_name, result.red_name
+    return result.red_name, result.blue_name
+
+
+def _burner_and_other(result: InterceptResult) -> tuple[str, str]:
+    """The satellite that burns in *result* and the other one, by name (audit 3-6).
+
+    The EVASION summary said "places RED-01 11.0 km from threat" when the burn was BLUE's.
+    """
+    chaser, target = _chaser_and_target(result)
+    return (target, chaser) if result.method in _TARGET_BURNS else (chaser, target)
+
+
+def burning_satellite(result: InterceptResult) -> str:
+    """The satellite that burns in *result*, by name; "" when it has no burn (the CSV export's column, S1)."""
+    return _burner_and_other(result)[0] if result.burns else ""
+
+
+def _dv_text(dv: float) -> str:
+    """A delta-v in a sentence, rounded as every table rounds it: a 0.15 m/s burn read "0 m/s" here (audit 3-6)."""
+    return f"{format_m_s(dv)} m/s"
+
+
+#: A miss under this many km is shown to 10 m: a 1 km avoidance and a 0.4 km one must not both read "1.0".
+_MISS_TWO_PLACES_BELOW_KM = 10.0
+
+
+def _miss_figure(miss: float) -> str:
+    """A miss in km as the table shows it: two decimals under 10 km, one above, "not computed" for NaN."""
+    if not math.isfinite(miss):
+        return NOT_COMPUTED_TEXT
+    return f"{miss:.2f}" if miss < _MISS_TWO_PLACES_BELOW_KM else f"{miss:.1f}"
+
+
+def _miss_words(miss: float) -> str:
+    """The same figure in a sentence: "0.24 km", or "not computed"."""
+    return f"{_miss_figure(miss)} km" if math.isfinite(miss) else NOT_COMPUTED_TEXT
+
+
 def _km_text(miss: float, places: int = 1) -> str:
     """*miss* in km to *places* decimals, or "not computed" when it is not a number (SPC-238)."""
     return f"{miss:.{places}f} km" if math.isfinite(miss) else NOT_COMPUTED_TEXT
 
 
 def _comes_within(result: InterceptResult, miss: float) -> str:
-    """"RED comes within 12.3 km of BLUE", or that its closest approach was not computed (SPC-238)."""
+    """"RED comes within 12.3 km of BLUE", naming the satellite that burns first, or that its closest approach was
+    not computed (SPC-238)."""
+    burner, other = _burner_and_other(result)
     if math.isfinite(miss):
-        return f"{result.red_name} comes within {miss:.1f} km of {result.blue_name}"
-    return f"{result.red_name}'s closest approach to {result.blue_name} was {NOT_COMPUTED_TEXT}"
+        return f"{burner} comes within {miss:.1f} km of {other}"
+    return f"{burner}'s closest approach to {other} was {NOT_COMPUTED_TEXT}"
 
 
 _LABEL_TRANSFER_TYPE: str = "Transfer Type"
+#: A defensive burn's miss: the closest approach its burn leaves, searched near the assumed TCA (start plus coast),
+#: not the one asked for, nor the separation at the old TCA instant, which the burn moves (0.47.0 review, B2).
+_LABEL_ACHIEVED_MISS: str = "Closest approach after the burn (searched near the assumed TCA)"
+
+
+def _window_text(seconds: float | None) -> str:
+    """A search half-width as read: "10 min", "47 min", "12.0 h"; the default window when none is recorded."""
+    if seconds is None:
+        return DEFENCE_WINDOW_TEXT
+    return f"{seconds / 60.0:.0f} min" if seconds < 2 * 3600.0 else f"{seconds / 3600.0:.1f} h"
+
+
+def _defence_tca(result: InterceptResult) -> str:
+    """What a defensive burn's assumed TCA is: Evasion is given no coast, so its TCA is the manoeuvre start (N3)."""
+    return "the manoeuvre start" if result.method is InterceptMethod.EVASION else "manoeuvre start plus coast"
+
+
+def _no_encounter(result: InterceptResult, tca: str = "") -> str:
+    """The words for a defensive search that found no minimum inside its window (0.47.0 review, S1)."""
+    when = f", {tca}" if tca else ""
+    return (
+        f"no closest approach to {_burner_and_other(result)[1]} within \u00b1{_window_text(result.search_window_s)} "
+        f"of the assumed TCA{when}; separation at least {_miss_words(result.edge_floor_km or 0.0)} at the window "
+        "edge; check the TCA"
+    )
+
+
+def _defence_miss_value(result: InterceptResult, miss: float) -> str:
+    """The defensive insight's value: the closest approach and the window it was found in, or that none was."""
+    if result.edge_floor_km is not None:
+        return _no_encounter(result)
+    return f"{_miss_words(miss)}, within \u00b1{_window_text(result.search_window_s)}"
 #: The transfer flown by the three methods that solve the same two-point
 #: boundary value problem.
 _TRANSFER_LAMBERT_ARC: str = "Lambert arc"
@@ -478,7 +564,7 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
         lambda result, dv, miss: (
             [
                 {"label": "Fingerprint match score (heuristic, uncalibrated)", "value": f"{miss:.0f}/100"},
-                {"label": "Estimated ΔV", "value": f"{dv:.0f} m/s"},
+                {"label": "Estimated ΔV", "value": _dv_text(dv)},
             ]
         ),
     InterceptMethod.TERRAIN:
@@ -493,34 +579,44 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
             [
                 {"label": "Detection score (heuristic, fixed per classification branch)",
                  "value": f"{miss:.0f}/100"},
-                {"label": "Estimated ΔV", "value": f"{dv:.0f} m/s"},
+                {"label": "Estimated ΔV", "value": _dv_text(dv)},
             ]
         ),
     InterceptMethod.INTERCEPT_ENVELOPE:
         lambda result, dv, miss: (
             [
                 {"label": "Feasible Solutions", "value": f"{int(miss)}"},
-                {"label": "Min Feasible ΔV", "value": f"{dv:.0f} m/s"},
+                {"label": "Min Feasible ΔV", "value": _dv_text(dv)},
             ]
         ),
     InterceptMethod.COLA:
         lambda result, dv, miss: (
             [
-                {"label": "Achieved Miss", "value": _km_text(miss, 2)},
+                {"label": _LABEL_ACHIEVED_MISS, "value": _defence_miss_value(result, miss)},
                 {"label": "Strategy", "value": "Optimal COLA manoeuvre"},
+            ]
+        ),
+    InterceptMethod.FORMATION:
+        lambda result, dv, miss: (
+            [
+                {"label": _LABEL_ACHIEVED_MISS, "value": _defence_miss_value(result, miss)},
+                {"label": "Type", "value": "Formation-aware defence"},
             ]
         ),
     InterceptMethod.EVASION:
         lambda result, dv, miss: (
             [
-                {"label": "Achieved Miss", "value": _km_text(miss, 2)},
+                {"label": _LABEL_ACHIEVED_MISS, "value": _defence_miss_value(result, miss)},
                 {"label": "Type", "value": "Defensive evasion"},
             ]
         ),
     InterceptMethod.GEO_DRIFT:
         lambda result, dv, miss: (
             [
-                {"label": "Longitude Gap", "value": f"{miss:.2f}\u00b0"},
+                {"label": "Longitude gap at the start", "value": f"{miss:.2f}\u00b0"},
+                # In the batch the plan is flown, so its closest approach in km sits beside the gap in degrees, each
+                # named; it was the km figure that read as the gap (0.47.0 review).
+                {"label": _LABEL_CLOSEST_APPROACH + " (flown)", "value": _km_text(result.intercept_range_km)},
                 {"label": "Type", "value": "GEO station relocation"},
             ]
         ),
@@ -537,15 +633,12 @@ _METHOD_INSIGHT_BUILDERS: dict[InterceptMethod, _InsightBuilder] = {
 def _method_insights(
     result: InterceptResult, dv: float, miss: float,
 ) -> list[dict[str, Any]]:
-    """The two or three figures that matter for THIS intercept method."""
+    """The two or three figures that matter for THIS intercept method, and the satellite that burns when one does."""
     builder = _METHOD_INSIGHT_BUILDERS.get(result.method)
-    if builder is None:
-        return (
-            [
-                {"label": _LABEL_MISS_DISTANCE, "value": _km_text(miss, 2)},
-            ]
-        )
-    return builder(result, dv, miss)
+    rows = builder(result, dv, miss) if builder else [{"label": _LABEL_MISS_DISTANCE, "value": _km_text(miss, 2)}]
+    if result.burns:
+        rows.append({"label": "Burning satellite", "value": _burner_and_other(result)[0]})
+    return rows
 
 
 # Two sentences are shared by more than one method, so they are named rather
@@ -557,23 +650,46 @@ def _method_insights(
 def _lambert_summary(
     result: InterceptResult, dv: float, miss: float, tof_label: str, _arrival: str,
 ) -> str:
+    burner, other = _burner_and_other(result)
     if not math.isfinite(miss):
         return (
-            f"Lambert transfer to {result.blue_name}: {dv:.0f} m/s total \u0394V in {tof_label}; "
+            f"Lambert transfer by {burner} to {other}: {_dv_text(dv)} total \u0394V in {tof_label}; "
             f"its closest approach was {NOT_COMPUTED_TEXT}."
         )
     return (
-        f"Lambert transfer achieves {miss:.1f} km close approach to {result.blue_name} "
-        f"with {dv:.0f} m/s total \u0394V in {tof_label}."
+        f"Lambert transfer by {burner} achieves {miss:.1f} km close approach to {other} "
+        f"with {_dv_text(dv)} total \u0394V in {tof_label}."
     )
 
 
 def _hohmann_summary(
     result: InterceptResult, dv: float, _miss: float, _tof_label: str, arrival: str,
 ) -> str:
+    burner, other = _burner_and_other(result)
+    kind = "Bi-elliptic" if result.method is InterceptMethod.BIELLIPTIC else "Hohmann"
     return (
-        f"Hohmann transfer to {result.blue_name} requires {dv:.0f} m/s across "
+        f"{kind} transfer by {burner} to {other} requires {_dv_text(dv)} across "
         f"{len(result.burns)} burn(s), arriving {arrival}."
+    )
+
+
+def _defence_summary(
+    result: InterceptResult, dv: float, miss: float, _tof_label: str, arrival: str,
+) -> str:
+    """COLA, Evasion and Formation: the satellite that burns, and the closest approach its burn leaves.
+
+    COLA and Formation reported the miss they were asked for; it is now measured by flying the burn (audit 2-9, 3-6)
+    and searching for the closest approach near the assumed TCA, which the burn moves (0.47.0 review, B2).
+    """
+    burner, other = _burner_and_other(result)
+    kind = {InterceptMethod.COLA: "COLA", InterceptMethod.EVASION: "Evasion"}.get(result.method, "Formation defence")
+    lead = f"{kind} burn by {burner} ({_dv_text(dv)} \u0394V)"
+    tca = f"{arrival} ({_defence_tca(result)})"
+    if result.edge_floor_km is not None:
+        return f"{lead}: {_no_encounter(result, tca)}."
+    return (
+        f"{lead}: closest approach to {other} after the burn {_miss_words(miss)}, searched within "
+        f"\u00b1{_window_text(result.search_window_s)} of the assumed TCA, {tca}."
     )
 
 
@@ -587,20 +703,20 @@ _SummaryBuilder = Callable[[InterceptResult, float, float, str, str], str]
 _METHOD_SUMMARY_BUILDERS: dict[InterceptMethod, _SummaryBuilder] = {
     InterceptMethod.RBAR_HOP:
         lambda result, dv, miss, tof_label, arrival: (
-            f"R-Bar hop: {_comes_within(result, miss)} using {dv:.0f} m/s \u0394V in {tof_label}."
+            f"R-Bar hop: {_comes_within(result, miss)} using {_dv_text(dv)} \u0394V in {tof_label}."
         ),
     InterceptMethod.VBAR_HOP:
         lambda result, dv, miss, tof_label, arrival: (
             f"V-Bar hop sequence along V-bar: {_comes_within(result, miss)} "
             f"via {len(result.burns)} burns "
-            f"({dv:.0f} m/s total \u0394V, {tof_label} TOF). "
+            f"({_dv_text(dv)} total \u0394V, {tof_label} TOF). "
             f"Low observability — each hop mimics natural drift."
         ),
     InterceptMethod.HBAR_HOP:
         lambda result, dv, miss, tof_label, arrival: (
             f"H-Bar hop sequence in orbit-normal: {_comes_within(result, miss)} "
             f"via {len(result.burns)} normal burns "
-            f"({dv:.0f} m/s total \u0394V, {tof_label} TOF). "
+            f"({_dv_text(dv)} total \u0394V, {tof_label} TOF). "
             f"Low observability — consistent with ACS activity."
         ),
     InterceptMethod.LAMBERT:    _lambert_summary,
@@ -610,28 +726,21 @@ _METHOD_SUMMARY_BUILDERS: dict[InterceptMethod, _SummaryBuilder] = {
     InterceptMethod.BIELLIPTIC: _hohmann_summary,
     InterceptMethod.INTENT_PREDICT:
         lambda result, dv, miss, tof_label, arrival: (
-            f"Intent indicator score {int(miss)}/100 against {result.blue_name}: a weighted "
-            f"score of uncalibrated indicators, not a calibrated estimate."
+            "Intent indicator score {}/100 for {} against {}: a weighted score of uncalibrated indicators, "
+            "not a calibrated estimate.".format(int(miss), *_chaser_and_target(result))
         ),
     InterceptMethod.DETECTABILITY:
         lambda result, dv, miss, tof_label, arrival: (
-            f"Detectability assessment scores {int(miss)}/100 observability (heuristic) for "
-            f"{result.red_name} manoeuvre against {result.blue_name}."
+            "Detectability assessment scores {}/100 observability (heuristic) for {} manoeuvre against {}.".format(
+                int(miss), *_chaser_and_target(result))
         ),
-    InterceptMethod.COLA:
-        lambda result, dv, miss, tof_label, arrival: (
-            f"COLA manoeuvre achieves {miss:.1f} km miss distance with "
-            f"{dv:.0f} m/s \u0394V, arriving {arrival}."
-        ),
-    InterceptMethod.EVASION:
-        lambda result, dv, miss, tof_label, arrival: (
-            f"Evasion manoeuvre places {result.red_name} {miss:.1f} km from threat "
-            f"using {dv:.0f} m/s \u0394V."
-        ),
+    InterceptMethod.COLA: _defence_summary,
+    InterceptMethod.EVASION: _defence_summary,
+    InterceptMethod.FORMATION: _defence_summary,
     InterceptMethod.MIN_TIME:
         lambda result, dv, miss, tof_label, arrival: (
-            f"Minimum-time intercept of {result.blue_name} achieved in {tof_label} "
-            f"with {dv:.0f} m/s \u0394V."
+            "Minimum-time intercept by {} of {} achieved in {} with {} \u0394V.".format(
+                *_burner_and_other(result), tof_label, _dv_text(dv))
         ),
 }
 
@@ -643,12 +752,47 @@ def _summary_text(
     """One sentence describing what this intercept would do."""
     arrival = result.arrival_epoch.strftime("%Y-%m-%d %H:%M UTC")
     builder = _METHOD_SUMMARY_BUILDERS.get(result.method)
-    if builder is None:
-        return (
-            f"{intent_label} for {result.red_name} \u2192 {result.blue_name}: "
-            f"{dv:.0f} m/s \u0394V, arriving {arrival}."
-        )
-    return builder(result, dv, miss, tof_label, arrival)
+    if builder is not None:
+        return builder(result, dv, miss, tof_label, arrival)
+    burner, other = _burner_and_other(result)
+    if result.burns:
+        return f"{intent_label}: {burner} burns {_dv_text(dv)} \u0394V against {other}, arriving {arrival}."
+    return f"{intent_label} for {burner} \u2192 {other}: {_dv_text(dv)} \u0394V, arriving {arrival}."
+
+
+def _classify(
+    method: InterceptMethod, dv: float, regime: str,
+) -> tuple[str, str, str, str, Posture | None]:
+    """A row's type, threat level, colour and background, and the posture it was banded on (None for none)."""
+    if method in _ASSESSMENT_METHODS:
+        return "ASSESSMENT", "ASSESSMENT", "#6b7280", "rgba(107,114,128,0.04)", None
+    if method in _DEFENSIVE_METHODS:
+        return "DEFENSIVE", "LOW", "#22c55e", "rgba(34,197,94,0.04)", None
+    manoeuvre_type = "OFFENSIVE" if method in _OFFENSIVE_METHODS else "REPOSITIONING"
+    # Banded on posture, not on a bare delta-v figure. These thresholds
+    # were 2.0, 0.5 and 0.1 km/s; against m/s values every intercept above
+    # 2 m/s would read CRITICAL. Posture also asks the better question:
+    # what does this cost say about how the actor would have to behave?
+    posture = classify_posture(dv, regime, kind_for_method(method.value)).posture
+    level, color, bg = _POSTURE_PRESENTATION[posture]
+    return manoeuvre_type, level, color, bg, posture
+
+
+#: Our own approach's type, when Blue manoeuvres: not an offensive, which is the adversary's word (S2).
+_OWN_TYPES: dict[str, str] = {"OFFENSIVE": "OWN APPROACH", "REPOSITIONING": "OWN REPOSITIONING"}
+
+
+def _as_presented(
+    result: InterceptResult, threat_level: str, manoeuvre_type: str, posture: Posture | None,
+) -> tuple[str, str]:
+    """The level the badge reads and the type, as the operator reads them.
+
+    A plan for our own satellite (Blue manoeuvring) is not a threat: its badge reads the posture its cost implies,
+    how an observer would read the burn, and its type is our own approach or repositioning (0.47.0 review, S2).
+    """
+    if result.chaser_side != BLUE or posture is None:
+        return threat_level, manoeuvre_type
+    return posture.value.replace("_", " "), _OWN_TYPES.get(manoeuvre_type, manoeuvre_type)
 
 
 def _compute_intercept_intel(
@@ -668,28 +812,8 @@ def _compute_intercept_intel(
     miss = result.score if result.score is not None else result.intercept_range_km
 
     # ── Threat classification ────────────────────────────────────────────────
-    if method in _ASSESSMENT_METHODS:
-        manoeuvre_type = "ASSESSMENT"
-        threat_level = "ASSESSMENT"
-        threat_color = "#6b7280"
-        threat_bg = "rgba(107,114,128,0.04)"
-    elif method in _DEFENSIVE_METHODS:
-        manoeuvre_type = "DEFENSIVE"
-        threat_level = "LOW"
-        threat_color = "#22c55e"
-        threat_bg = "rgba(34,197,94,0.04)"
-    else:
-        manoeuvre_type = (
-            "OFFENSIVE" if method in _OFFENSIVE_METHODS else "REPOSITIONING"
-        )
-        # Banded on posture, not on a bare delta-v figure. These thresholds
-        # were 2.0, 0.5 and 0.1 km/s; against m/s values every intercept above
-        # 2 m/s would read CRITICAL. Posture also asks the better question:
-        # what does this cost say about how the actor would have to behave?
-        posture = classify_posture(dv, regime, kind_for_method(method.value))
-        threat_level, threat_color, threat_bg = _POSTURE_PRESENTATION[
-            posture.posture
-        ]
+    manoeuvre_type, threat_level, threat_color, threat_bg, posture = _classify(method, dv, regime)
+    level_label, manoeuvre_type = _as_presented(result, threat_level, manoeuvre_type, posture)
 
     # ── Operational intent ───────────────────────────────────────────────────
     intent_label = INTENT_LABELS.get(method, "Intercept Calculation")
@@ -721,6 +845,11 @@ def _compute_intercept_intel(
         "threat_level": threat_level,
         "threat_color": threat_color,
         "threat_bg": threat_bg,
+        # What the badge reads: the threat level, or for our own plan its posture (0.47.0 review, S2).
+        "level_label": level_label,
+        # The satellite that burns and the other one: the geometry view flies the burn on the first (review).
+        "burner": _burner_and_other(result)[0],
+        "other": _burner_and_other(result)[1],
         "intent_label": intent_label,
         "dv_class": dv_class,
         "tof_hours": round(tof_hours, 3),
@@ -878,7 +1007,7 @@ async def apply_intercept(
 
     # Re-fetch TLEs if a per-panel data mode override was requested.
     red_tle, blue_tle, effective_dm, elset_notes = await _resolve_provenance(
-        red_tle, blue_tle, form.intercept_data_mode, state,
+        red_tle, blue_tle, form.intercept_data_mode, state, (red_sat.strip(), blue_sat.strip()),
     )
 
     # Regime compatibility check — block cross-belt intercepts.
@@ -1133,9 +1262,9 @@ _TYPED = "Typed coast"
 
 #: The element-set error band beside a flown closest approach (SPC-202's model, SPC-234).
 _ELSET_BAND_NOTE = (
-    "element-set error {sigma:.1f} km (1 sigma), {low:.1f} to {high:.1f} km: red's {red:.1f} km and blue's "
+    "element-set error {sigma:.1f} km (1 sigma), {low:.1f} to {high:.1f} km: {chaser}'s {red:.1f} km and {target}'s "
     "{blue:.1f} km along track at the closest approach, in quadrature; the sweep's rule of thumb, tuned, not sourced: "
-    "red's {red_rate}, blue's {blue_rate}"
+    "{chaser}'s {red_rate}, {target}'s {blue_rate}"
 )
 
 
@@ -1153,6 +1282,10 @@ class _Outcome:
     result: InterceptResult | None
     error: str | None
     targeted: targeting.Targeted | None = None
+    #: The word the row reads in place of FAILED when the method has no plan to give for a stated reason: NOT
+    #: REACHABLE (J2 drift's cap, audit 3-18), NOT APPLICABLE or ALIGNED (J2 drift between near-equatorial or
+    #: already-aligned planes, review S2). Empty for a failure.
+    verdict: str = ""
 
 
 class _Plan(NamedTuple):
@@ -1252,15 +1385,19 @@ def _run_all_methods(
     red_name: str,
     blue_name: str,
     plan: _Plan,
+    chaser_side: str = RED,
 ) -> list[_Outcome]:
     """Run every method of the batch, keeping each one's failure beside it.
 
     A red approach is searched and flown (see ``_target``); every other method is solved once with the panel's
     values, as before. A closure would have carried the route's nesting into its own branching and charged the route
     for it, which is how the batch came to be reported by the Code Quality gate in the first place.
+
+    *args* carries the chaser's element set as its red one: blue's, when the operator chose Blue as the manoeuvring
+    satellite (*chaser_side*). *red_name* and *blue_name* always name the red and the blue satellite (audit 4-3).
     """
     out: list[_Outcome] = []
-    for method in _ALL_METHODS_SEQUENCE:
+    for method in methods_for(chaser_side):
         try:
             targeted = _target(method, args, plan) if method in _SEARCH_AXES else None
             sol = targeted.solution if targeted else _run_intercept(
@@ -1268,27 +1405,57 @@ def _run_all_methods(
                 args.start, args.coast_s, args.tof_s, args.target_km, args.max_dv_m_s,
                 shaping=args.shaping,
             )
-            result = _solution_to_result(sol, red_name, blue_name, method)
+            result = _solution_to_result(sol, red_name, blue_name, method, chaser_side=chaser_side)
             out.append(_Outcome(method, result, None, targeted))
+        except NotPlannedError as exc:
+            out.append(_Outcome(method, None, _solver_words(exc, chaser_side, blue_name), verdict=exc.verdict))
         # BLE001: any solver failure is reported per method, not raised.
         except Exception as exc:  # noqa: BLE001
-            out.append(_Outcome(method, None, str(exc)))
+            out.append(_Outcome(method, None, _solver_words(exc, chaser_side, blue_name)))
     return out
 
 
-def _batch(args: _InterceptArgs, red_name: str, blue_name: str, fastest_budget_m_s: float) -> list[_Outcome]:
-    """The whole batch, as the executor runs it: the red satellite's burn points, then every method."""
-    return _run_all_methods(args, red_name, blue_name, _batch_plan(args, fastest_budget_m_s))
+#: The assessments that read an adversary's behaviour: a manoeuvre's fingerprint against hostile archetypes, the
+#: classification of an observed manoeuvre and the intent indicators of an approach. Planned for our own satellite
+#: they would score our intent, so they are left out when Blue manoeuvres (0.47.0 review, S2).
+ADVERSARY_ASSESSMENTS = frozenset({
+    InterceptMethod.FINGERPRINT, InterceptMethod.MANOEUVRE_DETECT, InterceptMethod.INTENT_PREDICT,
+})
+
+
+def methods_for(chaser_side: str) -> list[InterceptMethod]:
+    """The methods a batch runs: all twenty-three for red, all but the adversary assessments for blue."""
+    if chaser_side == BLUE:
+        return [m for m in _ALL_METHODS_SEQUENCE if m not in ADVERSARY_ASSESSMENTS]
+    return list(_ALL_METHODS_SEQUENCE)
+
+
+def _solver_words(exc: Exception, chaser_side: str, blue_name: str) -> str:
+    """A solver's refusal, which calls the chaser "red": the chaser named first when it was blue (audit 4-3), briefly,
+    so the row's truncated text keeps the refusal itself."""
+    if chaser_side == BLUE:
+        return f"(chaser: {blue_name}) {exc}"
+    return str(exc)
+
+
+def _batch(
+    args: _InterceptArgs, red_name: str, blue_name: str, fastest_budget_m_s: float, chaser_side: str = RED,
+) -> list[_Outcome]:
+    """The whole batch, as the executor runs it: the chaser's burn points, then every method."""
+    return _run_all_methods(args, red_name, blue_name, _batch_plan(args, fastest_budget_m_s), chaser_side)
 
 
 def _duration(seconds: float | None) -> str:
     return format_tof_label(seconds / _SECONDS_PER_HOUR) if seconds is not None else ""
 
 
-def _elset_band(red_tle: str, blue_tle: str, at: datetime | None, miss_km: float) -> dict[str, Any] | None:
+def _elset_band(
+    red_tle: str, blue_tle: str, at: datetime | None, miss_km: float, names: tuple[str, str] = ("red", "blue"),
+) -> dict[str, Any] | None:
     """Both element sets' 1-sigma along-track error at the closest approach, as the band beside the miss (SPC-202).
 
-    None when the miss was not computed or either set's epoch does not read.
+    *red_tle* is the chaser's and *blue_tle* the target's; *names* names them in the note. None when the miss was not
+    computed or either set's epoch does not read.
     """
     epochs = [tle_epoch(next((ln for ln in t.splitlines() if ln.startswith("1 ")), "")) for t in (red_tle, blue_tle)]
     red_epoch, blue_epoch = epochs
@@ -1301,12 +1468,17 @@ def _elset_band(red_tle: str, blue_tle: str, at: datetime | None, miss_km: float
     return {
         "sigma_km": sigma, "low_km": low, "high_km": high, "red_km": red_km, "blue_km": blue_km,
         "note": _ELSET_BAND_NOTE.format(sigma=sigma, low=low, high=high, red=red_km, blue=blue_km,
+                                        chaser=names[0], target=names[1],
                                         red_rate=error_rate_words(red_tle), blue_rate=error_rate_words(blue_tle)),
     }
 
 
 class _Assessing(NamedTuple):
-    """What each row is judged against."""
+    """What each row is judged against.
+
+    The red_ fields are the chaser's and blue_tle the target's: red's, unless the operator chose Blue as the
+    manoeuvring satellite, when they are blue's and red's (audit 4-3).
+    """
 
     red_regime: str
     budget_m_s: float
@@ -1315,6 +1487,7 @@ class _Assessing(NamedTuple):
     evidence: Evidence
     red_tle: str
     blue_tle: str
+    target_name: str = "blue"
 
 
 def _targeting_view(method: InterceptMethod, t: targeting.Targeted, judged: _Assessing) -> dict[str, Any]:
@@ -1334,7 +1507,8 @@ def _targeting_view(method: InterceptMethod, t: targeting.Targeted, judged: _Ass
         "closest_after": _duration(after),
         "approach": t.approach,
         "already_within": t.already_within,
-        "band": _elset_band(judged.red_tle, judged.blue_tle, t.closest_at, t.closest_km),
+        "band": _elset_band(judged.red_tle, judged.blue_tle, t.closest_at, t.closest_km,
+                            (judged.red_name, judged.target_name)),
         "tried": t.tried,
         "refused": t.refused,
     }
@@ -1353,9 +1527,12 @@ def _items_from_solutions(raw: list[_Outcome], judged: _Assessing) -> list[dict[
         item: dict[str, Any] = {
             "method": o.method, "result": o.result, "error": o.error, "intel": None,
             "group": _group_of(o.method), "targeting": None, "realism": None, "counts": False,
+            "verdict": o.verdict, "miss": None, "burner": None,
         }
         if o.result is not None:
             item["intel"] = _compute_intercept_intel(o.result, judged.red_regime, judged.budget_m_s)
+            item["miss"] = _miss_cell(o.result)
+            item["burner"] = _burner_and_other(o.result)[0] if o.result.burns else None
         if o.result is not None and o.targeted is not None:
             band = realism.assess(o.result.total_delta_v_m_s, judged.red_satno, judged.red_name, judged.evidence)
             item["targeting"] = _targeting_view(o.method, o.targeted, judged)
@@ -1363,6 +1540,31 @@ def _items_from_solutions(raw: list[_Outcome], judged: _Assessing) -> list[dict[
             item["counts"] = o.targeted.approach and not band.discounted
         items.append(item)
     return items
+
+
+#: The ranked table's Miss Dist column, so an operator need not open a row to read it (audit 3-5).
+_MISS_SCORE_TITLE = "{kind}: a score, not a distance; open the row for it"
+_MISS_APPROACH_TITLE = "Closest approach, flown from the plan's burns"
+_MISS_DEFENCE_TITLE = "Closest approach after the burn, searched within \u00b1{window} of the assumed TCA ({tca})"
+
+
+def _miss_cell(result: InterceptResult) -> dict[str, Any]:
+    """The Miss Dist cell for one row: its text in km, its sort value, and what the figure is.
+
+    An assessment's score is not a distance, so it reads a dash; a miss the search could not compute reads "not
+    computed". Both sort last either way (intercepts.js). GEO drift carries a score, its longitude gap, but in the
+    batch it is a flown approach, so its closest approach is shown.
+    """
+    if result.score is not None and result.method not in _SEARCH_AXES:
+        return {"text": "\u2014", "sort": "", "title": _MISS_SCORE_TITLE.format(kind=result.score_kind or "Score")}
+    miss = result.intercept_range_km
+    if result.edge_floor_km is not None:
+        # Not a closest approach: a floor at the window's edge, which sorts with the figures not computed (S1).
+        return {"text": f"\u2265{_miss_figure(result.edge_floor_km)}", "sort": "", "title": _no_encounter(result)}
+    title = _MISS_APPROACH_TITLE
+    if result.method in _DEFENCE_METHODS:
+        title = _MISS_DEFENCE_TITLE.format(window=_window_text(result.search_window_s), tca=_defence_tca(result))
+    return {"text": _miss_figure(miss), "sort": miss if math.isfinite(miss) else "", "title": title}
 
 
 def _sort_key(item: dict[str, Any]) -> tuple[int, int, int, float]:
@@ -1374,11 +1576,13 @@ def _sort_key(item: dict[str, Any]) -> tuple[int, int, int, float]:
     """
     if item["result"] is None:
         return (99, 0, 0, 0.0)
-    level = item["intel"]["threat_level"]
+    # Our own plans are ranked by cost alone: their posture is how they would read, not a threat (0.47.0 review, S2).
+    own = item["result"].chaser_side == BLUE
+    level = 0 if own else _THREAT_SORT_ORDER.get(item["intel"]["threat_level"], 5)
     return (
         _GROUP_ORDER[item["group"]],
         0 if item["counts"] else 1,
-        _THREAT_SORT_ORDER.get(level, 5),
+        level,
         item["result"].total_delta_v_m_s,
     )
 
@@ -1405,6 +1609,7 @@ async def apply_all_intercepts(
     target_distance_m: Annotated[float, Form(ge=0.0, le=_MAX_STANDOFF_M, allow_inf_nan=False)] = 0.0,
     max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0, allow_inf_nan=False)] = ENGINE_DEFAULT_BUDGET_M_S,
     intercept_data_mode: Annotated[str, Form()] = "",
+    manoeuvring: Annotated[Literal["red", "blue"], Form()] = RED,
     current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Run all intercept methods and return a ranked comparison table.
@@ -1416,6 +1621,10 @@ async def apply_all_intercepts(
     target (or solved with the typed values), flown to measure its closest
     approach, and banded against what NOTSOs record satellites spending on
     station (SPC-234).
+
+    *manoeuvring* names the satellite planned as the chaser: red by default,
+    as always; blue plans every method with the two roles swapped, and every
+    row names the satellite that burns (audit 4-3, 2-11).
     """
     state = get_session_state(current_user)
 
@@ -1440,7 +1649,7 @@ async def apply_all_intercepts(
 
     # Re-fetch TLEs if a per-panel data mode override was requested.
     red_tle, blue_tle, effective_dm, elset_notes = await _resolve_provenance(
-        red_tle, blue_tle, intercept_data_mode, state,
+        red_tle, blue_tle, intercept_data_mode, state, (red_sat.strip(), blue_sat.strip()),
     )
 
     # Regime compatibility check — block cross-belt intercepts.
@@ -1471,19 +1680,22 @@ async def apply_all_intercepts(
     tof_s = intercept_hours * 3600.0
     target_km = target_distance_m / 1000.0
 
+    sides = _sides(manoeuvring, _Side(red_sat.strip(), red_tle, red_regime), _Side(blue_sat.strip(), blue_tle,
+                                                                                    blue_regime))
     args = _InterceptArgs(
-        red_tle, blue_tle, manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s, shaping,
+        sides.chaser.tle, sides.target.tle, manoeuvre_start_dt, coast_s, tof_s, target_km, max_dv_m_s, shaping,
     )
     evidence = current_evidence()
-    red_satno = str(satno_from_tle(red_tle) or "") or None
-    fastest = realism.realistic_budget_m_s(red_satno, evidence)
+    chaser_satno = str(satno_from_tle(sides.chaser.tle) or "") or None
+    fastest = realism.realistic_budget_m_s(chaser_satno, evidence)
 
     loop = asyncio.get_running_loop()
     raw = await loop.run_in_executor(
-        None, lambda: _batch(args, red_sat.strip(), blue_sat.strip(), fastest[0])
+        None, lambda: _batch(args, red_sat.strip(), blue_sat.strip(), fastest[0], manoeuvring)
     )
 
-    judged = _Assessing(red_regime, max_dv_m_s, red_satno, red_sat.strip(), evidence, red_tle, blue_tle)
+    judged = _Assessing(sides.chaser.regime, max_dv_m_s, chaser_satno, sides.chaser.name, evidence,
+                        sides.chaser.tle, sides.target.tle, sides.target.name)
     items = _items_from_solutions(raw, judged)
     items.sort(key=_sort_key)
 
@@ -1496,13 +1708,13 @@ async def apply_all_intercepts(
 
     n_ok = sum(1 for i in items if i["result"])
     state.append_log(
-        f"[INTERCEPT] All-methods batch: {red_sat.strip()} → {blue_sat.strip()}, "
-        f"{n_ok}/{len(_ALL_METHODS_SEQUENCE)} methods succeeded"
+        f"[INTERCEPT] All-methods batch: {sides.chaser.name} manoeuvring against {sides.target.name}, "
+        f"{n_ok}/{len(items)} methods succeeded"
     )
     logger.info(
         "apply_all_intercepts: %s → %s, %s/%s ok, by %s",
         log_safe(red_sat.strip()), log_safe(blue_sat.strip()),
-        log_safe(n_ok), log_safe(len(_ALL_METHODS_SEQUENCE)), log_safe(current_user.username),
+        log_safe(n_ok), log_safe(len(items)), log_safe(current_user.username),
     )
 
     return render(request, _ALL_INTERCEPTS_TEMPLATE, {
@@ -1518,7 +1730,33 @@ async def apply_all_intercepts(
         "evidence": evidence.fleet,
         "approach_km": approach_radius_km(target_km),
         "fastest_budget": fastest,
+        "chaser_side": manoeuvring,
+        "chaser_name": sides.chaser.name,
+        "target_name": sides.target.name,
+        "defence_window": DEFENCE_WINDOW_TEXT,
+        "left_out": sorted(m.value for m in set(_ALL_METHODS_SEQUENCE) - set(methods_for(manoeuvring))),
     })
+
+
+class _Side(NamedTuple):
+    """One satellite of the pair: its name, element set and regime."""
+
+    name: str
+    tle: str
+    regime: str
+
+
+class _Sides(NamedTuple):
+    """The satellite the engine plans as manoeuvring, and the one it plans against."""
+
+    chaser: _Side
+    target: _Side
+
+
+def _sides(manoeuvring: str, red: _Side, blue: _Side) -> _Sides:
+    """Red chases blue unless the operator chose Blue as the manoeuvring satellite: then the roles are swapped, and
+    every method is planned with blue's element set as the chaser's (audit 4-3, 2-11)."""
+    return _Sides(blue, red) if manoeuvring == BLUE else _Sides(red, blue)
 
 
 @router.get("/trade-space-data", response_model=None)
@@ -1537,7 +1775,7 @@ async def trade_space_data(
             "method": r.method.value,
             "delta_v": round(r.total_delta_v_m_s, 1),  # m/s
             "transfer_time_min": round(transfer_s / 60.0, 2),
-            "label": f"{r.method.value}: {r.red_name}→{r.blue_name}",
+            "label": "{}: {}→{}".format(r.method.value, *_burner_and_other(r)),
         }
         # An assessment method carries a score, not a distance; emitted as
         # miss_km, a score of 73 was plotted as a 73 km miss (F-131, F-072).
@@ -1583,12 +1821,32 @@ class _Fetched(NamedTuple):
     passed_over: str = ""
 
 
-def _held_mode(state: object, tle: str) -> str:
+#: The selected object a set belongs to: its side, "red" or "blue", and its name. None for a set no object names.
+_Owner = tuple[str, str] | None
+
+
+def _owners(names: tuple[str, str]) -> tuple[_Owner, _Owner]:
+    """The red and the blue object the operator selected, by name, None for a side not named."""
+    red, blue = names
+    return (RED, red) if red else None, (BLUE, blue) if blue else None
+
+
+def _held_mode(state: object, tle: str, owner: _Owner = None) -> str:
     """The known mode of a set already held, or UNVERIFIED when none is recorded.
 
-    A mode is known only for the very set the HRR cache holds; an operator's
-    pasted set for the same object has no recorded provenance.
+    The object the operator selected (*owner*: its side and name) carries its own mode when it holds this very set:
+    SYNTHETIC for a training object, MANUAL for one entered by hand, the UDL mode for one fetched. Only the HRR cache
+    was read, so a training scenario's SYNTHETIC objects read UNVERIFIED (audit 2-14). The selected object is found by
+    side and name, never by matching the set's text anywhere, which read another object's mode when a blue copy held
+    the same text (0.47.0 review, S3). Otherwise a mode is known only for the very set the HRR cache holds; an
+    operator's pasted set for the same object has no recorded provenance.
     """
+    if owner is not None:
+        side, name = owner
+        held = getattr(state, "red_tracks" if side == RED else "blue_assets", [])
+        own = next((obj.data_mode for obj in held if obj.stk_name == name and obj.tle == tle and obj.data_mode), None)
+        if own is not None:
+            return str(own)
     satno = satno_from_tle(tle)
     key = str(satno) if satno is not None else ""
     if not key or state.hrr_tle_cache.get(key) != tle:  # type: ignore[attr-defined]
@@ -1601,22 +1859,26 @@ async def _refetch_tles(
     blue_tle: str,
     data_mode: str,
     state: object,
+    names: tuple[str, str] = ("", ""),
 ) -> tuple[_Fetched, _Fetched]:
     """Re-fetch the red and blue TLEs from UDL using *data_mode*.
 
     Keeps the supplied originals when UDL credentials are absent, the SATNO
     cannot be extracted from the TLE, or the fetch fails, and then reports
-    the mode the original is known to have rather than the one requested.
+    the mode the original is known to have rather than the one requested:
+    the selected objects' own, named in *names* (red, blue).
     """
+    red_owner, blue_owner = _owners(names)
     if not state.udl_username or not state.udl_password:  # type: ignore[attr-defined]
-        return _Fetched(red_tle, _held_mode(state, red_tle)), _Fetched(blue_tle, _held_mode(state, blue_tle))
+        return (_Fetched(red_tle, _held_mode(state, red_tle, red_owner)),
+                _Fetched(blue_tle, _held_mode(state, blue_tle, blue_owner)))
 
     from spectre.web.routes.udl import fetch_tle_for_satno
 
-    async def _try_fetch(tle: str) -> _Fetched:
+    async def _try_fetch(tle: str, owner: _Owner) -> _Fetched:
         satno = satno_from_tle(tle)
         if satno is None:
-            return _Fetched(tle, _held_mode(state, tle))
+            return _Fetched(tle, _held_mode(state, tle, owner))
         result = await fetch_tle_for_satno(
             satno,
             state.udl_username,  # type: ignore[attr-defined]
@@ -1625,12 +1887,12 @@ async def _refetch_tles(
             source=getattr(state, "udl_tle_source", ""),
         )
         if isinstance(result, RefusedElset):
-            return _Fetched(tle, _held_mode(state, tle), result.sentence(f"SATNO {satno}", outcome=HELD_KEPT))
+            return _Fetched(tle, _held_mode(state, tle, owner), result.sentence(f"SATNO {satno}", outcome=HELD_KEPT))
         if not result:
-            return _Fetched(tle, _held_mode(state, tle))
+            return _Fetched(tle, _held_mode(state, tle, owner))
         return _Fetched(result.tle, result.data_mode, passed_over=result.passed_over_note(f"SATNO {satno}"))
 
-    new_red, new_blue = await asyncio.gather(_try_fetch(red_tle), _try_fetch(blue_tle))
+    new_red, new_blue = await asyncio.gather(_try_fetch(red_tle, red_owner), _try_fetch(blue_tle, blue_owner))
     return new_red, new_blue
 
 
@@ -1654,18 +1916,21 @@ class _Provenance(NamedTuple):
 
 
 async def _resolve_provenance(
-    red_tle: str, blue_tle: str, requested: str, state: object,
+    red_tle: str, blue_tle: str, requested: str, state: object, names: tuple[str, str] = ("", ""),
 ) -> _Provenance:
     """The element sets to fly and the badge naming their actual provenance.
 
     The badge used to show the requested mode, defaulting to REAL, even when
     nothing was fetched and the sets were the operator's own (audit F-133).
+    *names* are the selected red and blue objects, whose own mode is read.
     """
     mode = requested.strip().upper()
     if mode in _UDL_DATA_MODES:
-        red, blue = await _refetch_tles(red_tle, blue_tle, mode, state)
+        red, blue = await _refetch_tles(red_tle, blue_tle, mode, state, names)
     else:
-        red, blue = _Fetched(red_tle, _held_mode(state, red_tle)), _Fetched(blue_tle, _held_mode(state, blue_tle))
+        red_owner, blue_owner = _owners(names)
+        red = _Fetched(red_tle, _held_mode(state, red_tle, red_owner))
+        blue = _Fetched(blue_tle, _held_mode(state, blue_tle, blue_owner))
     label = _with_refusals(red.mode if red.mode == blue.mode else f"red {red.mode}, blue {blue.mode}", red, blue)
     if mode and mode not in _UDL_DATA_MODES:
         # Never sent to UDL (SPC-025), and said, so the held sets are not
@@ -1916,12 +2181,15 @@ def _solution_to_result(
     red_name: str,
     blue_name: str,
     method: InterceptMethod,
+    *,
+    chaser_side: str = RED,
 ) -> InterceptResult:
     """Convert an astro InterceptSolution to a domain InterceptResult.
 
     THIS IS THE UNIT BOUNDARY for the intercept engine. The astro layer works
     in km/s; everything from the domain layer outwards is m/s. ``from_km_s`` is
-    applied here and nowhere downstream.
+    applied here and nowhere downstream. *chaser_side* is the side *sol* was
+    planned for as the chaser (audit 4-3).
     """
     burns = [
         BurnResult(
@@ -1947,6 +2215,9 @@ def _solution_to_result(
         score=sol.score,
         score_kind=sol.score_kind,
         provenance=sol.provenance,
+        chaser_side=chaser_side,
+        search_window_s=sol.search_window_s,
+        edge_floor_km=sol.edge_floor_km,
     )
 
 

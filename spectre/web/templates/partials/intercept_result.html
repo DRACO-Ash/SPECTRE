@@ -229,8 +229,10 @@ Observability:{{ intel.obs_level }}
       hx-swap="innerHTML"
       hx-indicator="#geom-indicator"
       style="margin-bottom:0.5rem">
-  <input type="hidden" name="red_sat"       value="{{ result.red_name }}">
-  <input type="hidden" name="blue_sat"      value="{{ result.blue_name }}">
+  {#- The view flies the burn on the satellite posted as red_sat, so the one that burns goes there: Evasion and
+      Formation burn the target, and it was drawn on the chaser (0.47.0 review). -#}
+  <input type="hidden" name="red_sat"       value="{{ intel.burner if intel and intel.burner else result.red_name }}">
+  <input type="hidden" name="blue_sat"      value="{{ intel.other if intel and intel.other else result.blue_name }}">
   <input type="hidden" name="burn_epoch_str" value="{{ b0.burn_epoch.strftime('%Y-%m-%dT%H:%M:%S') }}">
   <input type="hidden" name="dv_prograde"   value="{{ b0.dv_prograde }}">
   <input type="hidden" name="dv_normal"     value="{{ b0.dv_normal }}">

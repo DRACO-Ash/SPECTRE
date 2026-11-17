@@ -632,6 +632,21 @@ details[open] > summary span:first-child { display: inline-block; transform: rot
 .asset-item:last-child { border-bottom: none; }
 .asset-item:hover { background: var(--ops-blue-a06); }
 .asset-name { color: var(--text); font-weight: 500; }
+/* The element card behind each listed object (training audit 2026-11-16, finding 2-1): a <details>, so it opens with no script. */
+.asset-item:has(> .elset-card[open]) { align-items: flex-start; }
+.elset-card { flex: 1; min-width: 0; }
+.elset-card > summary { cursor: pointer; }
+.elset-toggle { font-size: 0.6rem; color: var(--text-dim); }
+.elset-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.1rem 0.6rem;
+  margin: 0.3rem 0 0.1rem 0.9rem;
+  font-size: 0.7rem;
+}
+.elset-grid dt { color: var(--text-dim); }
+.elset-grid dd { margin: 0; overflow-wrap: anywhere; }
+.elset-card-note, .elset-unread { display: block; font-size: 0.66rem; margin: 0.1rem 0 0 0.9rem; }
 
 /* ── Forms ───────────────────────────────────────────────────── */
 .asset-form, .run-form {

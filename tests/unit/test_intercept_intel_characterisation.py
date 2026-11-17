@@ -150,6 +150,9 @@ class TestTheShapeOfTheWholePayload:
         "dv_budget_m_s",
         "burn_intel", "obs_level", "obs_color", "obs_reason", "method_insights",
         "summary",
+        # 0.47.0: what the badge reads (a threat, or our own plan's posture), and the satellite that burns and the
+        # other one, which the geometry view flies the burn on.
+        "level_label", "burner", "other",
     }
 
     @pytest.mark.parametrize("method", list(InterceptMethod))

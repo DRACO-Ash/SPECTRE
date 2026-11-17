@@ -42,7 +42,7 @@
                 letter-spacing:0.06em; margin-bottom:0.25rem">Unlocked</div>
     {% for item in newly_unlocked %}
     <div style="font-size:0.63rem; color:var(--text-dim); padding:0.1rem 0">
-      &#8227; {{ item | replace('scenario:', 'Scenario: ') | replace('tutorial:', 'Tutorial: ') | replace('challenge:', 'Challenge: ') | replace('_', ' ') | title }}
+      &#8227; {{ content_title(item) }}
     </div>
     {% endfor %}
   </div>

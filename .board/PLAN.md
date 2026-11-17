@@ -1,5 +1,8 @@
 pace 1.00 from settings (nothing measured yet)
 
+V0.48: SPC-248 training redesign part 1 (mission engine on real data, HUD, Chapters 1-2)
+V0.49: SPC-249 training redesign part 2 (Chapters 3-5, challenges, medals, intel cards, Scramble)
+
 waiting: SPC-080 - needs an owner answer
 
 waiting: SPC-033 - needs an owner answer
@@ -25,6 +28,8 @@ waiting: SPC-240 - needs an owner answer
 waiting: SPC-244 - needs an owner answer
 
 waiting: SPC-246 - needs an owner answer
+
+waiting: SPC-250 - needs an owner answer
 
 off path: SPC-072 - research: no release gate
 

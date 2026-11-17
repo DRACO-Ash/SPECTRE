@@ -32,4 +32,6 @@ def test_without_a_fetch_the_badge_does_not_read_real(client: Any, auth_cookie: 
     assert resp.status_code == 200
     flat = " ".join(resp.text.split())
     assert "Data Mode: REAL" not in flat
-    assert "Data Mode: UNVERIFIED" in flat
+    # Both sets were entered by hand, so they carry MANUAL; before 0.47.0 any set outside the HRR cache read
+    # UNVERIFIED, a training object's SYNTHETIC set among them (audit 2-14).
+    assert "Data Mode: MANUAL" in flat

@@ -10,13 +10,15 @@ from __future__ import annotations
 import csv
 import io
 
+import pytest
+
 from tests.integration.conftest import session_state
 
 # Every delta-v column carries its unit in the name. A header reading km/s over
 # a value in m/s is worse than either unit alone, because whoever opens the file
 # cannot tell which one they have.
 _EXPECTED_COLUMNS = [
-    "run_id", "method", "red_name", "blue_name", "total_dv_m_s", "arrival_utc",
+    "run_id", "method", "red_name", "blue_name", "chaser_side", "burning_satellite", "total_dv_m_s", "arrival_utc",
     "miss_km", "n_burns", "burn_num", "segment", "burn_epoch_utc", "burn_dv_m_s",
     "dv_prograde_m_s", "dv_normal_m_s", "dv_radial_m_s", "notes",
 ]
@@ -412,3 +414,37 @@ class TestRunIdCannotReachTheResponseHeader:
 
         wrapped = _attachment_disposition("spectre_x\r\nX-Injected: yes.csv")
         assert "\r" not in wrapped and "\n" not in wrapped, f"the header was split: {wrapped!r}"
+
+
+class TestTheExportSaysWhichSatelliteBurned:
+    """0.47.0 review, S1: red_name and blue_name do not say who burned, since Evasion and Formation burn the target and
+    a run can plan Blue as the manoeuvring satellite."""
+
+    @pytest.mark.parametrize(("method", "side", "burner"), [
+        ("lambert", "red", "RED-1"), ("evasion", "red", "BLUE-1"),
+        ("lambert", "blue", "BLUE-1"), ("formation", "blue", "RED-1"),
+    ])
+    def test_the_side_and_the_burner_are_written(
+        self, client: object, auth_cookie: str, method: str, side: str, burner: str,
+    ) -> None:
+        from datetime import UTC, datetime
+
+        from spectre.domain.models import BurnResult, InterceptMethod, InterceptResult
+
+        state = session_state(auth_cookie)
+        epoch = datetime(2026, 1, 1, tzinfo=UTC)
+        state.intercept_history.append(InterceptResult(
+            red_name="RED-1", blue_name="BLUE-1", method=InterceptMethod(method),
+            burns=[BurnResult(burn_number=1, segment_name="Burn 1", burn_epoch=epoch, delta_v_m_s=1.0)],
+            total_delta_v_m_s=1.0, arrival_epoch=epoch, intercept_range_km=3.2, option_id="INT_WHOBURNS",
+            chaser_side=side,
+        ))
+        try:
+            resp = client.get(  # type: ignore[attr-defined]
+                "/plan/export", params={"run_id": "INT_WHOBURNS"}, cookies={"spectre_session": auth_cookie},
+            )
+            (row,) = [r for r in _rows(resp.text) if r and r[0] == "INT_WHOBURNS"]
+            assert row[_EXPECTED_COLUMNS.index("chaser_side")] == side
+            assert row[_EXPECTED_COLUMNS.index("burning_satellite")] == burner
+        finally:
+            state.intercept_history.clear()

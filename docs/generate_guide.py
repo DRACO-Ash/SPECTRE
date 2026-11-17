@@ -1181,8 +1181,12 @@ def _section_10_intercept_calculations(doc: Document) -> None:
     _add_data_table(doc,
         ["Parameter", "Description", "Default"],
         [
-            ["Red Satellite", "Target threat track to intercept", "(select from red tracks)"],
-            ["Blue Satellite", "Friendly asset performing the manoeuvre", "(select from blue assets)"],
+            ["Red Satellite", "The threat track", "(select from red tracks)"],
+            ["Blue Satellite", "The friendly asset", "(select from blue assets)"],
+            ["Manoeuvring satellite", "Which satellite's manoeuvres are planned. Red plans the threat's approach to "
+             "your asset, as in operations. Blue plans your own satellite's move against the threat, with the two "
+             "element sets swapped; every row then says which satellite burns, the cheapest option replaces the worst "
+             "case, and the three assessments of the manoeuvring satellite's own behaviour are left out.", "Red"],
             ["Manoeuvre Start", "UTC epoch for the first burn", "Current UTC time"],
             ["Coast Hours", "Coast duration before first burn (hours)", "1.0"],
             ["Intercept Hours", "Time of flight for Lambert solver (hours)", "6.0"],
@@ -1212,6 +1216,16 @@ def _section_10_intercept_calculations(doc: Document) -> None:
                      "stay listed, dimmed, with their reason; they cannot set the worst case.")
     _add_bullet(doc, "Most likely course of action: the cheapest red approach that arrives and is Seen before or "
                      "Possible, with its burn point, ΔV and closest approach.")
+    _add_bullet(doc, "The ranked table stays in view after a run; the trade-space chart is one click away on its "
+                     "tab. A Miss Dist (km) column shows each row's figure without opening the row.")
+    _add_bullet(doc, "Defensive rows (COLA, Evasion, Formation Defence) report the closest approach after the burn, "
+                     "searched around the assumed time of closest approach and widened when the minimum sits at the "
+                     "edge of the search. When no closest approach is found the row says so and shows the least "
+                     "separation found as a floor (\u2265 X km), never as a miss distance. Each summary names the "
+                     "satellite that burns.")
+    _add_bullet(doc, "J2 drift searches for an altitude change that closes the RAAN gap within 10 years. Beyond that "
+                     "it reads NOT REACHABLE; planes already within 0.1\u00b0 read ALIGNED; two near-equatorial "
+                     "orbits, where the node means little, read NOT APPLICABLE.")
     _add_body(doc,
         "Expand a row to see the burn point, coast, time of flight, revolutions or hops the search kept, how many "
         "options it compared, the closest approach and the realism reason. When searching, minimum-time is given "
@@ -1260,9 +1274,9 @@ def _section_11_trade_space(doc: Document) -> None:
 
     _add_heading_h2(doc, "Using the Trade-Space Plot")
     _add_body(doc,
-        "Run intercept calculations with different methods and parameters. After "
-        "the second solution, the trade-space chart appears automatically below the "
-        "burn table. Hover over any point to see the method, ΔV, transfer time, and "
+        "Run intercept calculations with different methods and parameters. The chart is drawn on the "
+        "Trade-Space tab, whose badge shows how many solutions are plotted; the ranked table stays in view. "
+        "Hover over any point to see the method, ΔV, transfer time, and "
         "miss distance, or \"not computed\" where it could not be."
     )
     _add_body(doc,
@@ -1906,89 +1920,59 @@ def _section_14_training(doc: Document) -> None:
     _add_heading_h1(doc, "Training Environment")
 
     _add_body(doc,
-        "SPECTRE includes a fully sandboxed Training Environment that allows operators "
-        "to develop and maintain proficiency without touching operational data. The "
-        "training mode uses synthetic TLEs and scenario parameters entirely; no "
-        "real satellite tracking data is used or accessible within a training session."
+        "The Training Environment runs scenarios in the real console, shown inside the training page. Training "
+        "has its own planning state: the objects a scenario loads, the scenario's clock, and anything added, "
+        "fetched or connected inside the training console live only there, and are discarded when you press "
+        "Return to Operations or your sign-in ends. Your operational lists, scenario time, UDL connection and "
+        "background tasks are never read or changed by training, and a Decision Engine run in training writes "
+        "no decision record. The training console shows a TRAINING CONSOLE strip in its header."
     )
     _add_body(doc,
-        "Access the Training Environment by clicking the Training button (shown as "
-        "a lightning bolt icon) in the navigation bar. Training sessions are isolated "
-        "from the main operational workspace — any assets, results, or UDL data from "
-        "the operational session remain unaffected."
+        "Open it with the Training button in the console's header. Starting a scenario loads its objects and sets "
+        "the training console's scenario time to the scenario's epoch, so every tool works at the time the "
+        "scenario describes."
     )
 
-    _add_heading_h2(doc, "Level-Based Progression")
-    _add_body(doc,
-        "Operators progress through five levels, each unlocking more complex scenarios "
-        "and analysis tools. Advancement requires accumulating points on the relevant "
-        "skill axes and meeting specific unlock conditions:"
-    )
+    _add_heading_h2(doc, "Levels")
+    _add_body(doc, "Each level needs its points total and one further condition, both shown in the sidebar:")
     _add_data_table(doc,
-        ["Level", "Title", "Unlock Condition", "Focus Area"],
+        ["Level", "Title", "Points", "Further condition"],
         [
-            ["1", "Observer", "Default — available on first login", "Basic TLE handling, orbital events, Lambert transfers"],
-            ["2", "Analyst", "Complete the introductory tutorial", "Threat assessment, manoeuvre classification, PoL basics"],
-            ["3", "Planner", "100+ points in manoeuvre_planning axis", "Tactical manoeuvres, COLA, evasion, trade-space analysis"],
-            ["4", "Commander", "5 scenarios completed and at least 50 decision_quality points", "Decision Engine, multi-threat scenarios, formation defence"],
-            ["5", "Strategist", "3 challenge scenarios completed", "Full capability — all methods, gauntlet challenges, adversary modelling"],
+            ["1", "Cadet", "0", "None"],
+            ["2", "Observer", "100", "Complete the Orientation tutorial"],
+            ["3", "Planner", "400", "Pass 3 scenarios"],
+            ["4", "Analyst", "1,200", "300 points on the Decision Quality axis"],
+            ["5", "Operator", "3,000", "Pass 3 challenges"],
+            ["6", "Instructor", "8,000", "1,000 points on the Operational Tempo axis"],
         ],
     )
 
     _add_heading_h2(doc, "Skill Axes")
-    _add_body(doc,
-        "Points earned in training are distributed across skill axes, providing a "
-        "multi-dimensional view of operator proficiency:"
-    )
     _add_data_table(doc,
-        ["Skill Axis", "Description"],
+        ["Skill axis", "What it measures"],
         [
-            ["manoeuvre_planning", "Accuracy and efficiency of orbital transfer and manoeuvre solutions"],
-            ["threat_assessment", "Quality of threat identification, classification, and prioritisation"],
-            ["decision_quality", "Soundness of response selection in decision-engine scenarios"],
-            ["situational_awareness", "Speed and accuracy of orbital event detection and conjunction analysis"],
-            ["system_proficiency", "Breadth of SPECTRE features used correctly across a session"],
+            ["Situational Awareness", "Speed and accuracy of reading a threat scenario"],
+            ["Manoeuvre Planning", "Ability to compute effective orbital responses"],
+            ["Decision Quality", "Selecting the optimal option, not merely a valid one"],
+            ["Operational Tempo", "Working at mission-required speed"],
+            ["Efficiency", "Minimising resource expenditure (ΔV, sensor tasking)"],
         ],
     )
 
-    _add_heading_h2(doc, "Scenario Types")
-    _add_body(doc,
-        "Three scenario types are available, each testing a different operational "
-        "skill set:"
-    )
-    _add_bullet(doc,
-        "Analyst scenarios — present a threat object and a TLE history; the operator "
-        "must correctly classify the manoeuvre type, estimate the ΔV, and assess "
-        "intent. These scenarios develop threat_assessment and situational_awareness."
-    )
-    _add_bullet(doc,
-        "Planner scenarios — provide a blue asset and a threat object; the operator "
-        "must select the optimal manoeuvre method and parameterise it correctly to "
-        "meet mission objectives within a fuel budget. These develop manoeuvre_planning."
-    )
-    _add_bullet(doc,
-        "Challenge scenarios (Gauntlet) — multi-stage scenarios that combine threat "
-        "assessment, manoeuvre planning, and decision support. All tools are available; "
-        "points are awarded for optimal solutions across each stage. Gauntlets are only "
-        "accessible at Level 5."
-    )
-
-    _add_heading_h2(doc, "Points System")
-    _add_body(doc,
-        "Points are awarded per completed objective within a scenario. Objectives "
-        "have a base point value and may include a speed multiplier — completing the "
-        "objective in under half the allotted time doubles the point award. Axis "
-        "weights determine how base points are distributed across skill axes:"
-    )
-    _add_bullet(doc, "Correct manoeuvre method selection — base 50 pts, 80% manoeuvre_planning, 20% system_proficiency.")
-    _add_bullet(doc, "ΔV within 5% of optimal — base 100 pts with speed multiplier, 100% manoeuvre_planning.")
-    _add_bullet(doc, "Correct threat classification — base 75 pts, 80% threat_assessment, 20% situational_awareness.")
-    _add_bullet(doc, "Decision Engine response selection matching recommended COA: base 100 pts, 100% decision_quality.")
+    _add_heading_h2(doc, "Points")
+    _add_bullet(doc, "A passed scenario: 150 points, split 20% Situational Awareness, 30% Manoeuvre Planning, 30% "
+                     "Decision Quality and 20% Operational Tempo. A failed attempt earns nothing.")
+    _add_bullet(doc, "A passed challenge: 250 points, and 100 more on a first attempt.")
+    _add_bullet(doc, "An objective with an answer scores only when the typed answer is within its tolerance; typing "
+                     "an answer ticks the objective. A unit matching the objective's may be typed with the number, "
+                     "and an hours answer may be written as T+18h.")
+    _add_bullet(doc, "A timed scenario submitted after its limit does not pass.")
+    _add_bullet(doc, "The debrief lists every objective, met or not, with your answer. The accepted answer is shown "
+                     "for objectives you met and after a passed scored attempt, never after an Explore run.")
+    _add_bullet(doc, "Abandon and Reset cancel the attempt without counting it, so the first-try bonus is kept.")
     _add_callout(doc,
-        "Tutorial completion is a prerequisite for Level 2 unlock. The introductory "
-        "tutorial walks through adding assets, fetching TLEs from the synthetic UDL "
-        "endpoint, running a Lambert intercept, and reading the burn table. It takes "
-        "approximately 10 minutes and can be re-run at any time from the Training menu."
+        "The scenarios are being rebuilt as missions on real catalogue objects with computed answers (the training "
+        "redesign, docs/training-game-design.md). Until then they use synthetic objects, labelled SYNTHETIC."
     )
 
 

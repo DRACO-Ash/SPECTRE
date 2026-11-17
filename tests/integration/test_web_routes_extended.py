@@ -598,9 +598,10 @@ class TestTrainingFullWorkflow:
         assert resp.status_code == 200
         page = " ".join(resp.content.decode().split())
         assert "NOT PASSED" in page
-        assert "+150 training points earned" in page
+        # Points are awarded on a pass only (audit G-1, 1-20).
+        assert "No training points earned" in page
         progress = _progress(client, "f166_workflow")  # type: ignore[arg-type]
-        assert progress.total_points == 150
+        assert progress.total_points == 0
         assert progress.scenarios_passed == 0
 
     def test_complete_tutorial_twice_idempotent(self, client: object) -> None:

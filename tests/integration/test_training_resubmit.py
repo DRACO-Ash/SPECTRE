@@ -63,7 +63,7 @@ def test_a_repeated_objective_scores_once(client: object) -> None:
     cookie = _level_3_operator(client, "f158_repeat")
     debrief = _attempt(client, cookie, "planner_03_multi_constraint", ["obj_select_optimal"] * 2)
     assert re.search(r">\s*60\s*<", debrief), "scored once, 60 points"
-    assert "+150 training points earned" in debrief, "completed, not passed"
+    assert "No training points earned" in debrief, "not passed, so no award (audit G-1)"
 
 
 def test_a_free_play_pass_earns_no_challenge_award(client: object) -> None:

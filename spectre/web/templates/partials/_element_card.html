@@ -1,0 +1,41 @@
+{#- One Blue asset's or Red track's name in the Assets panel, and behind it its element card (training audit 2026-11-16,
+    finding 2-1, and X5).
+
+    Expects: label (the name shown), cards (blue_cards or red_cards, by object name, when the route made them) and
+    key (the object's name in it). A <details> opens and closes with no script, so the card works under the console's
+    Content Security Policy (SPC-199). A set that does not parse gets no card and says so. -#}
+{%- set known = cards is defined and cards is not none and key in cards -%}
+{%- set card = cards[key] if known else none -%}
+{% if card %}
+<details class="elset-card">
+  <summary class="asset-name" title="Show this object's element set"><span class="elset-toggle" aria-hidden="true">&#9654;</span> {{ label }}</summary>
+  <dl class="elset-grid">
+    <dt>Epoch</dt><dd>{{ card.epoch_text }}</dd>
+    <dt>Age</dt>
+    <dd>{% if card.age %}{% if card.age.future %}{{ card.age.label }}{% else %}{{ card.age.label }} old{% endif %}{% if card.age.stale %} <span class="badge-warn">STALE</span>{% endif %}{% else %}not read{% endif %}
+      at {% if card.at_is_scenario %}scenario time{% else %}now{% endif %} ({{ card.at_text }})</dd>
+    <dt>Data mode</dt><dd>{{ card.data_mode }}</dd>
+    <dt title="Semi-major axis, from the set's mean motion">Semi-major axis</dt><dd>{{ "%.1f" | format(card.a_km) }} km</dd>
+    <dt>Eccentricity</dt><dd>{{ "%.7f" | format(card.ecc) }}</dd>
+    <dt>Inclination</dt><dd>{{ "%.2f" | format(card.inc_deg) }}&deg;</dd>
+    <dt title="Right ascension of the ascending node">RAAN</dt><dd>{{ "%.2f" | format(card.raan_deg) }}&deg;</dd>
+    <dt>Arg. of perigee</dt><dd>{{ "%.2f" | format(card.argp_deg) }}&deg;</dd>
+    <dt>Mean anomaly</dt><dd>{{ "%.2f" | format(card.mean_anomaly_deg) }}&deg;</dd>
+    <dt>Period</dt><dd>{{ "%.2f" | format(card.period_min) }} min</dd>
+    <dt>Perigee altitude</dt><dd>{{ "%.1f" | format(card.perigee_alt_km) }} km</dd>
+    <dt>Apogee altitude</dt><dd>{{ "%.1f" | format(card.apogee_alt_km) }} km</dd>
+    <dt>Regime</dt><dd>{{ card.regime }}</dd>
+    <dt title="The longitude under the object, from SGP4 and Greenwich Mean Sidereal Time">Sub-satellite lon.</dt>
+    {% if card.near_geo %}
+    <dd>{% if card.longitude_text %}{{ card.longitude_text }}{% else %}not available: {{ card.longitude_note }}{% endif %}
+      at {% if card.at_is_scenario %}scenario time{% else %}now{% endif %}</dd>
+    {% else %}
+    <dd>none: not near geostationary, so the point under it circles the Earth</dd>
+    {% endif %}
+  </dl>
+  <p class="field-meta elset-card-note">Mean elements as the set states them, at its epoch.</p>
+</details>
+{% else %}
+<span class="asset-name">{{ label }}</span>
+{% if known %}<span class="field-meta elset-unread">Element set does not parse: no elements to show.</span>{% endif %}
+{% endif %}

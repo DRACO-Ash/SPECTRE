@@ -248,8 +248,13 @@ class TestDebriefShowsTheRealAxisChange:
         cookie = _operator(client, "f172_axes")
         before = dict(_progress(client, "f172_axes").axis_points)
         result_id = _start(client, cookie, _CADET)
-        resp = _submit(client, cookie, _CADET, result_id, ["obj_load"])
+        # A pass: axis points move on a pass only (audit G-1).
+        resp = _post(client, cookie, f"/training/scenario/{_CADET}/submit", {
+            "result_id": result_id, "objectives_completed": '["obj_load"]',
+            "answer_obj_read_elements": "45", "answer_obj_confirm_dv": "2",
+        })
         after = _progress(client, "f172_axes").axis_points
+        assert after != before
         cfg = get_config()
 
         page = " ".join(resp.content.decode().split())

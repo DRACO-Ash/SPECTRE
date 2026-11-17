@@ -21,6 +21,7 @@ from spectre.web.auth import require_login
 from spectre.web.log_safety import log_safe
 from spectre.web.models import User
 from spectre.web.planning_state import get_session_state
+from spectre.web.routes.maneuver import burning_satellite
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +184,10 @@ async def export_intercepts(
         "method",
         "red_name",
         "blue_name",
+        # Which side was planned as the chaser, and the satellite that burns: Evasion and Formation burn the other
+        # one, so red_name and blue_name alone do not say (0.47.0 review, S1).
+        "chaser_side",
+        "burning_satellite",
         "total_dv_m_s",
         "arrival_utc",
         "miss_km",
@@ -203,6 +208,8 @@ async def export_intercepts(
             r.method.value,
             r.red_name,
             r.blue_name,
+            r.chaser_side,
+            burning_satellite(r),
             f"{r.total_delta_v_m_s:.3f}",
             r.arrival_epoch.strftime("%Y-%m-%d %H:%M:%S"),
             # A flown miss the search could not compute is NaN: written "not computed", never "nan" (SPC-238).

@@ -41,6 +41,7 @@ def render(
     CSRF field and meta tag without explicit wiring.
     """
     from spectre.web.csrf import make_csrf_token  # noqa: PLC0415
+    from spectre.web.planning_state import in_training_request
 
     tmpl = get_templates()
     ctx = context or {}
@@ -51,4 +52,7 @@ def render(
         session_cookie = request.cookies.get("spectre_session", "")
         current = getattr(request.state, "session_current", False)
         ctx["csrf_token"] = make_csrf_token(session_cookie) if session_cookie and current else ""
+    # A page served to training marks itself so its own requests stay training requests (base.html, core.js),
+    # and the console in the training frame hides its Training link (0.47.0 review B1, audit 1-23).
+    ctx.setdefault("in_training_frame", in_training_request())
     return cast(HTMLResponse, tmpl.TemplateResponse(request, name, ctx, status_code=status_code))

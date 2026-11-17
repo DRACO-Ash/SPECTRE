@@ -49,6 +49,44 @@ from spectre.astro.transfers import TransferResult, bielliptic, hohmann
 _NMC_SIZE_TOLERANCE = 0.10
 _NMC_SAMPLES = 2000
 
+#: The longest J2 drift reported, days: ten years. Beyond it a plan is no plan, and the arrival date of a gap that
+#: closes over millennia passed the calendar's end, so the method failed with "date value out of range" (audit 3-18).
+J2_DRIFT_CAP_DAYS = 3652.5
+J2_DRIFT_CAP_TEXT = "10 years"
+
+
+class NotPlannedError(ValueError):
+    """A method that has no plan to give, for a reason the row states rather than a failure. *verdict* is the word the
+    Intercept Engine's row reads in place of FAILED."""
+
+    verdict = "NOT PLANNED"
+
+
+class NotReachableError(NotPlannedError):
+    """A plan that exists in principle but does not arrive within the time the engine reports: said, not failed."""
+
+    verdict = "NOT REACHABLE"
+
+
+class NotApplicableError(NotPlannedError):
+    """The method does not apply to this pair: J2 drift between near-equatorial orbits, whose RAAN is ill-defined."""
+
+    verdict = "NOT APPLICABLE"
+
+
+class PlanesAlignedError(NotPlannedError):
+    """J2 drift has nothing to close: the two orbital planes already coincide."""
+
+    verdict = "ALIGNED"
+
+
+#: Two planes closer than this, deg, are already aligned for J2 drift; the angle is between the angular momentum
+#: vectors, so it holds where RAAN is meaningless (0.47.0 review, S2).
+J2_ALIGNED_DEG = 0.1
+#: Below this inclination, deg, RAAN is ill-defined: a 0.01 deg LEO pair read a 170 deg gap and was planned at 4.9 m/s,
+#: a 0.05 deg GEO pair at 722.8 m/s (0.47.0 review, S2).
+J2_EQUATORIAL_DEG = 1.0
+
 
 @dataclass
 class Burn:
@@ -89,6 +127,10 @@ class InterceptSolution:
     score: float | None = None        # 0-100, or a count for the envelope
     score_kind: str = ""              # what the score measures
     provenance: str = "physics"       # "physics": solved; "heuristic": uncalibrated weights
+    # A defensive burn's closest approach is searched either side of the assumed TCA: the half-width searched, s, and
+    # when no minimum lay inside it, the least separation in it, km, a floor, with miss_distance_km NaN (review S1).
+    search_window_s: float | None = None
+    edge_floor_km: float | None = None
 
 
 def lambert_intercept(
@@ -799,12 +841,16 @@ def j2_drift_intercept(
     """Analyse J2 RAAN drift for orbital plane alignment.
 
     Returns an InterceptSolution whose two burns are the Hohmann altitude
-    change that halves the natural convergence time. When no altitude in
-    range achieves that, there are no burns and the arrival is the natural
-    convergence.
+    change that halves the natural convergence time, or, when half still
+    takes longer than J2_DRIFT_CAP_DAYS, the smaller change that closes the
+    gap within the cap either way round. When no altitude in range achieves
+    that, there are no burns and the arrival is the natural convergence.
 
     Raises:
-        ValueError: when the planes never converge and no altitude helps.
+        PlanesAlignedError: when the planes are already within J2_ALIGNED_DEG of each other.
+        NotApplicableError: when both orbits are within J2_EQUATORIAL_DEG of the equator, where RAAN means nothing.
+        NotReachableError: when the planes never converge and no altitude helps, or when the gap does not close within
+            J2_DRIFT_CAP_DAYS (audit 3-18). All three are ValueErrors, as before.
 
     Args:
         red_tle: TLE of the chaser.
@@ -822,6 +868,7 @@ def j2_drift_intercept(
 
     kep_red = state_to_keplerian(sv_red)
     kep_blue = state_to_keplerian(sv_blue)
+    _require_distinct_inclined_planes(sv_red, sv_blue, kep_red.inc, kep_blue.inc)
 
     # RAAN difference
     delta_raan = kep_red.raan - kep_blue.raan
@@ -833,13 +880,19 @@ def j2_drift_intercept(
     result = j2_drift_plan(
         kep_red.a, kep_red.ecc, kep_red.inc,
         kep_blue.a, kep_blue.ecc, kep_blue.inc,
-        delta_raan, mu,
+        delta_raan, mu, cap_days=J2_DRIFT_CAP_DAYS,
     )
 
     if not math.isfinite(result.accel_convergence_days):
-        raise ValueError(
+        raise NotReachableError(
             "the two planes precess at the same rate, so J2 drift never closes the "
             f"{delta_raan:.2f} deg RAAN gap, and no altitude change in range speeds it"
+        )
+    if result.accel_convergence_days > J2_DRIFT_CAP_DAYS:
+        raise NotReachableError(
+            f"not reachable within {J2_DRIFT_CAP_TEXT}: natural J2 drift closes the {abs(delta_raan):.2f} deg RAAN "
+            f"gap in {result.accel_convergence_days:,.0f} days, and no altitude change from 200 km above the "
+            "surface to 2,000 km above the chaser closes it within the cap"
         )
 
     # The altitude change is a Hohmann transfer: two burns, prograde to raise
@@ -875,6 +928,28 @@ def j2_drift_intercept(
     )
 
 
+def _require_distinct_inclined_planes(sv_red: StateVector, sv_blue: StateVector, inc_red: float, inc_blue: float) -> None:
+    """Refuse a J2 drift plan where it has no meaning: planes already aligned, or both orbits near the equator.
+
+    The angle between the planes is taken from the angular momentum vectors, which are defined at any inclination;
+    RAAN is not, and a gap read from it planned confident burns between near-equatorial orbits (0.47.0 review, S2).
+    """
+    h_red, h_blue = np.cross(sv_red.r, sv_red.v), np.cross(sv_blue.r, sv_blue.v)
+    cosine = float(np.dot(h_red, h_blue) / (np.linalg.norm(h_red) * np.linalg.norm(h_blue)))
+    angle = math.degrees(math.acos(min(1.0, max(-1.0, cosine))))
+    if angle < J2_ALIGNED_DEG:
+        raise PlanesAlignedError(
+            f"the planes are already aligned: {angle:.3f} deg apart, under {J2_ALIGNED_DEG} deg, so J2 drift has "
+            "nothing to close"
+        )
+    if inc_red < J2_EQUATORIAL_DEG and inc_blue < J2_EQUATORIAL_DEG:
+        raise NotApplicableError(
+            f"both orbits are within {J2_EQUATORIAL_DEG:g} deg of the equator ({inc_red:.3f} and {inc_blue:.3f} deg), "
+            f"where RAAN is ill-defined and J2 drift cannot align them; the planes are {angle:.3f} deg apart, which "
+            "a plane change closes"
+        )
+
+
 def cola_intercept(
     red_tle: str,
     blue_tle: str,
@@ -887,7 +962,10 @@ def cola_intercept(
     """Minimum-ΔV collision avoidance manoeuvre.
 
     Computes the cheapest single-impulse burn (radial, along-track, or
-    out-of-plane) to achieve the desired miss distance.
+    out-of-plane) to achieve the desired miss distance. The burn is sized from
+    a reference orbit alone, so the miss reported is the one it achieves: the
+    closest approach after the burn, searched within DEFENCE_WINDOW_S of the
+    assumed TCA (``_Encounter``), as the other two defensive burns measure theirs.
 
     Args:
         red_tle: TLE of the manoeuvring satellite.
@@ -927,6 +1005,7 @@ def cola_intercept(
         dv_vec = n_hat * best.delta_v
 
     burn1 = _make_burn(1, t_burn, dv_vec, sv_red_burn)
+    approach = _Encounter(red_orbit, blue_orbit, t_tca).closest_after(sv_red_burn, dv_vec, mu)
 
     _notes = (
         f"COLA {best.strategy}: ΔV={best.delta_v:.4f} km/s → "
@@ -943,7 +1022,11 @@ def cola_intercept(
         total_delta_v=best.delta_v,
         departure_epoch=t_burn,
         arrival_epoch=t_tca,
-        miss_distance_km=desired_miss_km,
+        # The closest approach the burn leaves near the assumed TCA, not the miss asked for, which it used to report
+        # (audit 2-9, 3-6), nor the separation at the old TCA instant, which the burn moves (0.47.0 review, B2).
+        miss_distance_km=approach.miss_km,
+        search_window_s=approach.window_s,
+        edge_floor_km=approach.edge_floor_km,
     )
 
 
@@ -1010,6 +1093,9 @@ def geo_drift_intercept(
         total_delta_v=result.total_delta_v,
         departure_epoch=t_departure,
         arrival_epoch=t_arrival,
+        # Not flown here, so no closest approach: NaN reads "not computed", where the default 0.0 read as an arrival.
+        # The Intercept Engine's batch flies the plan and fills it in (0.47.0 review).
+        miss_distance_km=math.nan,
         score=abs(gap),
         score_kind="longitude gap (deg)",
     )
@@ -1212,11 +1298,13 @@ def evasion_intercept(
     The BLUE satellite evades an incoming RED threat. ``optimal_evasion``
     sizes candidate burns (prograde, normal and radial, at several lead times)
     from a Clohessy-Wiltshire model of BLUE's own orbit. Each candidate, and
-    its reverse, is then flown: BLUE's displacement at TCA under two-body
-    motion is added to its predicted position and measured against RED's
-    predicted position. The cheapest candidate that reaches the desired miss
-    is chosen; if none does within the budget, the one that opens the widest
-    miss. The reported miss is that achieved separation.
+    its reverse, is then flown: BLUE's displacement under two-body motion is
+    added to its predicted position and the closest approach to RED's
+    predicted position searched within DEFENCE_WINDOW_S of the assumed TCA,
+    since the burn moves the time of closest approach (0.47.0 review, B2). The
+    cheapest candidate that reaches the desired miss is chosen; if none does
+    within the budget, the one that opens the widest miss. The reported miss is
+    that closest approach.
 
     Args:
         red_tle: TLE of the incoming threat.
@@ -1233,17 +1321,20 @@ def evasion_intercept(
 
     t_tca = manoeuvre_start + timedelta(seconds=coast_s)
     sv_blue = blue_orbit.propagate(t_tca)
-    separation_at_tca = sv_blue.r - red_orbit.propagate(t_tca).r
+    encounter = _Encounter(blue_orbit, red_orbit, t_tca)
 
     plan = optimal_evasion(sv_blue.r_mag, desired_miss_km, time_before_tca_s, fuel_budget_km_s, mu)
 
     flown = [
-        _fly_evasion(blue_orbit, t_tca, (candidate, sense), separation_at_tca, mu)
+        _fly_evasion(blue_orbit, t_tca, (candidate, sense), encounter, mu)
         for candidate in plan.strategies or [plan.best]
         for sense in (1.0, -1.0)
     ]
-    enough = [f for f in flown if f[1] >= desired_miss_km]
-    burn1, miss = min(enough, key=lambda f: f[0].delta_v_mag) if enough else max(flown, key=lambda f: f[1])
+    # A candidate whose search found no minimum, only a separation at the window's edge, is never taken as reaching
+    # the miss: the edge says nothing about the encounter beyond it (0.47.0 review, S1).
+    enough = [f for f in flown if f[1].found and f[1].miss_km >= desired_miss_km]
+    burn1, approach = (min(enough, key=lambda f: f[0].delta_v_mag) if enough
+                       else max(flown, key=lambda f: (f[1].found, f[1].least_km)))
 
     return InterceptSolution(
         method="evasion",
@@ -1251,7 +1342,9 @@ def evasion_intercept(
         total_delta_v=burn1.delta_v_mag,
         departure_epoch=burn1.epoch,
         arrival_epoch=t_tca,
-        miss_distance_km=miss,
+        miss_distance_km=approach.miss_km,
+        search_window_s=approach.window_s,
+        edge_floor_km=approach.edge_floor_km,
     )
 
 
@@ -1259,15 +1352,10 @@ def _fly_evasion(
     blue_orbit: TLEOrbit,
     t_tca: datetime,
     option: tuple[EvasionResult, float],
-    separation_at_tca: np.ndarray,
+    encounter: _Encounter,
     mu: float,
-) -> tuple[Burn, float]:
-    """Apply one evasion candidate, in the given sense, and return the burn and its miss.
-
-    The burn's effect is taken as the difference between two two-body coasts
-    from the same state, with and without the burn, so the propagator's own
-    model error cancels and only the displacement is added to the prediction.
-    """
+) -> tuple[Burn, DefenceApproach]:
+    """Apply one evasion candidate, in the given sense, and return the burn and its closest approach (``_Encounter``)."""
     candidate, sense = option
     t_burn = t_tca - timedelta(seconds=candidate.burn_epoch_offset_s)
     sv = blue_orbit.propagate(t_burn)
@@ -1276,10 +1364,110 @@ def _fly_evasion(
     n_hat = h / float(np.linalg.norm(h))
     b_hat = np.cross(v_hat, n_hat)
     dv = sense * (v_hat * candidate.prograde_dv + n_hat * candidate.normal_dv + b_hat * candidate.radial_dv)
+    return _make_burn(1, t_burn, dv, sv), encounter.closest_after(sv, dv, mu)
 
-    displacement = _coast(sv, dv, t_tca, mu).r - _coast(sv, np.zeros(3), t_tca, mu).r
-    miss = float(np.linalg.norm(separation_at_tca + displacement))
-    return _make_burn(1, t_burn, dv, sv), miss
+
+#: A defensive burn's closest approach is searched this far either side of the assumed TCA, s. The burn moves the
+#: time of closest approach, so the separation at the old instant overstated the miss in crossing geometry: a COLA
+#: asked for 1 km read 1.03 km where the closest approach head-on was 0.24 km (0.47.0 review, B2). Ten minutes is
+#: about a tenth of a LEO revolution and holds the shift a defensive burn makes.
+DEFENCE_WINDOW_S = 600.0
+DEFENCE_WINDOW_TEXT = "10 min"
+#: The search samples every 5 s, 75 km of relative motion head-on in LEO, and refines each minimum to a millisecond,
+#: 15 m at that speed.
+_DEFENCE_STEP_S = 5.0
+_DEFENCE_TOLERANCE_S = 1e-3
+#: When the least separation within DEFENCE_WINDOW_S is at its edge, the encounter is beyond it: the search is widened
+#: to a quarter revolution of the faster orbit either side, never more than 12 h, sampled at most this many times
+#: (review S1). A LEO head-on pair whose TCA was assumed 610 s late read 151.44 km, the separation at the edge, for
+#: 0.27 km. A quarter, not the half the review suggested: crossing orbits meet at both nodes, half a revolution apart,
+#: and a half-revolution window around a late TCA held the next node's encounter, not the one the burn avoids.
+_WIDE_LIMIT_S = 12 * 3600.0
+_WIDE_SAMPLES = 2000
+
+
+@dataclass(frozen=True)
+class DefenceApproach:
+    """What the search after a defensive burn found: the closest approach, km, NaN when no minimum lay inside the
+    window; the half-width searched, s; and in that case the least separation in it, a floor, km."""
+
+    miss_km: float
+    window_s: float
+    edge_floor_km: float | None = None
+
+    @property
+    def found(self) -> bool:
+        """Whether a closest approach lay inside the window: an edge value is not one."""
+        return self.edge_floor_km is None and math.isfinite(self.miss_km)
+
+    @property
+    def least_km(self) -> float:
+        """The least separation seen, an encounter's or the edge floor, for ranking candidates that reach nothing."""
+        return self.miss_km if self.found else (self.edge_floor_km or 0.0)
+
+
+class _Encounter:
+    """The burning object and the other one around the assumed TCA, for the defensive burns' closest approach.
+
+    Positions are each object's own propagation (SGP4 for an element set); a burn adds its displacement, the
+    difference between two two-body coasts from the state it burns at, with and without it, so the propagator's own
+    model error cancels. The predicted separation is cached by time, so the candidates of one evasion share it.
+    """
+
+    def __init__(self, burner: TLEOrbit, other: TLEOrbit, t_tca: datetime) -> None:
+        self._burner, self._other = burner, other
+        self._tca = t_tca
+        self._predicted: dict[float, np.ndarray] = {}
+
+    def _separation_without_burn(self, t: float) -> np.ndarray:
+        """Burner minus other at *t* s from the assumed TCA, unburned."""
+        if t not in self._predicted:
+            when = self._tca + timedelta(seconds=t)
+            self._predicted[t] = self._burner.propagate(when).r - self._other.propagate(when).r
+        return self._predicted[t]
+
+    def _search(self, sv: StateVector, dv: np.ndarray, mu: float, half_s: float) -> tuple[float, bool]:
+        """The least separation within *half_s* of the assumed TCA after the burn, and whether it is at an edge.
+
+        The window never opens before a burn: a minimum there is not one the burn leaves. A burn of nothing (no
+        warning time) leaves the window whole, so the unmanoeuvred encounter is reported.
+        """
+        still = np.zeros(3)
+        burned = bool(np.any(dv))
+        start = max(-half_s, (sv.epoch - self._tca).total_seconds()) if burned else -half_s
+        span = half_s - start
+
+        def separation(t: float) -> float:
+            offset = start + t
+            when = self._tca + timedelta(seconds=offset)
+            moved = np.zeros(3) if when <= sv.epoch else _coast(sv, dv, when, mu).r - _coast(sv, still, when, mu).r
+            return float(np.linalg.norm(self._separation_without_burn(offset) + moved))
+
+        if span <= 0.0:
+            return separation(0.0), True
+        step = min(max(_DEFENCE_STEP_S, span / _WIDE_SAMPLES), span)
+        found = closest_approach(separation, span, step_s=step, tolerance_s=_DEFENCE_TOLERANCE_S)
+        return found.miss_km, found.at_window_edge
+
+    def _wide_half_s(self, sv: StateVector, dv: np.ndarray, mu: float) -> float:
+        """A quarter revolution of the faster orbit, the burner's after its burn or the other's, within the limits."""
+        after = StateVector(epoch=sv.epoch, r=sv.r, v=sv.v + dv)
+        periods = [p for p in (orbit_period_s(after, mu), orbit_period_s(self._other.propagate(self._tca), mu))
+                   if p is not None]
+        quarter = min(periods, default=4.0 * _WIDE_LIMIT_S) / 4.0
+        return min(max(quarter, DEFENCE_WINDOW_S), _WIDE_LIMIT_S)
+
+    def closest_after(self, sv: StateVector, dv: np.ndarray, mu: float) -> DefenceApproach:
+        """The closest approach within DEFENCE_WINDOW_S of the assumed TCA once the object at *sv* burns *dv*,
+        searched again over a quarter revolution when the least separation is at the window's edge; NaN with the floor
+        when it is still at the edge (0.47.0 review, S1)."""
+        miss, at_edge = self._search(sv, dv, mu, DEFENCE_WINDOW_S)
+        if not at_edge:
+            return DefenceApproach(miss, DEFENCE_WINDOW_S)
+        wide = self._wide_half_s(sv, dv, mu)
+        if wide > DEFENCE_WINDOW_S:
+            miss, at_edge = self._search(sv, dv, mu, wide)
+        return DefenceApproach(math.nan, wide, miss) if at_edge else DefenceApproach(miss, wide)
 
 
 def intent_predict_intercept(
@@ -1561,9 +1749,9 @@ def formation_intercept(
     formation geometry.
 
     The burn is sized by ``formation_defence_burn`` from blue's own orbit
-    alone: *red_tle* is accepted for the common intercept signature but the
-    threat's state is not modelled, unlike ``evasion_intercept``. Its radius
-    was passed in and never read (audit F-078).
+    alone, unlike ``evasion_intercept``. Its radius was passed in and never
+    read (audit F-078). The threat is read only to measure the closest approach
+    the burn leaves near the assumed TCA, which is what is reported (audit 2-9).
     """
     blue_orbit = TLEOrbit(blue_tle)
 
@@ -1590,6 +1778,7 @@ def formation_intercept(
         dv_vec = n_hat * result.delta_v
 
     burn1 = _make_burn(1, t_burn, dv_vec, sv_blue_burn)
+    approach = _Encounter(blue_orbit, TLEOrbit(red_tle), t_tca).closest_after(sv_blue_burn, dv_vec, mu)
 
     return InterceptSolution(
         method="formation",
@@ -1597,7 +1786,11 @@ def formation_intercept(
         total_delta_v=result.delta_v,
         departure_epoch=t_burn,
         arrival_epoch=t_tca,
-        miss_distance_km=result.resulting_miss_km,
+        # The closest approach to the threat the burn leaves near the assumed TCA. This was the sizing model's own
+        # figure, the miss it was asked for, whatever the threat's position (audit 2-9, 3-6; 0.47.0 review, B2).
+        miss_distance_km=approach.miss_km,
+        search_window_s=approach.window_s,
+        edge_floor_km=approach.edge_floor_km,
     )
 
 

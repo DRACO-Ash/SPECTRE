@@ -37,7 +37,9 @@
   <script src="/static/js/core.js" defer></script>
   {% block scripts %}{% endblock %}
 </head>
-<body{% if csrf_token %} hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'{% endif %}>
+{# A page served to training (the console in the training frame) names the frame on every request it makes, so the
+   server serves them from the training planning state: htmx through hx-headers, fetch() through core.js. #}
+<body{% if csrf_token %} hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"{% if in_training_frame %}, "X-Spectre-Frame": "training"{% endif %}}'{% endif %}{% if in_training_frame %} data-spectre-frame="training"{% endif %}>
   <div class="app-chrome">
     <div class="spectre-classification-banner {{ classification_class }}">{{ classification_marking }}</div>
     <nav class="nav-bar">

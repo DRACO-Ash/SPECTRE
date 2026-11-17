@@ -1,6 +1,6 @@
-{# Training Progress Dashboard — rendered via HTMX into #tpanel-dashboard #}
-{# Context: progress, cfg, level_def, next_lv_def, progress_pct, pts_needed,
-            recommendation, recent_results, first_scenario #}
+{# Training Progress Dashboard — rendered via HTMX into #training-dashboard, and out of band by the refresh #}
+{# Context: progress, cfg, level_def, next_lv_def, progress_pct, pts_needed, gates,
+            recommendation, recent_results, first_scenario, content_title #}
 
 {# ── Getting Started banner (shown until the operator starts their first scenario) ── #}
 {% if progress.scenarios_started == 0 and first_scenario %}
@@ -76,9 +76,9 @@
     <div style="font-size:1.8rem; font-weight:800; color:var(--ops-blue); line-height:1">
       {{ progress.total_points | int }}
     </div>
-    {% if pts_needed %}
+    {% if next_lv_def %}
     <div style="font-size:0.62rem; color:var(--text-dim); margin-top:0.1rem">
-      {{ pts_needed }} pts to Level {{ progress.current_level + 1 }}
+      {% if pts_needed %}{{ pts_needed }} pts to Level {{ progress.current_level + 1 }}{% else %}Points met for Level {{ progress.current_level + 1 }}: see the other conditions below{% endif %}
     </div>
     <div style="height:4px; background:var(--border); border-radius:2px; margin-top:0.3rem; overflow:hidden">
       <div style="height:100%; width:{{ progress_pct }}%; background:var(--ops-blue); border-radius:2px; transition:width 0.5s"></div>
@@ -167,7 +167,18 @@
   <div style="font-size:0.65rem; font-weight:700; color:var(--ops-blue); margin-bottom:0.2rem">
     Recommended Next Step
   </div>
+  {# The full condition for the next level, from gamification.yaml, and what to do next (audit 1-19). #}
   <div style="font-size:0.65rem; color:var(--text-dim)">{{ recommendation }}</div>
+  {% if gates %}
+  <ul id="dashboard-gates" style="list-style:none; margin:0.3rem 0 0; padding:0; font-size:0.62rem; color:var(--text-dim)">
+    {% for gate in gates %}
+    <li style="display:flex; gap:0.3rem">
+      <span style="color:{% if gate.met %}#22c55e{% else %}var(--text-dim){% endif %}" aria-hidden="true">{% if gate.met %}✓{% else %}○{% endif %}</span>
+      <span>{{ gate.label }}<span class="visually-hidden">{% if gate.met %} (met){% else %} (not met){% endif %}</span></span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
 </div>
 
 {# ── Recent Activity ─────────────────────────────────────────────────────────── #}
@@ -190,8 +201,8 @@
     <tbody>
     {% for cr in recent_results %}
       <tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:0.2rem 0.3rem; font-family:monospace; color:var(--text-dim)">
-          {{ cr.scenario_id | truncate(28, True, '…') }}
+        <td style="padding:0.2rem 0.3rem; color:var(--text-dim)">
+          {{ content_title(cr.scenario_id) }}
         </td>
         <td style="text-align:center; padding:0.2rem 0.3rem">
           {% if cr.passed %}
@@ -206,7 +217,7 @@
           {{ cr.total_score }}
         </td>
         <td style="text-align:right; padding:0.2rem 0.3rem; color:var(--text-dim)">
-          {{ cr.started_at.strftime("%m/%d %H:%M") }}
+          {{ cr.started_at.strftime("%d %b %H:%M") }}
         </td>
       </tr>
     {% endfor %}

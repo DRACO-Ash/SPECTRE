@@ -21,13 +21,16 @@ function aiToggle(idx) {
 }
 
 /* ── Pre-fill the intercept engine ── */
-function aiLoadEngine(redSat, blueSat, epoch) {
+function aiLoadEngine(redSat, blueSat, epoch, manoeuvring) {
   if (typeof SPECTRE.switchToEngine === 'function') SPECTRE.switchToEngine();
   var redSel  = document.getElementById('ie-red-sat');
   var blueSel = document.getElementById('ie-blue-sat');
+  var sideSel = document.getElementById('ie-manoeuvring');
   var startIn = document.querySelector('input[name="manoeuvre_start"]');
   if (redSel)  redSel.value  = redSat;
   if (blueSel) blueSel.value = blueSat;
+  /* A row planned with Blue manoeuvring re-plans as Blue when loaded (0.47.0 review). */
+  if (sideSel && manoeuvring) sideSel.value = manoeuvring;
   if (startIn) startIn.value = epoch;
   var engine = document.getElementById('intercept-engine-form');
   if (engine) engine.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -92,18 +95,21 @@ function _aiPairRows(rows) {
 }
 
 /* Orders pairs by the parent row's data-sort-<col>; a numeric column reads an
-   unparseable value as Infinity, so it sorts last ascending. */
+   unparseable value (a dash, "not computed") as null, which sorts last in
+   either direction, so a descending Miss Dist does not lead with dashes. */
 function _aiSortKey(row, col, type) {
   var v = row.getAttribute('data-sort-' + col) || '';
   if (type !== 'num') return v;
   var n = Number.parseFloat(v);
-  return Number.isNaN(n) ? Infinity : n;
+  return Number.isNaN(n) ? null : n;
 }
 
 function _aiCompare(col, type, asc) {
   return function(a, b) {
     var av = _aiSortKey(a[0], col, type);
     var bv = _aiSortKey(b[0], col, type);
+    if (av === null) return bv === null ? 0 : 1;
+    if (bv === null) return -1;
     if (av < bv) return asc ? -1 : 1;
     if (av > bv) return asc ?  1 : -1;
     return 0;
@@ -114,7 +120,9 @@ SPECTRE.action('aiToggle', function (el) { aiToggle(Number(el.dataset.idx)); });
 SPECTRE.action('aiSort', function (el) { aiSort(Number(el.dataset.col), el.dataset.kind); });
 /* The Load button sits in a clickable row: a click runs the innermost action only, and its Enter reaches the
    button, not the row, because only an element carrying data-activate answers to the row's keys. */
-SPECTRE.action('aiLoadEngine', function (el) { aiLoadEngine(el.dataset.red, el.dataset.blue, el.dataset.epoch); });
+SPECTRE.action('aiLoadEngine', function (el) {
+  aiLoadEngine(el.dataset.red, el.dataset.blue, el.dataset.epoch, el.dataset.manoeuvring);
+});
 
 /* ── Intercept result: copy the summary ── */
 SPECTRE.action('copyClip', function (btn) {

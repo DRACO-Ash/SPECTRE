@@ -165,12 +165,6 @@ document.body.addEventListener('htmx:afterRequest', function (e) {
   if (e.detail.successful && elt && elt.dataset && elt.dataset.opensDecision !== undefined) openDecisionPanel();
 });
 
-/* Switch to Trade-Space engine sub-tab programmatically */
-function switchToTradeSpace() {
-  switchToEngine();
-  var btn = document.querySelector('.etab[data-panel="et-trade"]');
-  if (btn) engineTab(btn);
-}
 SPECTRE.action('sbTab', sbTab);
 SPECTRE.action('assetTab', assetTab);
 SPECTRE.action('heroTab', heroTab);
@@ -403,13 +397,13 @@ SPECTRE.switchToEngine = switchToEngine;
         });
         window._tsChartInstance = _tsChartInstance;
 
-        /* Chart ready — activate button, update badge, auto-switch to Trade-Space tab */
+        /* Chart ready: activate the button and update the badge. The view stays on the ranked table the operator
+           asked for; the Trade-Space tab, its badge now counting the points, is one click away (audit X2, 3-5, 4-9). */
         btn.disabled = false;
         btn.textContent = _tsVisible ? 'Hide Chart' : 'View Chart (' + data.length + ' pts)';
         if (status) status.textContent = data.length + ' solutions plotted';
         if (badge) badge.textContent = '(' + data.length + ' pts)';
         if (clearBtn) clearBtn.style.display = '';
-        switchToTradeSpace();
       })
       .catch(function(err) {
         btn.disabled = true;

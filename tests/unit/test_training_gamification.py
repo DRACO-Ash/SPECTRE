@@ -233,27 +233,60 @@ class TestProgressHelpers:
 
 # ── recommended_next_step ──────────────────────────────────────────────────────
 
+def _progress(**fields: object) -> object:
+    from types import SimpleNamespace
+
+    base: dict[str, object] = {
+        "current_level": 1, "total_points": 0, "axis_points": {}, "tutorials_completed": [],
+        "scenarios_passed": 0, "challenges_passed": 0,
+    }
+    return SimpleNamespace(**{**base, **fields})
+
+
 class TestRecommendedNextStep:
-    def test_empty_axis_points_returns_string(self):
-        rec = recommended_next_step({}, [], 1)
-        assert len(rec) > 10
+    """Audit 1-19: the advice named the weakest axis and hid the pass and challenge counts."""
 
-    def test_weak_axis_mentioned(self):
-        axis_pts = {
-            "situational_awareness": 500,
-            "manoeuvre_planning": 500,
-            "decision_quality": 10,    # weakest
-            "operational_tempo": 500,
-            "efficiency": 500,
-        }
-        rec = recommended_next_step(axis_pts, ["orientation"], 3)
-        assert "decision" in rec.lower() or "Decision" in rec
+    def test_level_2_names_its_points_and_its_tutorial(self):
+        rec = recommended_next_step(_progress())
+        assert "Level 2 (Observer) needs 100 total points (you have 0)" in rec
+        assert "complete the Orientation" in rec
 
-    def test_tutorial_condition_mentioned(self):
-        """At level 1, the tutorial unlock should be surfaced."""
-        rec = recommended_next_step({}, [], 1)
-        # Should mention a tutorial or skill improvement
-        assert len(rec) > 5
+    def test_level_3_names_the_pass_count(self):
+        rec = recommended_next_step(_progress(current_level=2, total_points=500, scenarios_passed=1))
+        assert "pass 3 scored scenarios (you have passed 1)" in rec
+        assert "Start a scenario" in rec
+
+    def test_level_4_names_the_axis_gate_and_how_it_grows(self):
+        rec = recommended_next_step(_progress(current_level=3, total_points=1300,
+                                              axis_points={"decision_quality": 120}))
+        assert "300 Decision Quality points (you have 120)" in rec
+        assert "passing a scored scenario (+45)" in rec
+
+    def test_level_5_names_the_challenge_count(self):
+        rec = recommended_next_step(_progress(current_level=4, total_points=100, challenges_passed=1))
+        assert "3,000 total points (you have 100)" in rec
+        assert "pass 3 challenges (you have passed 1)" in rec
+
+    def test_the_highest_level_says_so(self):
+        top = max(lv.level for lv in get_config().levels)
+        assert recommended_next_step(_progress(current_level=top)) == "You have reached the highest level."
+
+
+class TestNextLevelGates:
+    def test_every_gate_is_listed_with_whether_it_is_met(self):
+        from spectre.training.gamification import next_level_gates
+
+        gates = next_level_gates(_progress(current_level=2, total_points=500, scenarios_passed=1))
+        assert [(g.label, g.met) for g in gates] == [
+            ("400 total points (you have 500)", True),
+            ("Pass 3 scored scenarios (you have passed 1)", False),
+        ]
+
+    def test_none_at_the_highest_level(self):
+        from spectre.training.gamification import next_level_gates
+
+        top = max(lv.level for lv in get_config().levels)
+        assert next_level_gates(_progress(current_level=top)) == []
 
 
 # ── Scenario loader ────────────────────────────────────────────────────────────

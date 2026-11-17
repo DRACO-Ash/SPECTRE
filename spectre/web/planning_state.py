@@ -10,6 +10,9 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Protocol
@@ -185,6 +188,35 @@ class SessionState:
 # last one entered (audit F-044).
 _store: dict[SessionKey, tuple[float, SessionState]] = {}
 
+# The same sign-in's training state, kept apart from the operational one
+# (0.47.0 review B1). Training used to add its scenario objects to, and set its
+# epoch as the scenario time of, the operational state, so every operations tab
+# of the sign-in planned at the training epoch, and anything fetched inside the
+# training frame stayed in the operational lists. A request from the training
+# page or its console frame reads and writes this state only; it is discarded
+# when the operator leaves training, and never written back.
+_training_store: dict[SessionKey, tuple[float, SessionState]] = {}
+
+#: Whether the request being served comes from training: a /training route, or
+#: the console in the training page's frame. Set per request by
+#: spectre.web.training_frame.TrainingFrameMiddleware.
+_training_request: ContextVar[bool] = ContextVar("spectre_training_request", default=False)
+
+
+def in_training_request() -> bool:
+    """Whether the request being served comes from training (see ``_training_request``)."""
+    return _training_request.get()
+
+
+@contextmanager
+def training_request(active: bool = True) -> Iterator[None]:
+    """Serve what runs inside as a training request (*active*) or an operational one."""
+    token = _training_request.set(active)
+    try:
+        yield
+    finally:
+        _training_request.reset(token)
+
 # No token is accepted after this long (spectre.web.auth._SESSION_MAX_AGE), so
 # state older than it can never be reached again and is dropped.
 _STATE_MAX_AGE_S = 28_800
@@ -205,13 +237,38 @@ def _key_of(owner: SessionKey | _HasSessionKey) -> SessionKey:
 def _prune(now: float) -> None:
     for key in [k for k, (created, _) in _store.items() if now - created > _STATE_MAX_AGE_S]:
         del _store[key]
+    # A training state lives no longer than its sign-in: it carries the sign-in's
+    # creation time (get_training_state), and goes when that state has gone (review S1).
+    for key in [k for k in _training_store if k not in _store]:
+        _blank(_training_store.pop(key)[1])
+
+
+def _blank(state: SessionState) -> None:
+    """Take the UDL credentials off *state*, which a task in flight may still hold."""
+    state.udl_username = state.udl_password = None
+
+
+def _seeded_state() -> SessionState:
+    """A new state holding the default watchlist and its element sets."""
+    state = SessionState()
+    if _default_hrr_objects:
+        # Copies, so no state can change another's entry or the default's (review N3).
+        state.hrr_objects = [dict(o) for o in _default_hrr_objects]
+    if _default_hrr_tles:
+        state.hrr_tle_cache.update(_default_hrr_tles)
+        state.hrr_tle_data_mode.update(_default_hrr_tle_modes)
+    for sentence in _default_elset_refusals:
+        state.append_log(f"[HRR] {sentence}")
+    return state
 
 
 def get_session_state(owner: SessionKey | _HasSessionKey) -> SessionState:
     """Return the :class:`SessionState` for this sign-in, creating it if absent.
 
     *owner* is the authenticated user from ``require_login``, which carries the
-    sign-in's key, or a :class:`SessionKey` directly.
+    sign-in's key, or a :class:`SessionKey` directly. A training request gets
+    the sign-in's training state (:func:`get_training_state`) instead, so no
+    route has to choose.
 
     New sessions are pre-populated with the default HRR object list, and with
     any element sets that came with it, so the threat sweep and the asset
@@ -220,21 +277,51 @@ def get_session_state(owner: SessionKey | _HasSessionKey) -> SessionState:
     object, so seeding the list alone would populate a dropdown that then
     refuses to run.
     """
-    key = _key_of(owner)
+    if in_training_request():
+        return get_training_state(owner)
+    return _operational_entry(_key_of(owner))[1]
+
+
+def _operational_entry(key: SessionKey) -> tuple[float, SessionState]:
+    """The sign-in's operational entry, when it was created and its state, created now if absent."""
     now = time.monotonic()
     _prune(now)
     if key not in _store:
-        state = SessionState()
-        if _default_hrr_objects:
-            state.hrr_objects = list(_default_hrr_objects)
-        if _default_hrr_tles:
-            state.hrr_tle_cache.update(_default_hrr_tles)
-            state.hrr_tle_data_mode.update(_default_hrr_tle_modes)
-        for sentence in _default_elset_refusals:
-            state.append_log(f"[HRR] {sentence}")
-        _store[key] = (now, state)
+        _store[key] = (now, _seeded_state())
         logger.debug("Created new session state for account %d", key.user_id)
-    return _store[key][1]
+    return _store[key]
+
+
+def get_training_state(owner: SessionKey | _HasSessionKey) -> SessionState:
+    """Return this sign-in's training state, creating it if absent.
+
+    It starts as a new operational state does, from the default watchlist and
+    its element sets, so the console in the training frame works, and it never
+    reads or writes the operational state: no UDL credentials, lists or
+    scenario time pass either way (0.47.0 review B1).
+
+    It is filed with its sign-in's creation time, not its own, so it expires
+    with the sign-in: opened late, it used to outlive it by up to 8 hours,
+    UDL password and all (review S1).
+    """
+    key = _key_of(owner)
+    anchor = _operational_entry(key)[0]
+    if key not in _training_store:
+        _training_store[key] = (anchor, _seeded_state())
+        logger.debug("Created new training state for account %d", key.user_id)
+    return _training_store[key][1]
+
+
+def discard_training_state(owner: SessionKey | _HasSessionKey) -> None:
+    """Discard this sign-in's training state, everything training put in it going with it.
+
+    Its UDL credentials are blanked as well, since a task still in flight may
+    hold the state (review S2); spectre.web.routes.training.leave_training
+    also cancels the tasks training started.
+    """
+    held = _training_store.pop(_key_of(owner), None)
+    if held is not None:
+        _blank(held[1])
 
 
 def session_alive(key: SessionKey, state: SessionState) -> bool:
@@ -244,12 +331,23 @@ def session_alive(key: SessionKey, state: SessionState) -> bool:
     not prune, so an expired sign-in still answered True until the next
     request pruned it, and a replaced state would be mistaken for this one.
     """
-    held = _store.get(key)
-    return held is not None and held[1] is state and time.monotonic() - held[0] <= _STATE_MAX_AGE_S
+    operational = _store.get(key)
+    if operational is None or time.monotonic() - operational[0] > _STATE_MAX_AGE_S:
+        return False   # the sign-in has gone, and its training state with it (review S1)
+    training = _training_store.get(key)
+    return operational[1] is state or (training is not None and training[1] is state)
+
+
+def has_session_state(key: SessionKey) -> bool:
+    """Whether this sign-in still holds planning state, operational or training (review N4)."""
+    return key in _store or key in _training_store
 
 
 def sign_in_expires_at(key: SessionKey, now: datetime) -> datetime | None:
-    """When this sign-in's planning state expires, on the wall clock, or ``None`` if not held."""
+    """When this sign-in's planning state expires, on the wall clock, or ``None`` if not held.
+
+    The operational entry's time is the anchor of the training state too, so this holds for both (review S1).
+    """
     held = _store.get(key)
     if held is None:
         return None
@@ -257,14 +355,10 @@ def sign_in_expires_at(key: SessionKey, now: datetime) -> datetime | None:
     return now + timedelta(seconds=max(remaining, 0.0))
 
 
-def has_session_state(key: SessionKey) -> bool:
-    """Whether this sign-in still holds planning state."""
-    return key in _store
-
-
 def clear_session_state(owner: SessionKey | _HasSessionKey) -> None:
-    """Remove and discard the state for one sign-in."""
+    """Remove and discard the state for one sign-in, its training state with it."""
     _store.pop(_key_of(owner), None)
+    discard_training_state(owner)
 
 
 def clear_account_state(user_id: int) -> None:
@@ -275,9 +369,9 @@ def clear_account_state(user_id: int) -> None:
     on each state as well as the state dropped: a burn watch check in flight
     still holds the state, and must find no password in it (V0.9 review 6).
     """
-    for key in [k for k in _store if k.user_id == user_id]:
-        state = _store.pop(key)[1]
-        state.udl_username = state.udl_password = None
+    for store in (_store, _training_store):
+        for key in [k for k in store if k.user_id == user_id]:
+            _blank(store.pop(key)[1])
 
 
 # ── App-level on-orbit catalog (shared across all operator sessions) ─────────

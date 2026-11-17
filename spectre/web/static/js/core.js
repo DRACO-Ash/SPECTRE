@@ -44,6 +44,45 @@
   };
   window.SPECTRE = SPECTRE;
 
+  /* The console in the training page's frame serves every request from the sign-in's training planning state, and
+     the server knows a request comes from the frame by its X-Spectre-Frame header (spectre/web/training_frame.py).
+     htmx sends it from the body's hx-headers; this adds it to every same-origin fetch() the page's scripts make
+     (operator.js, pol.js), so none of them reads or writes the operational state (0.47.0 review B1). */
+  function frameFetch(plainFetch) {
+    return function (resource, init) {
+      var url = new URL(String(resource instanceof Request ? resource.url : resource), window.location.href);
+      if (url.origin !== window.location.origin) { return plainFetch(resource, init); }
+      var options = Object.assign({}, init);
+      var headers = new Headers(options.headers || (resource instanceof Request ? resource.headers : undefined));
+      headers.set('X-Spectre-Frame', 'training');
+      options.headers = headers;
+      return plainFetch(resource, options);
+    };
+  }
+  /* XMLHttpRequest too, which htmx and any other script use (review N1): every same-origin request opened on the
+     page carries the header once. htmx also sends it from hx-headers; the second setting is skipped, as XHR would
+     otherwise join the two into "training, training". */
+  function sameOrigin(url) {
+    return new URL(String(url), window.location.href).origin === window.location.origin;
+  }
+  function frameXhr(proto) {
+    var plainOpen = proto.open;
+    var plainSet = proto.setRequestHeader;
+    proto.open = function (method, url) {
+      plainOpen.apply(this, arguments);
+      this.spectreFrameSent = sameOrigin(url);
+      if (this.spectreFrameSent) { plainSet.call(this, 'X-Spectre-Frame', 'training'); }
+    };
+    proto.setRequestHeader = function (name, value) {
+      if (this.spectreFrameSent && String(name).toLowerCase() === 'x-spectre-frame') { return; }
+      plainSet.call(this, name, value);
+    };
+  }
+  if (document.body && document.body.dataset.spectreFrame === 'training') {
+    if (window.fetch) { window.fetch = frameFetch(window.fetch.bind(window)); }
+    frameXhr(window.XMLHttpRequest.prototype);
+  }
+
   function holder(event, attr) {
     var target = event.target;
     return target && target.closest ? target.closest('[' + attr + ']') : null;

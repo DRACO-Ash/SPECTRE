@@ -7,7 +7,9 @@ YAML files; it never writes to them and never touches operational data.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -47,6 +49,28 @@ class ScenarioObjective:
     # Earned only when the attempt is submitted within the scenario's time
     # limit, as the server measures it (audit F-168).
     time_limited: bool = False
+
+    @property
+    def accepted_answer(self) -> str:
+        """The answer the scorer accepts, as the debrief shows it (audit 1-16).
+
+        Empty for an objective that is only ticked.
+        """
+        if not self.answer:
+            return ""
+        if self.answer in VERDICT_LABELS:
+            return VERDICT_LABELS[self.answer]
+        tolerance = f" ± {self.tolerance:g}" if self.tolerance is not None else ""
+        unit = f" {self.unit}" if self.unit else ""
+        return f"{self.answer}{tolerance}{unit}"
+
+
+#: The verdict answers, and how the objective's radio buttons label them.
+VERDICT_LABELS = {
+    "compliant": "Compliant",
+    "partially_compliant": "Partially Compliant",
+    "non_compliant": "Non-Compliant",
+}
 
 
 @dataclass
@@ -95,12 +119,67 @@ class TrainingScenario:
         }.get(self.difficulty, "#6b7280")
 
     @property
+    def epoch(self) -> datetime | None:
+        """The scenario's epoch in UTC, which training sets as the console's scenario start (audit 2-7, X3)."""
+        try:
+            moment = datetime.fromisoformat(str(self.scenario_epoch_utc).strip())
+        except ValueError:
+            return None
+        return moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
+
+    @property
+    def workflow(self) -> tuple[str, list[str]]:
+        """The tool workflow as its opening text and its numbered steps (audit 2-5, 3-17)."""
+        return workflow_steps(self.tool_workflow)
+
+    @property
     def blue_objects(self) -> list[ScenarioObject]:
         return [o for o in self.objects if o.side == "blue"]
 
     @property
     def red_objects(self) -> list[ScenarioObject]:
         return [o for o in self.objects if o.side == "red"]
+
+
+def workflow_steps(text: str) -> tuple[str, list[str]]:
+    """Split a folded workflow into the text before step 1 and one string per numbered step.
+
+    Folded YAML joins "1. ... 2. ..." onto one line, so the steps ran together
+    on screen (audit 2-5, 3-17). Steps are found in sequence, 1 then 2 and so
+    on, each as a number and a full stop that starts a word and is followed by
+    a space, so a figure such as 0.5 or a later "1." inside a step is not taken
+    for a step. Text with no step 1 is all opening text.
+    """
+    starts: list[tuple[int, int]] = []
+    pos = 0
+    number = 1
+    while match := re.compile(rf"(?<!\S){number}\.\s").search(text, pos):
+        starts.append((match.start(), match.end()))
+        pos = match.end()
+        number += 1
+    if not starts:
+        return _lines(text), []
+    ends = [start for start, _ in starts[1:]] + [len(text)]
+    steps = [_step(text[body:end]) for (_, body), end in zip(starts, ends, strict=True)]
+    return _lines(text[:starts[0][0]]), steps
+
+
+def _lines(text: str) -> str:
+    """*text* with each line stripped, so the folded indentation does not show."""
+    return "\n".join(line.strip() for line in text.strip().splitlines())
+
+
+def _step(text: str) -> str:
+    """One step as running text: its wrapped lines joined, a lettered sub-item ("a. ...") kept on a line of its own."""
+    joined = ""
+    for line in _lines(text).splitlines():
+        if not joined:
+            joined = line
+        elif re.match(r"[a-z]\.\s", line):
+            joined += "\n" + line
+        else:
+            joined += " " + line
+    return joined
 
 
 # ── Loader ─────────────────────────────────────────────────────────────────────
@@ -189,6 +268,35 @@ def load_scenarios() -> list[TrainingScenario]:
 def get_scenario(scenario_id: str) -> TrainingScenario | None:
     """Return a single scenario by ID, or None if not found."""
     return next((s for s in load_scenarios() if s.id == scenario_id), None)
+
+
+def content_title(entry: str) -> str:
+    """The title of the scenario, challenge or tutorial an unlock entry names (audit 1-24).
+
+    An entry is ``kind:id``, shown as "Kind: Title"; a bare scenario id is
+    shown as its title. One that names nothing known keeps its id.
+    """
+    kind, _, item = entry.partition(":")
+    if not item:
+        kind, item = "", entry
+    if kind == "tutorial":
+        # Deferred: tutorials is a sibling that reads YAML of its own.
+        from spectre.training.tutorials import get_tutorial
+
+        tutorial = get_tutorial(item)
+        title = tutorial.title if tutorial else item
+    else:
+        scenario = get_scenario(item)
+        title = scenario.title if scenario else item
+    label = {"scenario": "Scenario", "challenge": "Challenge", "tutorial": "Tutorial"}.get(kind)
+    return f"{label}: {title}" if label else title
+
+
+def with_titles(text: str) -> str:
+    """*text* with every scenario id in it replaced by that scenario's title (audit 4-16)."""
+    for scenario in load_scenarios():
+        text = re.sub(rf"\b{re.escape(scenario.id)}\b", scenario.title, text)
+    return text
 
 
 def scenarios_for_level(level: int) -> list[TrainingScenario]:

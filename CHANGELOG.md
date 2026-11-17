@@ -9,6 +9,35 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-11-17
+
+**Training no longer touches operations, and the console faults the training audit found are fixed: element cards, honest Intercept Engine results, and your own satellite as the one that manoeuvres.**
+
+The owner could not complete the first training scenario. Four agents then played every tutorial and scenario in a browser and found 84 problems (`docs/training-audit-2026-11-16.md`). This release fixes the console and training mechanics behind them. The scenarios and tutorials themselves are rewritten on real data in the training redesign (`docs/training-game-design.md`), so their text is not patched here. Finding numbers below are the audit's.
+
+### Added
+- An element card for every Blue asset and Red track: click the name to see the element set's epoch and age, data mode, a, e, i, RAAN, argument of perigee, mean anomaly, period, perigee and apogee altitude, regime, and, for a near-geostationary object, the longitude under it at the scenario time (2-1). The figures are the set's mean elements, as the card says.
+- Asset Screening lists your own Blue assets after the watchlist and screens them from their own element sets (2-3). Your choice and Max ΔV survive adding or removing an asset, and an asset is never screened against itself.
+- Intercept Engine: a "Manoeuvring satellite: Red / Blue" choice (4-3, 2-11). Red, the default, is unchanged. Blue plans your own satellite's move against the threat; every row says which satellite burns, the headline reads "Cheapest option", and the three assessments of the manoeuvring satellite's own behaviour are left out. The CSV export carries which side manoeuvred and which satellite burned.
+- Intercept Engine: a sortable Miss Dist (km) column (3-5).
+- Training: its own planning state. Scenario objects, the scenario clock, and anything added, fetched or connected inside the training console live only there, and are discarded on Return to Operations or when the sign-in ends. Operational lists, scenario time, UDL credentials and background tasks are never read or changed by training, and a Decision Engine run in training writes no decision record. The training console shows a TRAINING CONSOLE strip (1-13, 1-21).
+- Training: starting a scenario sets the training console's scenario time to the scenario's epoch, which is shown on the scenario panel (2-7, X3, 4-8).
+- Training: the debrief lists every objective, met or not, with the answer given (1-16); the accepted answer shows only for objectives met or after a passed scored attempt, never after Explore.
+
+### Fixed
+- Training's console tab reloads after a scenario starts, resets, is abandoned or submitted, so pre-loaded objects always show (F0, the owner's report).
+- Intercept Engine: the ranked table stays in view after a run instead of switching to Trade-Space (X2).
+- Intercept Engine: COLA, Evasion and Formation Defence report the closest approach after the burn, searched around the assumed time of closest approach, not the separation at one instant or the distance they were asked for (3-6, 2-9). The search widens when the minimum sits at its edge; when none is found the row shows the least separation as a floor (≥ X km), never as a miss. Each summary names the satellite that burns, and rounds ΔV as the table does.
+- Intercept Engine: J2 drift finds an altitude change that closes the RAAN gap within 10 years instead of failing with a date error or arriving in 2130 (3-18); beyond that it reads NOT REACHABLE, planes within 0.1° read ALIGNED, and two near-equatorial orbits read NOT APPLICABLE.
+- Intercept Engine: the data mode shown is the selected object's own (training objects read SYNTHETIC, hand-entered ones MANUAL) instead of UNVERIFIED (2-14). The geometry view flies the burn on the satellite that burns, and GEO drift labels its longitude gap and flown closest approach separately.
+- Training: points are awarded on a pass only (G-1, 1-20); a timed scenario submitted late does not pass (4-7); Abandon cancels the attempt without costing the first-try bonus (G-3); Reset of a locked scenario is refused.
+- Training: typing an answer ticks its objective, and an hours answer may be written T+18h; only plain numbers are read (3-3).
+- Training: sidebar, banner and lists update after a completion, submit or level-up without a reload (1-18, G-4); Recommended Next Step states every condition of the next level (1-19); locked tutorials cannot be read (1-26); titles replace ids (1-24); dates are in UK format (1-25); the banner no longer covers the header (1-22); the console inside the training page hides its own Training link (1-23); workflow steps show as a numbered list (2-5).
+- Operator Guide: the Training section described levels, skill axes and a points system the application never had; it now states the real ones, and the Intercept Engine section describes this release's changes.
+
+### Changed
+- CI: two browser waits use selectors instead of string conditions, which the page's policy refused whenever the page was slow.
+
 ## [0.46.0] - 2026-11-16
 
 **The Pree scoring core is in SPECTRE: it scores how threatening the observed evidence is, and says how much of that evidence was there to read.**

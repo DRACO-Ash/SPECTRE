@@ -5,6 +5,33 @@
  * data-remaining-s, where Jinja used to write it into the script.
  */
 
+/* The console frame loads the console by name, so the console knows it is inside training: it then hides its own
+   Training link and does not clean up after training as a console opened directly does (routes/training.py). */
+var TRAINING_CONSOLE_URL = '/?frame=training';
+
+/* Whether the frame shows planning lists or a scenario time that have since changed. A scenario start, reset, abandon
+   or submission raises training-console-stale (routes/training.py), and the frame then reloads when the Console tab
+   is next shown, or at once if it is showing. It used to load once and keep showing the first scenario's lists
+   (audit F0). Opening the tab with nothing changed keeps the frame as it was, so work in it is not lost. */
+var trainingConsoleStale = true;
+
+function loadTrainingConsole() {
+  var frame = document.getElementById('training-console-frame');
+  if (!frame) return;
+  frame.src = TRAINING_CONSOLE_URL;
+  trainingConsoleStale = false;
+}
+
+function trainingConsoleShowing() {
+  var panel = document.getElementById('tpanel-console');
+  return Boolean(panel) && panel.style.display === 'block';
+}
+
+document.addEventListener('training-console-stale', function () {
+  trainingConsoleStale = true;
+  if (trainingConsoleShowing()) loadTrainingConsole();
+});
+
 function trainingTab(id) {
   var isConsole = id === 'console';
   var main = document.getElementById('training-main');
@@ -20,12 +47,7 @@ function trainingTab(id) {
     main.style.overflow = 'hidden';
     main.style.padding  = '0';
     main.style.position = 'relative';
-    // Lazy-load iframe: only set src once
-    var frame = document.getElementById('training-console-frame');
-    if (frame && !frame.dataset.loaded) {
-      frame.src = '/';
-      frame.dataset.loaded = '1';
-    }
+    if (trainingConsoleStale) loadTrainingConsole();
   } else {
     main.style.overflow = 'auto';
     main.style.padding  = '0.75rem';
@@ -60,9 +82,6 @@ SPECTRE.action('loadFirstScenario', function (btn) {
   htmx.ajax('GET', btn.dataset.scenarioUrl, { target: '#scenario-detail', swap: 'innerHTML' });
   setTimeout(scrollScenarioDetail, 300);
 });
-SPECTRE.action('clearScenarioDetail', function () {
-  document.getElementById('scenario-detail').innerHTML = '';
-});
 SPECTRE.afterRequest('scrollScenarioDetail', function () { setTimeout(scrollScenarioDetail, 100); });
 
 /* ── A scenario attempt: the objectives ticked, and the countdown ── */
@@ -73,6 +92,17 @@ function updateObjectivesJson() {
   document.getElementById('objectives-json').value = JSON.stringify(checked);
 }
 SPECTRE.action('updateObjectivesJson', function () { updateObjectivesJson(); });
+
+/* Typing an answer, or choosing a verdict, ticks its objective: an answer typed under an unticked box used to score
+   nothing (audit 3-3). Clearing the answer leaves the box as it is. */
+SPECTRE.action('answerTicksObjective', function (field) {
+  if (!field.value.trim()) return;
+  var box = document.getElementById('obj-box-' + field.dataset.objective);
+  if (box && !box.checked) {
+    box.checked = true;
+    updateObjectivesJson();
+  }
+});
 
 SPECTRE.init('scenario-attempt', function (marker) {
   if (marker.dataset.remainingS === undefined) return;

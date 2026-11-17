@@ -68,6 +68,7 @@ from spectre.domain.manoeuvre_calibration import (
     to_km_s,
 )
 from spectre.domain.models import (
+    BlueAsset,
     RedTrack,
     SweepBurn,
     ThreatActor,
@@ -3252,8 +3253,13 @@ class _Candidates(NamedTuple):
     passed_over_notes: list[str] = []
 
 
-async def _select_candidates(state: object, asset_regime: str, this_year: int) -> _Candidates:
+async def _select_candidates(
+    state: object, asset_regime: str, this_year: int, *, asset_satno: str = "",
+) -> _Candidates:
     """Choose which red objects to screen against this asset, fetching the element sets they are screened on.
+
+    The asset itself, *asset_satno*, is never one of its own actors: a session Blue asset or a pasted set can be an
+    object the watchlist holds as red, and it was screened against itself (training audit 2026-11-16, finding 2-3).
 
     Every empty outcome carries a different sentence. An operator reading
     "no candidates" has to be able to tell a missing watchlist from a
@@ -3281,7 +3287,18 @@ async def _select_candidates(state: object, asset_regime: str, this_year: int) -
         1 for o in hrr_objects
         if str(o.get("country") or "").strip().upper() in _RED_COUNTRIES
     )
+    regime_text = asset_regime or "this asset"
     in_reach = _actors_in_reach(state, asset_regime)
+    itself =[a for a in in_reach if _same_satno(a.actor_satno, asset_satno)]
+    in_reach = [a for a in in_reach if a not in itself]
+    itself_note = (
+        f"{itself[0].actor_name} ({itself[0].actor_satno}) is the asset screened, so it is not screened as an actor "
+        "against itself."
+    ) if itself else ""
+    if itself and not in_reach:
+        return _Candidates(error=(
+            f"No other red HRR object is in a regime compatible with {regime_text}. {itself_note}"
+        ))
     catalogue = _catalogue_index()
     able, settled = _judge_actors(state, in_reach, this_year, catalogue, read_sets=False)
     walk = await _walk_to_cap(state, able, this_year, catalogue)
@@ -3291,16 +3308,16 @@ async def _select_candidates(state: object, asset_regime: str, this_year: int) -
     not_screened = _exclusion_note(excluded) if excluded else ""
     if not actors and excluded:
         return _Candidates(error=(
-            f"No red HRR object in a regime compatible with {asset_regime or 'this asset'} can act. {not_screened}"
+            f"No red HRR object in a regime compatible with {regime_text} can act. {not_screened}"
         ))
     if not actors:
         return _Candidates(error=(
             f"No red HRR objects are in a regime compatible with "
-            f"{asset_regime or 'this asset'}. {red_population} red object(s) "
+            f"{regime_text}. {red_population} red object(s) "
             "were considered and all were excluded by regime."
         ))
 
-    notes: list[str] = []
+    notes: list[str] = [itself_note] if itself_note else []
     if walk.unreached:
         # The payloads past the cap are not fetched, so their age is not judged: the count is of those not left out
         # before the walk stopped.
@@ -3316,18 +3333,49 @@ async def _select_candidates(state: object, asset_regime: str, this_year: int) -
     )
 
 
+def _same_satno(left: str, right: str) -> bool:
+    """Whether two catalogue numbers name one object, leading zeros aside; an empty one names none."""
+    a, b = str(left).strip().lstrip("0"), str(right).strip().lstrip("0")
+    return bool(a) and a == b
+
+
 class _ResolvedAsset(NamedTuple):
     """The asset to screen, or why it could not be resolved.
 
     Pulled out of the handler because resolving which object the operator
     means, and where its element set comes from, is a separate job from
     screening it. Every failure here is a sentence the operator can act on.
+    *source* is the asset's ThreatTarget.target_source and *data_mode* the
+    mode its own set carries, empty for an HRR object, whose mode the cache
+    records (training audit 2026-11-16, finding 2-3).
     """
 
     tle: str = ""
     satno: str = ""
     name: str = ""
     error: str = ""
+    source: str = "hrr"
+    data_mode: str = ""
+
+
+#: The selector value prefix naming one of the session's own Blue assets rather than an HRR satno (training audit
+#: 2026-11-16, finding 2-3). A catalogue number can start with a letter (Alpha-5, SPC-026) but never holds a colon,
+#: so the colon makes the prefix unambiguous.
+_SESSION_BLUE = "blue:"
+
+
+def _resolve_session_blue(state: object, name: str) -> _ResolvedAsset:
+    """A Blue asset the operator added, or a training scenario did, screened from its own element set."""
+    asset = next((a for a in state.blue_assets if a.name == name), None)  # type: ignore[attr-defined]
+    if asset is None:
+        return _ResolvedAsset(error=(
+            f"Blue asset {name} is no longer in the session. Choose another, or add it again from the Assets panel."
+        ))
+    satno = satno_from_tle(asset.tle)
+    return _ResolvedAsset(
+        tle=asset.tle, satno=str(satno) if satno is not None else "", name=asset.stk_name,
+        source="blue", data_mode=asset.data_mode,
+    )
 
 
 def _resolve_asset(
@@ -3348,6 +3396,8 @@ def _resolve_asset(
 
     if not asset_satno:
         return _ResolvedAsset(error="Select a blue asset to screen, or paste its TLE.")
+    if asset_satno.startswith(_SESSION_BLUE):
+        return _resolve_session_blue(state, asset_satno.removeprefix(_SESSION_BLUE))
 
     tle = _resolve_hrr_tle(state, asset_satno)
     if not tle:
@@ -3371,8 +3421,14 @@ def _resolve_asset(
 async def screen_config(
     request: Request,
     current_user: Annotated[User, Depends(require_login)],
+    asset_satno: Annotated[str, Query(max_length=200)] = "",
+    max_dv_m_s: Annotated[str, Query(max_length=32)] = "",
 ) -> HTMLResponse:
-    """Return the blue asset selector for the screening panel."""
+    """Return the blue asset selector for the screening panel.
+
+    The selector reloads when the session's Blue assets change, carrying the asset chosen and the budget typed, so
+    both survive it (training audit 2026-11-16, finding 2-3, review of 0.47.0).
+    """
     state = get_session_state(current_user)
     assets = [
         {
@@ -3398,9 +3454,44 @@ async def screen_config(
         "has_udl": bool(state.udl_username),
         "has_hrr": bool(state.hrr_objects),
         "assets": assets,
+        "session_blue": _session_blue_options(state.blue_assets),
+        "selected": asset_satno.strip(),
+        "max_dv_m_s": _kept_budget(max_dv_m_s),
         "red_total": red_total,
         "synthetic_elements": bool(modes - {"REAL"}),
     })
+
+
+def _kept_budget(typed: str) -> float:
+    """The budget the operator had typed, if it is one the screen accepts, else the default."""
+    try:
+        value = float(typed)
+    except ValueError:
+        return DEFAULT_SWEEP_BUDGET_M_S
+    return value if math.isfinite(value) and 0.0 <= value <= _MAX_BUDGET_M_S else DEFAULT_SWEEP_BUDGET_M_S
+
+
+#: The largest budget the screen accepts, m/s; the selector keeps a typed budget only within it.
+_MAX_BUDGET_M_S = 100000.0
+
+
+def _session_blue_options(blue_assets: Sequence[BlueAsset]) -> list[dict[str, str]]:
+    """The session's own Blue assets for the selector, after the HRR objects, each labelled with its data mode.
+
+    Hand-added and training assets were not offered at all, so a scenario's BLUE-01 could not be screened
+    (training audit 2026-11-16, finding 2-3). Each is screened from its own element set.
+    """
+    options = []
+    for asset in blue_assets:
+        satno = satno_from_tle(asset.tle)
+        options.append({
+            "value": f"{_SESSION_BLUE}{asset.name}",
+            "name": asset.stk_name,
+            "satno": str(satno) if satno is not None else "",
+            "regime": _regime_of_tle(asset.tle),
+            "data_mode": asset.data_mode,
+        })
+    return options
 
 
 # PLR0913, PLR0917: one argument per field of the adjudication form.
@@ -3445,7 +3536,7 @@ async def threat_screen(
     # fields. FastAPI binds these by name, so the order is not observable.
     current_user: Annotated[User, Depends(require_login)],
     asset_satno: Annotated[str, Form()] = "",
-    max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0)] = DEFAULT_SWEEP_BUDGET_M_S,
+    max_dv_m_s: Annotated[float, Form(ge=0.0, le=_MAX_BUDGET_M_S)] = DEFAULT_SWEEP_BUDGET_M_S,
 ) -> HTMLResponse:
     """Screen ONE blue asset against every candidate red actor in reach.
 
@@ -3478,13 +3569,13 @@ async def threat_screen(
     asset = ThreatTarget(
         target_name=asset_name,
         target_satno=asset_satno,
-        target_source="hrr" if not manual_asset_tle else "manual",
+        target_source="manual" if manual_asset_tle else resolved.source,
         hrr_rank=None,
     )
 
     # ── Enumerate candidate actors ───────────────────────────────────────────
     # Fetches any missing or synthetic element set before a payload's age is judged on it (SPC-239).
-    candidates = await _select_candidates(state, asset_regime, now.year)
+    candidates = await _select_candidates(state, asset_regime, now.year, asset_satno=asset_satno)
     if candidates.error:
         return _fail(candidates.error)
     actors = candidates.actors
@@ -3502,7 +3593,10 @@ async def threat_screen(
 
     screening = rank_actors(run.verdicts)
     # Read after _select_candidates's refresh, which replaces synthetic sets when it can.
-    asset_mode = "MANUAL" if manual_asset_tle else state.hrr_tle_data_mode.get(asset_satno, "REAL")
+    # A session Blue asset carries its own mode; an HRR object's is the cache's (training audit 2026-11-16, 2-3).
+    asset_mode = "MANUAL" if manual_asset_tle else (
+        resolved.data_mode or state.hrr_tle_data_mode.get(asset_satno, "REAL")
+    )
     actor_modes = {
         v.actor_satno: state.hrr_tle_data_mode.get(v.actor_satno, "REAL")
         for v in run.verdicts

@@ -10,20 +10,29 @@ They ONLY:
   - Read training_* database tables via get_db()
   - Read static YAML configs via spectre.training.*
   - Write to training_* database tables
-  - Pre-load synthetic scenario TLEs into SessionState on scenario start
-    (intentional bridge: training TLEs are fully synthetic, never from UDL)
+  - Pre-load synthetic scenario TLEs into the sign-in's TRAINING planning
+    state on scenario start, remove them when the scenario ends, and set that
+    state's scenario time to the scenario's epoch
+
+The training planning state (spectre.web.planning_state.get_training_state)
+is the sign-in's own, apart from its operational one: every /training route
+and every request from the console in the training frame uses it
+(spectre.web.training_frame), and it is discarded when the operator leaves
+training. Nothing here reads or writes the operational lists or window
+(0.47.0 review B1).
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+import re
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import Select, select, update
+from sqlalchemy import Select, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,24 +42,42 @@ from spectre.training.gamification import (
     check_level_up,
     get_config,
     level_progress_fraction,
+    next_level_gates,
     points_to_next_level,
     recommended_next_step,
 )
 from spectre.training.models import ChallengeResult, TrainingProgress, TrainingSession
-from spectre.training.scenarios import get_scenario, scenarios_for_level
+from spectre.training.scenarios import (
+    VERDICT_LABELS,
+    content_title,
+    get_scenario,
+    scenarios_for_level,
+    with_titles,
+)
 from spectre.training.tutorials import get_tutorial, tutorials_for_level
 from spectre.web.auth import require_login
 from spectre.web.database import get_db
 from spectre.web.deps import render
 from spectre.web.elsets import refused
 from spectre.web.models import User
-from spectre.web.planning_state import get_session_state
+from spectre.web.planning_state import SessionState, discard_training_state, get_training_state
+from spectre.web.routes.udl import cancel_training_tasks
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/training", tags=["training"])
 
 _SCENARIO_NOT_FOUND = '<p class="error-msg">Scenario not found.</p>'
+_DETAIL_TEMPLATE = "partials/training_scenario_detail.html"
+
+#: The events a training response raises for the page (training.js, training.html). training-changed re-fetches
+#: the sidebar, banner, dashboard, tutorial and scenario lists (audit 1-18, G-4); training-console-stale marks the
+#: console frame for a reload, because the planning lists or the scenario time changed (audit F0).
+_CHANGED = "training-changed"
+_CHANGED_AND_STALE = "training-changed, training-console-stale"
+
+CurrentUser = Annotated[User, Depends(require_login)]
+Db = Annotated[AsyncSession, Depends(get_db)]
 
 
 # ── Helper: get-or-create TrainingProgress ───────────────────────────────────
@@ -162,107 +189,149 @@ async def _scored_attempts(db: AsyncSession, user_id: int, scenario_id: str) -> 
     return len(rows)
 
 
+def _changed(response: HTMLResponse, *, console: bool = True) -> HTMLResponse:
+    """*response*, raising the events that bring the rest of the training page up to date."""
+    response.headers["HX-Trigger"] = _CHANGED_AND_STALE if console else _CHANGED
+    return response
+
+
+# ── The hub's progress panels ─────────────────────────────────────────────────
+
+async def _hub_context(owner: User, db: AsyncSession, progress: TrainingProgress) -> dict[str, Any]:
+    """Everything the sidebar, banner, dashboard, tutorial and scenario lists show.
+
+    One builder for the page, the dashboard and the refresh that follows every
+    change, so they cannot disagree (audit 1-18, 1-19).
+    """
+    cfg = get_config()
+    available = scenarios_for_level(progress.current_level)
+    free_play = [s for s in available if not s.challenge]
+    return {
+        "progress": progress,
+        "cfg": cfg,
+        "level_def": cfg.level_def(progress.current_level),
+        "next_lv_def": cfg.level_def(progress.current_level + 1),
+        "progress_pct": int(level_progress_fraction(progress.current_level, progress.total_points) * 100),
+        "pts_needed": points_to_next_level(progress.current_level, progress.total_points),
+        "gates": next_level_gates(progress),
+        "recommendation": recommended_next_step(progress),
+        "free_play_scenarios": free_play,
+        "challenge_scenarios": [s for s in available if s.challenge],
+        "unlocked_tutorials": tutorials_for_level(progress.unlocked),
+        "recent_results": (await db.execute(_recent_scored(owner.id, 5))).scalars().all(),
+        "first_scenario": free_play[0] if free_play else None,
+        "content_title": content_title,
+    }
+
+
 # ── Main training page ────────────────────────────────────────────────────────
 
 @router.get("", response_class=HTMLResponse)
 @router.get("/", response_class=HTMLResponse)
-async def training_home(
-    request: Request,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
-) -> HTMLResponse:
+async def training_home(request: Request, current_user: CurrentUser, db: Db) -> HTMLResponse:
     """Main training hub — opens (or resumes) a training session."""
     progress = await _get_or_create_progress(current_user, db)
-    cfg      = get_config()
-
-    # Open a new session row (we close it on departure via /training/leave)
     session = await _open_session(current_user, db)
-
-    available = scenarios_for_level(progress.current_level)
-    challenges = [s for s in available if s.challenge]
-    free_play  = [s for s in available if not s.challenge]
-    unlocked_tutorials = tutorials_for_level(progress.unlocked)
-
-    recent_results = (await db.execute(_recent_scored(current_user.id, 10))).scalars().all()
-
-    level_def    = cfg.level_def(progress.current_level)
-    next_lv_def  = cfg.level_def(progress.current_level + 1)
-    progress_pct = int(level_progress_fraction(progress.current_level, progress.total_points) * 100)
-    pts_needed   = points_to_next_level(progress.current_level, progress.total_points)
-    recommendation = recommended_next_step(
-        progress.axis_points,
-        progress.tutorials_completed,
-        progress.current_level,
-    )
-
     return render(request, "training.html", {
+        **await _hub_context(current_user, db, progress),
         "user": current_user,
-        "progress": progress,
-        "cfg": cfg,
-        "level_def": level_def,
-        "next_lv_def": next_lv_def,
-        "progress_pct": progress_pct,
-        "pts_needed": pts_needed,
-        "recommendation": recommendation,
-        "free_play_scenarios": free_play,
-        "challenge_scenarios": challenges,
-        "unlocked_tutorials": unlocked_tutorials,
-        "recent_results": recent_results,
         "training_session_id": session.id,
     })
 
 
+@router.get("/refresh", response_class=HTMLResponse)
+async def training_refresh(request: Request, current_user: CurrentUser, db: Db) -> HTMLResponse:
+    """The hub's progress panels, each swapped out of band into its place (audit 1-18, G-4).
+
+    The page asks for this whenever a response raises training-changed, so a
+    completion, a submission or a level-up shows without a reload.
+    """
+    progress = await _get_or_create_progress(current_user, db)
+    return render(request, "partials/training_refresh.html", await _hub_context(current_user, db, progress))
+
+
 # ── Leave training mode ───────────────────────────────────────────────────────
 
-@router.post("/leave", response_class=RedirectResponse)
-async def training_leave(
-    request: Request,
-    session_id: Annotated[int, Form()] = 0,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
-    """Close the training session, remove its scenario objects, return to Operations."""
-    _remove_training_objects(current_user)
-    if session_id:
-        result = await db.execute(
-            select(TrainingSession).where(
-                TrainingSession.id == session_id,
-                TrainingSession.user_id == current_user.id,
-            )
-        )
-        ts = result.scalar_one_or_none()
-        if ts and ts.ended_at is None:
-            # A local, aware now: ts.ended_at is typed as the column, and
-            # SQLite hands it back naive after a refresh (audit F-264).
-            now = datetime.now(UTC)
-            ts.ended_at = now
-            # Accrue time — normalise started_at to UTC-aware in case SQLite returns naive
-            started = ts.started_at
-            if started.tzinfo is None:
-                started = started.replace(tzinfo=UTC)
-            elapsed = (now - started).total_seconds() / 60.0
-            prog = await _get_or_create_progress(current_user, db)
-            prog.time_in_training_minutes += elapsed
-            await db.commit()
+async def leave_training(owner: User, db: AsyncSession) -> None:
+    """Everything leaving training undoes (audit 1-21).
 
+    The sign-in's training planning state is discarded, with every object and
+    the scenario time training put in it and anything added by hand in the
+    training frame; the operational state was never touched, so there is
+    nothing to put back (0.47.0 review B1). An attempt still open is cancelled
+    (its panel has gone with the page), and the open session is closed with
+    its time added to the operator's total.
+    """
+    # Tasks training started (a UDL login in the frame) go too; the operational ones are untouched (review S2).
+    cancel_training_tasks(owner.session_key)
+    discard_training_state(owner)
+    await _cancel_open_attempts(db, owner)
+    await _close_sessions(db, owner)
+    await db.commit()
+
+
+async def _close_sessions(db: AsyncSession, owner: User) -> None:
+    """Close every open training session of *owner*, adding its time to their total."""
+    open_sessions = (await db.execute(
+        select(TrainingSession).where(TrainingSession.user_id == owner.id, TrainingSession.ended_at.is_(None))
+    )).scalars().all()
+    if not open_sessions:
+        return
+    # A local, aware now: ts.ended_at is typed as the column, and SQLite hands
+    # it back naive after a refresh (audit F-264).
+    now = datetime.now(UTC)
+    prog = await _get_or_create_progress(owner, db)
+    for ts in open_sessions:
+        ts.ended_at = now
+        started = ts.started_at if ts.started_at.tzinfo else ts.started_at.replace(tzinfo=UTC)
+        prog.time_in_training_minutes += max(0.0, (now - started).total_seconds() / 60.0)
+
+
+@router.post("/leave", response_class=RedirectResponse)
+async def training_leave(current_user: CurrentUser, db: Db) -> RedirectResponse:
+    """Close the training session, remove its scenario objects, return to Operations."""
+    await leave_training(current_user, db)
     return RedirectResponse(url="/", status_code=303)
 
 
-def _remove_training_objects(owner: User) -> None:
-    """Drop every object a training scenario added to the operator's lists."""
-    state = get_session_state(owner)
+def _remove_training_objects(state: SessionState) -> None:
+    """Drop every object a scenario added to the training lists; objects added by hand in the frame stay."""
     state.blue_assets = [a for a in state.blue_assets if not a.training]
     state.red_tracks = [t for t in state.red_tracks if not t.training]
 
 
+def _set_scenario_time(state: SessionState, scenario: Any) -> None:
+    """Make *scenario*'s epoch the training console's scenario start, its horizon the window's end.
+
+    The console's Manoeuvre Start and the other tools read the scenario start
+    and fall back to now when it is blank, so synthetic objects were
+    propagated months past their epoch (audit 2-7, X3, 4-8). *state* is the
+    training state, so the operational window is never touched.
+    """
+    epoch = scenario.epoch
+    if epoch is None:
+        return
+    state.scenario_start = epoch
+    state.scenario_stop = epoch + timedelta(hours=scenario.horizon_hours)
+
+
 # ── Scenario detail panel ─────────────────────────────────────────────────────
+
+async def _detail(request: Request, owner: User, db: AsyncSession, scenario: Any) -> HTMLResponse:
+    """The scenario's briefing panel, before an attempt starts."""
+    progress = await _get_or_create_progress(owner, db)
+    # Scored attempts only, so the number shown is the one the start records.
+    return render(request, _DETAIL_TEMPLATE, {
+        "scenario": scenario,
+        "progress": progress,
+        "attempt_number": await _scored_attempts(db, owner.id, scenario.id) + 1,
+        "titles": with_titles,
+    })
+
 
 @router.get("/scenario/{scenario_id}", response_class=HTMLResponse)
 async def training_scenario_detail(
-    request: Request,
-    scenario_id: str,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    request: Request, scenario_id: str, current_user: CurrentUser, db: Db,
 ) -> HTMLResponse:
     """Return scenario briefing and objectives panel."""
     scenario = get_scenario(scenario_id)
@@ -273,13 +342,7 @@ async def training_scenario_detail(
     locked = _scenario_locked(progress, scenario)
     if locked is not None:
         return locked
-
-    # Scored attempts only, so the number shown is the one the start records.
-    return render(request, "partials/training_scenario_detail.html", {
-        "scenario": scenario,
-        "progress": progress,
-        "attempt_number": await _scored_attempts(db, current_user.id, scenario_id) + 1,
-    })
+    return await _detail(request, current_user, db, scenario)
 
 
 # ── Start a scenario attempt ──────────────────────────────────────────────────
@@ -289,11 +352,12 @@ def _preload_training_objects(scenario: Any, owner: User) -> None:
 
     SPECTRE panels can then work with them immediately. Training TLEs are
     fully synthetic and never come from UDL. They are tagged as training
-    objects and removed when the operator leaves training; untagged, they
-    used to stay in the operational lists for good (audit F-051).
+    objects and removed when the scenario ends or the operator leaves
+    training; untagged, they used to stay in the operational lists for good
+    (audit F-051).
     """
     try:
-        state = get_session_state(owner)
+        state = get_training_state(owner)
         for obj in scenario.objects:
             held: list[Any] = state.blue_assets if obj.side == "blue" else state.red_tracks
             if any(obj.satno == getattr(h, "satno", None) or obj.name == h.name for h in held):
@@ -311,6 +375,32 @@ def _preload_training_objects(scenario: Any, owner: User) -> None:
         logger.warning("Could not pre-load scenario TLEs into session state: %s", _tl_exc)
 
 
+async def _cancel_open_attempts(db: AsyncSession, owner: User, result_id: int | None = None) -> None:
+    """Delete *owner*'s attempts not yet submitted (only *result_id*, when given), and uncount the scored ones.
+
+    An attempt left open counted as made, so the next one lost the first-try
+    bonus (audit G-3). Submitted attempts are never touched.
+    """
+    query = select(ChallengeResult).where(
+        ChallengeResult.user_id == owner.id, ChallengeResult.completed_at.is_(None),
+    )
+    if result_id is not None:
+        query = query.where(ChallengeResult.id == result_id)
+    ids = [cr.id for cr in (await db.execute(query)).scalars().all()]
+    if not ids:
+        return
+    # The delete itself re-checks that each row is still open, so an attempt
+    # submitted since the select is never removed, and the count given back is
+    # the scored rows this delete removed, not those the select saw.
+    still_open = (ChallengeResult.id.in_(ids), ChallengeResult.completed_at.is_(None))
+    scored = (await db.execute(delete(ChallengeResult).where(*still_open, ChallengeResult.scored.is_(True))))
+    await db.execute(delete(ChallengeResult).where(*still_open))
+    removed: int = scored.rowcount  # type: ignore[attr-defined]
+    if removed:
+        progress = await _get_or_create_progress(owner, db)
+        progress.scenarios_started = max(0, progress.scenarios_started - removed)
+
+
 async def _start_scenario(
     scenario_id: str,
     owner: User,
@@ -318,7 +408,11 @@ async def _start_scenario(
     scored: bool,
     request: Request,
 ) -> HTMLResponse:
-    """Shared logic for scored and explore-mode scenario starts."""
+    """Shared logic for scored and explore-mode scenario starts.
+
+    The last scenario's objects and any attempt still open go first, so the
+    lists hold this scenario's objects only (audit 1-21).
+    """
     scenario = get_scenario(scenario_id)
     if scenario is None:
         return HTMLResponse(_SCENARIO_NOT_FOUND, status_code=404)
@@ -328,7 +422,11 @@ async def _start_scenario(
     if locked is not None:
         return locked
 
+    state = get_training_state(owner)
+    _remove_training_objects(state)
+    await _cancel_open_attempts(db, owner)
     _preload_training_objects(scenario, owner)
+    _set_scenario_time(state, scenario)
 
     # Explore runs are not numbered; a scored attempt counts only scored ones.
     attempt_num = await _scored_attempts(db, owner.id, scenario_id) + 1 if scored else 0
@@ -347,20 +445,18 @@ async def _start_scenario(
     await db.commit()
     await db.refresh(cr)
 
-    return render(request, "partials/training_scenario_active.html", {
+    return _changed(render(request, "partials/training_scenario_active.html", {
         "scenario": scenario,
         "result_id": cr.id,
         "attempt_num": attempt_num,
         "scored": scored,
-    })
+        "titles": with_titles,
+    }))
 
 
 @router.post("/scenario/{scenario_id}/start", response_class=HTMLResponse)
 async def training_scenario_start(
-    request: Request,
-    scenario_id: str,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    request: Request, scenario_id: str, current_user: CurrentUser, db: Db,
 ) -> HTMLResponse:
     """Start a scored attempt."""
     return await _start_scenario(scenario_id, current_user, db, scored=True, request=request)
@@ -368,10 +464,7 @@ async def training_scenario_start(
 
 @router.post("/scenario/{scenario_id}/explore", response_class=HTMLResponse)
 async def training_scenario_explore(
-    request: Request,
-    scenario_id: str,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    request: Request, scenario_id: str, current_user: CurrentUser, db: Db,
 ) -> HTMLResponse:
     """Start an unscored free-exploration run.
 
@@ -383,49 +476,54 @@ async def training_scenario_explore(
     return await _start_scenario(scenario_id, current_user, db, scored=False, request=request)
 
 
-# ── Reset active scenario ─────────────────────────────────────────────────────
+# ── Reset or abandon the active scenario ──────────────────────────────────────
 
 @router.post("/scenario/{scenario_id}/reset", response_class=HTMLResponse)
 async def training_scenario_reset(
     request: Request,
     scenario_id: str,
     result_id: Annotated[int, Form()],
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser,
+    db: Db,
 ) -> HTMLResponse:
     """Delete the in-progress ChallengeResult and return a fresh scenario detail.
 
-    This is the clean-reset path: the operator returns to the pre-start briefing
-    with no side effects.  Only the current attempt row is removed; previously
-    completed attempts are preserved.
+    This is the clean-reset path: the operator returns to the pre-start
+    briefing with the scenario's objects gone from the planning lists. Only
+    the current attempt row is removed; previously completed attempts are
+    preserved.
     """
-    cr_result = await db.execute(
-        select(ChallengeResult).where(
-            ChallengeResult.id == result_id,
-            ChallengeResult.user_id == current_user.id,
-        )
-    )
-    cr = cr_result.scalar_one_or_none()
-    if cr is not None and cr.completed_at is None:
-        # Only delete if not yet submitted — don't destroy a scored record
-        await db.delete(cr)
-        # Roll back scenarios_started counter if this was a scored attempt
-        if cr.scored:
-            progress = await _get_or_create_progress(current_user, db)
-            progress.scenarios_started = max(0, progress.scenarios_started - 1)
-        await db.commit()
+    await _cancel_open_attempts(db, current_user, result_id)
+    _remove_training_objects(get_training_state(current_user))
+    await db.commit()
 
-    # Return the scenario detail panel (pre-start state)
     scenario = get_scenario(scenario_id)
     if scenario is None:
         return HTMLResponse(_SCENARIO_NOT_FOUND, status_code=404)
+    # The briefing is shown only at a level that opens it: Reset returned a
+    # locked scenario's briefing that the detail route refuses (review S5).
+    locked = _scenario_locked(await _get_or_create_progress(current_user, db), scenario)
+    if locked is not None:
+        return locked
+    return _changed(await _detail(request, current_user, db, scenario))
 
-    progress = await _get_or_create_progress(current_user, db)
-    return render(request, "partials/training_scenario_detail.html", {
-        "scenario": scenario,
-        "progress": progress,
-        "attempt_number": await _scored_attempts(db, current_user.id, scenario_id) + 1,
-    })
+
+@router.post("/scenario/{scenario_id}/abandon", response_class=HTMLResponse)
+async def training_scenario_abandon(
+    scenario_id: str,
+    result_id: Annotated[int, Form()],
+    current_user: CurrentUser,
+    db: Db,
+) -> HTMLResponse:
+    """Close the attempt panel, cancelling the attempt and removing the scenario's objects (audit G-3, 1-21).
+
+    Abandon used to close the panel in the browser only: the attempt stayed
+    open, counted as made, and cost the next attempt its first-try bonus.
+    """
+    await _cancel_open_attempts(db, current_user, result_id)
+    _remove_training_objects(get_training_state(current_user))
+    await db.commit()
+    return _changed(HTMLResponse(""))
 
 
 # ── Submit a scenario attempt ─────────────────────────────────────────────────
@@ -445,16 +543,54 @@ def _objective_ids(raw: str) -> list[str]:
     return list(dict.fromkeys(x for x in parsed if isinstance(x, str)))
 
 
+#: The ways an operator writes each answer unit, longest first within each, stripped from the end of an answer.
+_UNIT_SPELLINGS: dict[str, tuple[str, ...]] = {
+    "hours": ("hours", "hour", "hrs", "hr", "h"),
+    "degrees": ("degrees", "degree", "deg", "°"),
+    "km": ("kilometres", "kilometers", "km"),
+    "m/s": ("m/s", "mps"),
+}
+
+
+def _bare_answer(given: str, unit: str | None) -> str:
+    """*given* without a trailing unit that matches the objective's, and for hours a leading "T+" (audit 3-3).
+
+    "T+18h", "18 h" and "18h" were refused for an answer in hours.
+    """
+    text = given.strip().lower()
+    wanted = (unit or "").strip().lower()
+    if wanted == "hours":
+        text = re.sub(r"^t\s*\+\s*", "", text)
+    for spelling in _UNIT_SPELLINGS.get(wanted, (wanted,) if wanted else ()):
+        if text.endswith(spelling):
+            return text[:-len(spelling)].strip()
+    return text
+
+
+#: A plain decimal number, signed or not. float() also takes "1_8", "nan", "inf" and "1.8e1", none of which an
+#: operator means as an answer (review nit).
+_PLAIN_NUMBER = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)")
+
+
 def _answer_ok(obj: Any, given: str) -> bool:
     """Whether the operator's answer matches an answer-type objective."""
     op_ans = given.strip().lower()
     expected = obj.answer.strip().lower()
     if obj.tolerance is None:
         return bool(op_ans == expected)  # exact match, case-insensitive
+    number = _bare_answer(given, obj.unit)
+    if not _PLAIN_NUMBER.fullmatch(number):
+        return False
     try:
-        return abs(float(op_ans) - float(expected)) <= float(obj.tolerance)
+        return abs(float(number) - float(expected)) <= float(obj.tolerance)
     except (ValueError, TypeError):
         return False
+
+
+def _ticked(scenario: Any, completed_ids: list[str], answers: dict[str, str]) -> list[str]:
+    """The objectives ticked, and those answered: typing an answer ticks its objective (audit 3-3)."""
+    answered = [o.id for o in scenario.objectives if o.answer and answers.get(o.id, "").strip()]
+    return list(dict.fromkeys([*completed_ids, *answered]))
 
 
 def _elapsed_minutes(cr: ChallengeResult) -> float:
@@ -500,19 +636,63 @@ def _score_objectives(
     return total_score, axis_scores, scored
 
 
+def _why_unmet(obj: Any, ticked: list[str], late: bool) -> str:
+    """Why an objective that did not score did not, without saying what would have."""
+    if obj.id not in ticked:
+        return "not answered" if obj.answer else "not ticked"
+    if late and obj.time_limited:
+        return "submitted after the time limit"
+    return "outside tolerance" if obj.tolerance is not None else "not the accepted answer"
+
+
+# Seven facts of one attempt, each needed to say why an objective did or did not score; the last three are
+# keyword-only so no call can swap them.
+def _objective_outcomes(  # noqa: PLR0913
+    scenario: Any, ticked: list[str], answers: dict[str, str], scored_ids: list[str], *,
+    late: bool, scored: bool, passed: bool,
+) -> list[dict[str, Any]]:
+    """Every objective, met or not, with the answer given and, where it gives nothing away, the one accepted.
+
+    The debrief said "Review the objectives above" with no objectives above
+    (audit 1-16). On a *scored* attempt the accepted answer is shown for an
+    objective that was met, or for every objective once the attempt *passed*;
+    otherwise an unmet answer reads "outside tolerance" with no value, and an
+    explore run never shows one, so neither a failed nor an explore run is an
+    answer key for the next scored attempt (review S3).
+    """
+    outcomes = []
+    for obj in scenario.objectives:
+        given = answers.get(obj.id, "").strip()
+        met = obj.id in scored_ids
+        outcomes.append({
+            "description": with_titles(obj.description),
+            "points": obj.points,
+            "met": met,
+            "why": "" if met else _why_unmet(obj, ticked, late),
+            "has_answer": bool(obj.answer),
+            "given": VERDICT_LABELS.get(given, given) if obj.answer else "",
+            "accepted": obj.accepted_answer if scored and (met or passed) else "",
+        })
+    return outcomes
+
+
 def _award(
     axis: dict[str, float], *, is_scored: bool, passed: bool, first_try: bool, challenge: bool,
 ) -> tuple[int, dict[str, float]]:
     """Points earned by one submission, and the axis totals after them.
 
-    The two challenge awards go to challenge scenarios only. They were given
-    for every passed scored attempt, so a free-play pass earned 500 points
-    where its authors tuned for 150 (audit F-160).
+    Every award needs a pass. scenario_completed was paid for any scored
+    submission, a zero score among them, so seven empty submissions met the
+    Level 4 Decision Quality gate (audit G-1, 1-20); gamification.yaml sets
+    no scaling by score, so a fail earns nothing. The two challenge awards go
+    to challenge scenarios only: they were given for every passed scored
+    attempt, so a free-play pass earned 500 points where its authors tuned
+    for 150 (audit F-160).
     """
     actions: list[str] = []
-    if is_scored:
+    if is_scored and passed:
         actions.append("scenario_completed")
-        if passed and challenge:
+        if challenge:
             actions.append("challenge_passed")
             if first_try:
                 actions.append("challenge_passed_first_try")
@@ -603,9 +783,9 @@ async def training_scenario_submit(
     request: Request,
     scenario_id: str,
     result_id: Annotated[int, Form()],
+    current_user: CurrentUser,
+    db: Db,
     objectives_completed: Annotated[str, Form()] = "[]",  # JSON list of obj IDs
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Score a completed scenario attempt and update operator progress."""
     scenario = get_scenario(scenario_id)
@@ -626,11 +806,12 @@ async def training_scenario_submit(
         for key, value in form_data.items()
         if key.startswith("answer_")
     }
-    total_score, axis_scores, scored_ids = _score_objectives(
-        scenario, _objective_ids(objectives_completed), operator_answers, late=late,
-    )
+    ticked = _ticked(scenario, _objective_ids(objectives_completed), operator_answers)
+    total_score, axis_scores, scored_ids = _score_objectives(scenario, ticked, operator_answers, late=late)
 
-    passed     = total_score >= scenario.scoring.passing_score
+    # A timed scenario submitted after its limit does not pass, whatever it
+    # scored: the late operator_timed_full_cycle passed on 400 of 400 (audit 4-7).
+    passed     = total_score >= scenario.scoring.passing_score and not late
     is_scored  = cr.scored
 
     # Award gamification points only for scored attempts
@@ -650,6 +831,8 @@ async def training_scenario_submit(
             progress.challenges_passed += 1
 
     level_up_events, newly_unlocked = _apply_level_ups(progress)
+    outcomes = _objective_outcomes(scenario, ticked, operator_answers, scored_ids, late=late,
+                                   scored=is_scored, passed=passed)
 
     # Save ChallengeResult
     cr.completed_at       = datetime.now(UTC)
@@ -664,12 +847,14 @@ async def training_scenario_submit(
         "points_earned": total_points_earned,
         "level_ups": [{"level": ld.level, "title": ld.title} for ld in level_up_events],
         "newly_unlocked": newly_unlocked,
+        "objectives": outcomes,
     }
 
+    # The attempt is over, so its objects leave the planning lists (audit 1-21).
+    _remove_training_objects(get_training_state(current_user))
     await db.commit()
 
-    cfg = get_config()
-    return render(request, "partials/training_debrief.html", {
+    return _changed(render(request, "partials/training_debrief.html", {
         "scenario": scenario,
         "cr": cr,
         "total_score": total_score,
@@ -682,62 +867,36 @@ async def training_scenario_submit(
         "elapsed_min": elapsed_min,
         "level_up_events": level_up_events,
         "newly_unlocked": newly_unlocked,
-        "cfg": cfg,
-    })
+        "objective_outcomes": outcomes,
+        "content_title": content_title,
+        "cfg": get_config(),
+    }))
 
 
 # ── Dashboard partial (HTMX refresh) ─────────────────────────────────────────
 
 @router.get("/dashboard", response_class=HTMLResponse)
-async def training_dashboard(
-    request: Request,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
-) -> HTMLResponse:
+async def training_dashboard(request: Request, current_user: CurrentUser, db: Db) -> HTMLResponse:
     """Return the progress dashboard partial."""
-    progress  = await _get_or_create_progress(current_user, db)
-    cfg       = get_config()
-    level_def = cfg.level_def(progress.current_level)
-    next_lv   = cfg.level_def(progress.current_level + 1)
-    pct       = int(level_progress_fraction(progress.current_level, progress.total_points) * 100)
-    pts_needed = points_to_next_level(progress.current_level, progress.total_points)
-    recommendation = recommended_next_step(
-        progress.axis_points, progress.tutorials_completed, progress.current_level
-    )
-
-    recent_results = (await db.execute(_recent_scored(current_user.id, 5))).scalars().all()
-
-    available = scenarios_for_level(progress.current_level)
-    first_scenario = next((s for s in available if not s.challenge), None)
-
-    return render(request, "partials/training_dashboard.html", {
-        "progress": progress,
-        "cfg": cfg,
-        "level_def": level_def,
-        "next_lv_def": next_lv,
-        "progress_pct": pct,
-        "pts_needed": pts_needed,
-        "recommendation": recommendation,
-        "recent_results": recent_results,
-        "first_scenario": first_scenario,
-    })
+    progress = await _get_or_create_progress(current_user, db)
+    return render(request, "partials/training_dashboard.html", await _hub_context(current_user, db, progress))
 
 
 # ── Tutorial viewer ───────────────────────────────────────────────────────────
 
 @router.get("/tutorial/{tutorial_id}", response_class=HTMLResponse)
 async def training_tutorial_view(
-    request: Request,
-    tutorial_id: str,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    request: Request, tutorial_id: str, current_user: CurrentUser, db: Db,
 ) -> HTMLResponse:
-    """Return a tutorial reading panel."""
+    """Return a tutorial reading panel, for a tutorial the operator has unlocked (audit 1-26)."""
     tutorial = get_tutorial(tutorial_id)
     if tutorial is None:
         return HTMLResponse('<p class="error-msg">Tutorial not found.</p>', status_code=404)
 
     progress = await _get_or_create_progress(current_user, db)
+    locked = _tutorial_locked(progress, tutorial_id)
+    if locked is not None:
+        return locked
     already_done = tutorial_id in progress.tutorials_completed
 
     return render(request, "partials/training_tutorial.html", {
@@ -748,10 +907,7 @@ async def training_tutorial_view(
 
 @router.post("/tutorial/{tutorial_id}/complete", response_class=HTMLResponse)
 async def training_tutorial_complete(
-    request: Request,
-    tutorial_id: str,
-    current_user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db),
+    request: Request, tutorial_id: str, current_user: CurrentUser, db: Db,
 ) -> HTMLResponse:
     """Mark a tutorial complete, award points, check for level-up."""
     tutorial = get_tutorial(tutorial_id)
@@ -783,13 +939,13 @@ async def training_tutorial_complete(
 
     await db.commit()
 
-    cfg = get_config()
-    return render(request, "partials/training_tutorial_complete.html", {
+    return _changed(render(request, "partials/training_tutorial_complete.html", {
         "tutorial": tutorial,
         "points_earned": points_earned,
         "already_done": already_done,
         "level_up_events": level_up_events,
         "newly_unlocked": newly_unlocked,
-        "cfg": cfg,
+        "content_title": content_title,
+        "cfg": get_config(),
         "progress": progress,
-    })
+    }), console=False)

@@ -8,6 +8,9 @@
    (SPC-234, owner ruling 2026-11-12). #}
 {% set counted = items | selectattr('counts') | list %}
 {% set best = counted[0] if counted else none %}
+{# The satellite planned as manoeuvring: red unless the operator chose blue (audit 4-3, 2-11). #}
+{% set _side = chaser_side if chaser_side is defined and chaser_side else 'red' %}
+{% set _chaser = chaser_name if chaser_name is defined and chaser_name else red_name %}
 
 {# ── Summary header ── #}
 <div class="threat-sweep-summary" style="margin-bottom:0.5rem">
@@ -20,17 +23,26 @@
   <p class="field-meta elset-passed-over"><span class="badge-warn">Newer set refused</span> {{ note }}</p>
   {% endfor %}
   {% endif %}
-  {% if best %}
-  <span class="intercept-detail" style="color:{{ best.intel.threat_color }}; font-weight:700">
-    Worst-case: {{ best.intel.threat_level }} &mdash; {{ best.result.method.value | upper }}
+  {#- Our own plans are options, not threats: Blue manoeuvring leads with the cheapest, not a worst case (S2). -#}
+  {% if _side == 'blue' and most_likely %}
+  <span class="intercept-detail" id="ai-headline" style="font-weight:700">
+    Cheapest option: {{ most_likely.result.method.value | upper }} by {{ _chaser }}
+    &mdash; {{ most_likely.result.total_delta_v_m_s | m_s }} m/s
+  </span>
+  {% elif best and _side != 'blue' %}
+  <span class="intercept-detail" id="ai-headline" style="color:{{ best.intel.threat_color }}; font-weight:700">
+    Worst-case: {{ best.intel.threat_level }} &mdash; {{ best.result.method.value | upper }} by {{ _chaser }}
     &mdash; {{ best.result.total_delta_v_m_s | m_s }} m/s
   </span>
   {% elif ok_items %}
-  <span class="intercept-detail">No red approach both reaches the target and is within the NOTSO record.</span>
+  <span class="intercept-detail">No {{ _side }} approach both reaches the target and is within the NOTSO record.</span>
   {% endif %}
-  <span class="intercept-detail">
+  <span class="intercept-detail" id="ai-manoeuvring">
+    Manoeuvring: <strong style="color:var({{ '--ops-blue' if _side == 'blue' else '--red' }})">{{ _chaser }}</strong>
+    ({{ _side | capitalize }})
+    &middot;
     <span style="color:var(--red)">{{ red_name }}</span>
-    &#8594;
+    {{ '&#8594;' | safe if _side == 'red' else '&#8592;' | safe }}
     <span style="color:var(--ops-blue)">{{ blue_name }}</span>
   </span>
   {# Export all-methods batch as CSV #}
@@ -49,8 +61,8 @@
 {% if most_likely %}
 {% set ml = most_likely.targeting %}
 <p class="callout callout-gold" role="note" style="margin:0 0 0.5rem; font-size:0.7rem">
-  <strong>Most likely course of action:</strong>
-  {{ most_likely.result.method.value | upper }}, burning at {{ ml.burn_point | lower }}
+  <strong>{{ 'Cheapest option' if _side == 'blue' else 'Most likely course of action' }}:</strong>
+  {{ most_likely.result.method.value | upper }} by {{ _chaser }}, burning at {{ ml.burn_point | lower }}
   ({{ ml.burn_at.strftime('%d %b %H:%M UTC') }}),
   {{ most_likely.result.total_delta_v_m_s | m_s }} m/s, closest approach
   {{ ml.closest_text }}{% if ml.closest_after %} {{ ml.closest_after }} after the burn{% endif %}.
@@ -59,8 +71,10 @@
 {% endif %}
 {% if evidence %}
 <p class="label-dim" style="margin:0 0 0.5rem; font-size:0.62rem">
-  {% if searched %}Each red approach was searched for its cheapest plan that comes within {{ "%g" | format(approach_km) }} km and flown to measure its closest approach.{% else %}Each red approach was solved once with the typed values and flown to measure its closest approach.{% endif %}
-  Flown: two-body for red between burns, SGP4 for the target; the V-bar and H-bar hops keep their own estimate.
+  {% if searched %}Each approach by {{ _chaser }} was searched for its cheapest plan that comes within {{ "%g" | format(approach_km) }} km and flown to measure its closest approach.{% else %}Each approach by {{ _chaser }} was solved once with the typed values and flown to measure its closest approach.{% endif %}
+  Flown: two-body for {{ _chaser }} between burns, SGP4 for the target; the V-bar and H-bar hops keep their own estimate.
+  Avoidance and defence rows give the closest approach after their burn, searched within &plusmn;{{ defence_window if defence_window is defined else '10 min' }} of the assumed TCA, the manoeuvre start plus the coast.
+  {% if left_out is defined and left_out %}With {{ _chaser }} manoeuvring, the {{ left_out | map('upper') | join(', ') }} assessments are left out: they read an adversary's behaviour, not our own.{% endif %}
   Realism is judged against the shipped record of {{ evidence.burns }} on-station burns by {{ evidence.satellites }} satellites in JCO NOTSOs,
   {{ evidence.first_report }} to {{ evidence.last_report }}, with each satellite's figures raised by any NOTSO cache records received since;
   the most any satellite spent comes from the shipped record alone. It is a floor on what satellites can do, not a ceiling.
@@ -78,6 +92,7 @@
     <col style="width:7rem">
     <col style="width:6.5rem">
     <col style="width:5rem">
+    <col style="width:5.5rem">
     <col style="width:7rem">
     <col style="width:6rem">
     <col style="width:5rem">
@@ -91,13 +106,16 @@
          clicked, and it gives aiSort a selector that cannot touch the two
          columns that do not sort. #}
       <th data-action="aiSort" data-col="1" data-kind="str" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Method / Intent <span class="hrr-sort-ind"></span></th>
-      <th data-action="aiSort" data-col="2" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Threat <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="2" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none"{% if _side == 'blue' %} title="Our own plans: the posture each burn's cost implies, how an observer would read it, not a threat"{% endif %}>{{ 'Posture' if _side == 'blue' else 'Threat' }} <span class="hrr-sort-ind"></span></th>
       <th data-action="aiSort" data-col="3" data-kind="str" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Type <span class="hrr-sort-ind"></span></th>
       <th data-action="aiSort" data-col="4" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none; text-align:right">&#916;V (m/s) <span class="hrr-sort-ind"></span></th>
       <th data-action="aiSort" data-col="5" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">TOF <span class="hrr-sort-ind"></span></th>
-      <th data-action="aiSort" data-col="6" data-kind="str" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Direction <span class="hrr-sort-ind"></span></th>
-      <th data-action="aiSort" data-col="7" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Observability <span class="hrr-sort-ind"></span></th>
-      <th data-action="aiSort" data-col="8" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none" title="Red approaches: Seen before, Possible or Unrealistic against the NOTSO record, or No approach when the flown plan never comes within the approach distance. Other rows: their group.">Realism <span class="hrr-sort-ind"></span></th>
+      {# Read without opening a row (audit 3-5): an approach's flown closest approach, a defensive burn's achieved
+         separation at the assumed TCA; an assessment's score is not a distance and reads a dash. #}
+      <th data-action="aiSort" data-col="6" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none; text-align:right" title="Approaches: the closest approach, flown from the plan's burns. Avoidance and defence: the separation the burn achieves at the assumed TCA. Assessments carry a score, not a distance.">Miss Dist (km) <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="7" data-kind="str" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Direction <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="8" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none">Observability <span class="hrr-sort-ind"></span></th>
+      <th data-action="aiSort" data-col="9" data-kind="num" tabindex="0" data-activate scope="col" aria-sort="none" style="cursor:pointer; user-select:none" title="Approaches: Seen before, Possible or Unrealistic against the NOTSO record, or No approach when the flown plan never comes within the approach distance. Other rows: their group.">Realism <span class="hrr-sort-ind"></span></th>
       <th>Action</th>
     </tr>
   </thead>
@@ -124,9 +142,10 @@
       data-sort-3="{{ item.intel.manoeuvre_type }}"
       data-sort-4="{{ item.result.total_delta_v_m_s }}"
       data-sort-5="{{ item.intel.tof_hours }}"
-      data-sort-6="{{ item.intel.burn_intel[0].direction if item.intel.burn_intel else '' }}"
-      data-sort-7="{{ _oord.get(item.intel.obs_level, 4) }}"
-      data-sort-8="{{ (3 if not item.targeting.approach else _rord.get(item.realism.band, 4)) if item.realism else 5 }}">
+      data-sort-6="{{ item.miss.sort }}"
+      data-sort-7="{{ item.intel.burn_intel[0].direction if item.intel.burn_intel else '' }}"
+      data-sort-8="{{ _oord.get(item.intel.obs_level, 4) }}"
+      data-sort-9="{{ (3 if not item.targeting.approach else _rord.get(item.realism.band, 4)) if item.realism else 5 }}">
     <td class="threat-chevron-cell">
       <span class="threat-chevron" id="ai-chevron-{{ loop.index0 }}">&#9654;</span>
     </td>
@@ -136,16 +155,23 @@
         {{ item.result.method.value | upper }}
       </div>
       <div style="font-size:0.62rem; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis"
-           title="{{ item.intel.intent_label }}">
+           title="{{ item.intel.intent_label }}{% if item.burner %}: {{ item.burner }} burns{% endif %}">
         {{ item.intel.intent_label }}
       </div>
+      {% if item.burner %}
+      {# The satellite that burns, which is not always the one planned as manoeuvring: Evasion and Formation move
+         the other one (audit 3-6). #}
+      <div class="ai-burner" style="font-size:0.6rem; color:var({{ '--ops-blue' if item.burner == blue_name else '--red' }}); white-space:nowrap; overflow:hidden; text-overflow:ellipsis">
+        {{ item.burner }} burns
+      </div>
+      {% endif %}
     </td>
     <td>
       <span style="background:{{ item.intel.threat_color }}; color:#fff;
                    padding:0.15rem 0.45rem; border-radius:3px;
                    font-size:0.63rem; font-weight:800; letter-spacing:0.05em;
                    text-transform:uppercase">
-        {{ item.intel.threat_level }}
+        {{ item.intel.level_label }}
       </span>
     </td>
     <td style="font-size:0.67rem; color:var(--text-dim)">{{ item.intel.manoeuvre_type }}</td>
@@ -153,6 +179,7 @@
       <strong>{{ item.result.total_delta_v_m_s | m_s }}</strong>
     </td>
     <td style="font-size:0.67rem; color:var(--text-dim)">{{ item.intel.tof_label }}</td>
+    <td class="ai-miss" style="font-size:0.67rem; text-align:right; color:var(--text-bright)" title="{{ item.miss.title }}">{{ item.miss.text }}</td>
     <td style="font-size:0.67rem; color:var(--text-dim)">
       {% if item.intel.burn_intel %}{{ item.intel.burn_intel[0].direction }}{% else %}&mdash;{% endif %}
     </td>
@@ -178,22 +205,22 @@
          on the button reached the row's handler instead: the button's own
          activation was cancelled and the row toggled, so a keyboard operator
          staged nothing. The mouse path has always been guarded the same way,
-         in onclick. #}
+         in onclick. The engine field is the manoeuvre start, so the first
+         burn epoch goes in, not the arrival (audit F-242). #}
       <button class="btn-secondary btn-sm"
               type="button"
               data-red="{{ item.result.red_name }}" data-blue="{{ item.result.blue_name }}"
-              {# The engine field is the manoeuvre start, so the first burn
-                 epoch goes in, not the arrival (audit F-242). #}
+              data-manoeuvring="{{ item.result.chaser_side }}"
               data-epoch="{{ (item.result.burns[0].burn_epoch if item.result.burns else item.result.arrival_epoch).strftime('%Y-%m-%dT%H:%M') }}"
               data-action="aiLoadEngine"
-              title="Pre-fill the intercept engine with these objects and start epoch (method and TOF are not set)">Load</button>
+              title="Pre-fill the intercept engine with these objects, the manoeuvring satellite and the start epoch (method and TOF are not set)">Load</button>
     </td>
   </tr>
 
   {# ── Expandable detail row ── #}
   <tr id="ai-detail-{{ loop.index0 }}" style="display:none">
     <td></td>
-    <td colspan="9" style="padding:0.6rem 0.5rem 0.8rem 0.5rem;
+    <td colspan="10" style="padding:0.6rem 0.5rem 0.8rem 0.5rem;
                             background:{{ item.intel.threat_bg }};
                             border-bottom:2px solid {{ item.intel.threat_color }}">
 
@@ -204,7 +231,7 @@
           <span style="background:{{ item.intel.threat_color }}; color:#fff;
                        font-size:0.62rem; font-weight:800; padding:0.15rem 0.45rem;
                        border-radius:3px; text-transform:uppercase; letter-spacing:0.05em">
-            {{ item.intel.threat_level }}
+            {{ item.intel.level_label }}
           </span>
           <span style="font-size:0.73rem; font-weight:700; color:var(--text-bright)">
             {{ item.intel.intent_label }}
@@ -430,12 +457,12 @@
   </tr>
 
   {% else %}
-  {# ── Failed method row ── #}
-  <tr style="opacity:0.35">
+  {# ── Failed method row, or one that does not arrive within the time the engine reports (audit 3-18) ── #}
+  <tr style="opacity:{{ '0.6' if item.verdict else '0.35' }}">
     <td></td>
     <td style="font-size:0.67rem; color:var(--text-dim)">{{ item.method.value | upper }}</td>
-    <td><span style="font-size:0.58rem; color:var(--text-dim)">FAILED</span></td>
-    <td colspan="7" style="font-size:0.6rem; color:var(--text-dim)">{{ item.error | truncate(80) }}</td>
+    <td><span style="font-size:0.58rem; color:var(--text-dim)">{{ item.verdict or 'FAILED' }}</span></td>
+    <td colspan="8" style="font-size:0.6rem; color:var(--text-dim)" title="{{ item.error }}">{{ item.error | truncate(160 if item.verdict else 80) }}</td>
   </tr>
   {% endif %}
   {% endfor %}

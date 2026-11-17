@@ -15,8 +15,9 @@ def _assert_clean(console: Console) -> None:
 
 def _training(console: Console) -> Any:
     page = console.open("/training")
-    page.wait_for_function(
-        "document.getElementById('tpanel-dashboard').textContent.indexOf('Loading dashboard') < 0", timeout=30000)
+    # A selector wait, not wait_for_function: a string predicate is re-evaluated with eval, which the policy refuses
+    # whenever the dashboard has not loaded on the first look.
+    page.wait_for_selector("#tpanel-dashboard .spinner", state="detached", timeout=30000)
     return page
 
 
@@ -41,11 +42,13 @@ class TestTrainingNavigation:
         assert page.evaluate("document.getElementById('tnav-tutorials').style.color") == "rgb(245, 158, 11)"
         _assert_clean(console)
 
-    def test_the_console_tab_loads_the_console_once(self, console: Console) -> None:
+    def test_the_console_tab_loads_the_console_in_its_training_frame(self, console: Console) -> None:
         page = _training(console)
         assert page.get_attribute("#training-console-frame", "src") is None
         page.click("#tnav-console")
-        assert page.get_attribute("#training-console-frame", "src") == "/"
+        # Named, so the console hides its Training link and leaves training's objects in place (audit 1-21, 1-23).
+        # When it reloads is tests/browser/test_training_mechanics.py (audit F0).
+        assert page.get_attribute("#training-console-frame", "src") == "/?frame=training"
         assert page.evaluate("document.getElementById('training-main').style.position") == "relative"
         page.click("#tnav-dashboard")
         assert page.evaluate("document.getElementById('training-main').style.position") == ""
@@ -102,6 +105,8 @@ class TestAScenarioAttempt:
             page.wait_for_timeout(2200)
             assert page.text_content("#timer-display") != before
         page.click('#scenario-detail button:has-text("Abandon")')
+        # Abandon now asks the server to cancel the attempt (audit G-3), then empties the panel.
+        page.wait_for_selector("#scenario-submit-form", state="detached")
         assert page.inner_html("#scenario-detail") == ""
         page.wait_for_timeout(1500)
         _assert_clean(console)

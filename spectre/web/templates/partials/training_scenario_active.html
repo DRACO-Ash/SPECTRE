@@ -1,5 +1,5 @@
 {# Active scenario UI — shown while operator is working through objectives #}
-{# Context: scenario (TrainingScenario), result_id (int), attempt_num (int), scored (bool) #}
+{# Context: scenario (TrainingScenario), result_id (int), attempt_num (int), scored (bool), titles #}
 
 <div style="background:var(--panel-bg); border:2px solid rgba(245,158,11,0.5); border-radius:6px;
             padding:0.75rem 0.9rem" id="active-scenario">
@@ -30,6 +30,15 @@
     {% endif %}
   </div>
 
+  {# ── Scenario time: the epoch the console's tools now work at (audit 2-7, X3) ── #}
+  {% if scenario.epoch %}
+  <div id="scenario-epoch" style="font-size:0.62rem; color:var(--text-dim); margin-bottom:0.45rem">
+    <strong style="color:var(--text-primary)">Scenario time:</strong>
+    {{ scenario.epoch.strftime('%d %b %Y %H:%M') }} UTC, {{ scenario.horizon_hours }} h horizon.
+    Set as the console's scenario start, which Manoeuvre Start and the other tools read.
+  </div>
+  {% endif %}
+
   {# ── Scenario briefing ────────────────────────────────────────────────────── #}
   <div style="background:rgba(59,139,235,0.06); border:1px solid rgba(59,139,235,0.2);
               border-radius:4px; padding:0.5rem 0.65rem; margin-bottom:0.5rem">
@@ -44,15 +53,18 @@
     <div style="font-size:0.58rem; font-weight:700; color:#22c55e; text-transform:uppercase;
                 letter-spacing:0.07em; margin-bottom:0.3rem">How to Complete This Scenario</div>
     <div style="font-size:0.63rem; color:var(--text-dim); line-height:1.7">
+      {% set intro, steps = scenario.workflow %}
       {% if scenario.tool_workflow %}
-        {# Same sink as the UDL element-set viewer in pol_results.html: replace-to-<br> does not
-           escape and | safe then disabled autoescaping on the whole value, so anything editable
-           into scenarios.yaml rendered as markup. white-space:pre-line gives the breaks instead
-           and collapses the folded-YAML indentation exactly as the old <br> rendering did. The
-           value sits hard against the span so this template's own newlines are not preserved
-           with it, and the style stays off the parent div so the fallback prose below is
-           unaffected. #}
-        <span style="white-space:pre-line">{{ scenario.tool_workflow }}</span>
+        {# One list item per numbered step: the folded YAML ran the steps together (audit 2-5, 3-17).
+           Autoescaped text only; pre-line keeps a lettered sub-item on a line of its own. #}
+        {% if intro %}<div style="margin:0 0 0.25rem; white-space:pre-line">{{ intro }}</div>{% endif %}
+        {% if steps %}
+        <ol id="scenario-workflow-steps" style="margin:0; padding-left:1.2rem">
+          {% for step in steps %}
+          <li style="white-space:pre-line; margin-bottom:0.15rem">{{ step }}</li>
+          {% endfor %}
+        </ol>
+        {% endif %}
       {% else %}
         Work through the objectives below using the SPECTRE panels.
         Tick each objective once you have completed the required action and are confident in your answer.
@@ -102,12 +114,12 @@
         {# Checkbox + content #}
         <div style="flex:1; padding:0.4rem 0.55rem 0.4rem 0.5rem">
           <label style="display:flex; align-items:flex-start; gap:0.55rem; cursor:pointer; width:100%">
-            <input type="checkbox" name="obj_{{ obj.id }}" value="{{ obj.id }}"
+            <input type="checkbox" name="obj_{{ obj.id }}" value="{{ obj.id }}" id="obj-box-{{ obj.id }}"
                    style="margin-top:0.15rem; accent-color:#f59e0b; flex-shrink:0; width:0.85rem; height:0.85rem"
                    data-action-change="updateObjectivesJson">
             <div style="flex:1; min-width:0">
               <div style="font-size:0.67rem; font-weight:600; color:var(--text-primary); line-height:1.4">
-                {{ obj.description }}
+                {{ titles(obj.description) }}
               </div>
               <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.15rem; flex-wrap:wrap">
                 <span style="font-size:0.58rem; font-weight:700; color:{{ axis_colour }}">
@@ -136,6 +148,7 @@
             <label style="display:flex; align-items:center; gap:0.25rem; cursor:pointer; font-size:0.6rem;
                           font-weight:700; color:{{ v_colour }}">
               <input type="radio" name="answer_{{ obj.id }}" value="{{ v_val }}"
+                     data-action-change="answerTicksObjective" data-objective="{{ obj.id }}"
                      style="accent-color:{{ v_colour }}">
               {{ v_label }}
             </label>
@@ -144,8 +157,10 @@
 
           {% elif has_answer %}
           <div style="margin-top:0.3rem; margin-left:1.4rem; display:flex; align-items:center; gap:0.4rem">
-            <span style="font-size:0.58rem; color:var(--text-dim)">Your answer:</span>
-            <input type="text" name="answer_{{ obj.id }}"
+            <label for="obj-answer-{{ obj.id }}" style="font-size:0.58rem; color:var(--text-dim)">Your answer:</label>
+            {# Typing here ticks the objective; "T+18h", "18 h" and "18" are all read as 18 hours (audit 3-3). #}
+            <input type="text" name="answer_{{ obj.id }}" id="obj-answer-{{ obj.id }}"
+                   data-action-input="answerTicksObjective" data-objective="{{ obj.id }}"
                    placeholder="{% if obj.unit %}value in {{ obj.unit }}{% else %}enter answer{% endif %}"
                    style="background:var(--panel-bg); border:1px solid var(--border); border-radius:3px;
                           padding:0.2rem 0.45rem; font-size:0.62rem; color:var(--text-primary);
@@ -175,13 +190,17 @@
               hx-post="/training/scenario/{{ scenario.id }}/reset"
               hx-target="#scenario-detail"
               hx-swap="innerHTML"
-              title="Cancel this attempt and return to the briefing. Scenario objects stay loaded until you leave training">
+              title="Cancel this attempt and return to the briefing. The scenario's objects leave your planning lists until you start again">
         &#8635; Reset
       </button>
+      {# A request now, not a client-side clear: the attempt was left open and cost the next one its first-try bonus,
+         and the scenario's objects stayed in the planning lists (audit G-3, 1-21). #}
       <button type="button" class="btn-secondary"
               style="font-size:0.68rem; color:#ef4444; border-color:rgba(239,68,68,0.35)"
-              data-action="clearScenarioDetail"
-              title="Close this panel without submitting. A scored attempt stays on record as started; use Reset to cancel it">
+              hx-post="/training/scenario/{{ scenario.id }}/abandon"
+              hx-target="#scenario-detail"
+              hx-swap="innerHTML"
+              title="Close this panel without submitting. The attempt is cancelled, so it does not count, and the scenario's objects leave your planning lists">
         Abandon
       </button>
     </div>

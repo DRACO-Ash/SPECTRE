@@ -6,17 +6,21 @@ different threats produced the same answer.
 
 The check here is independent of the code under test: the defended satellite
 is moved by the burn under numerically integrated two-body motion, and the
-miss is its distance from the threat at the time of closest approach (TCA).
+miss is its closest approach to the threat within ten minutes of the assumed
+time of closest approach (TCA), found by scipy's bounded minimiser. It was the
+separation at the assumed TCA instant, which the burn moves, so in crossing
+geometry it overstated the miss (0.47.0 review, B2).
 """
 
 from __future__ import annotations
 
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pytest
 from scipy.integrate import solve_ivp
+from scipy.optimize import minimize_scalar
 
 from spectre.astro import maneuvers
 from spectre.astro.constants import MU_EARTH
@@ -52,19 +56,38 @@ def _with(monkeypatch: pytest.MonkeyPatch, red: _Circular) -> None:
     monkeypatch.setattr(maneuvers, "TLEOrbit", lambda tle: by_tle[tle])
 
 
-def _integrate(r0: np.ndarray, v0: np.ndarray, seconds: float) -> np.ndarray:
-    def f(_t: float, s: np.ndarray) -> list[float]:
-        r = s[:3]
-        return [*s[3:], *(-MU_EARTH * r / np.linalg.norm(r) ** 3)]
-    return solve_ivp(f, (0.0, seconds), np.concatenate([r0, v0]), rtol=1e-11, atol=1e-9).y[:3, -1]
+def _closest(separation: object, centre_s: float) -> float:
+    """The smallest of *separation* within 600 s of *centre_s*: a 1 s grid, then the bounded minimiser."""
+    grid = np.arange(centre_s - 600.0, centre_s + 600.5, 1.0)
+    k = int(np.argmin([separation(t) for t in grid]))  # type: ignore[operator]
+    lo, hi = grid[max(k - 1, 0)], grid[min(k + 1, len(grid) - 1)]
+    return float(minimize_scalar(separation, bounds=(lo, hi), method="bounded", options={"xatol": 1e-7}).fun)
 
 
 def _achieved_miss(sol: maneuvers.InterceptSolution, red: _Circular) -> float:
     burn = sol.burns[0]
     start = _BLUE.propagate(burn.epoch)
-    coast = (sol.arrival_epoch - burn.epoch).total_seconds()
-    moved = _integrate(start.r, start.v + burn.delta_v, coast)
-    return float(np.linalg.norm(moved - red.propagate(sol.arrival_epoch).r))
+    to_tca = (sol.arrival_epoch - burn.epoch).total_seconds()
+
+    def f(_t: float, s: np.ndarray) -> list[float]:
+        r = s[:3]
+        return [*s[3:], *(-MU_EARTH * r / np.linalg.norm(r) ** 3)]
+
+    flown = solve_ivp(f, (0.0, to_tca + 600.0), np.concatenate([start.r, start.v + burn.delta_v]),
+                      dense_output=True, rtol=1e-12, atol=1e-10).sol
+
+    def separation(t: float) -> float:
+        return float(np.linalg.norm(flown(t)[:3] - red.propagate(burn.epoch + timedelta(seconds=t)).r))
+
+    return _closest(separation, to_tca)
+
+
+def _unmanoeuvred_miss(red: _Circular) -> float:
+    def separation(t: float) -> float:
+        when = _TCA + timedelta(seconds=t)
+        return float(np.linalg.norm(_BLUE.propagate(when).r - red.propagate(when).r))
+
+    return _closest(separation, 0.0)
 
 
 # An inclined threat that meets the defended satellite at the node at TCA,
@@ -100,4 +123,7 @@ def test_no_warning_time_reports_the_unmanoeuvred_miss(monkeypatch: pytest.Monke
     _with(monkeypatch, _OFFSET)
     sol = maneuvers.evasion_intercept("RED", "BLUE", _TCA, time_before_tca_s=0.0)
     assert sol.total_delta_v == 0.0
-    assert sol.miss_distance_km == pytest.approx(6.0, abs=0.01)
+    # The threat crosses 6 km along its own track from the node, so the closest approach is under the 6 km
+    # separation at the TCA instant, which is what was reported.
+    assert sol.miss_distance_km == pytest.approx(_unmanoeuvred_miss(_OFFSET), abs=0.01)
+    assert sol.miss_distance_km < 6.0 - 0.1

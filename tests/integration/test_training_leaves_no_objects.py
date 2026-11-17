@@ -16,7 +16,13 @@ _SCENARIO = "cadet_01_geo_stationkeeping"
 
 
 def _names(cookie: str) -> set[str]:
-    state = session_state(cookie)
+    """The objects in the sign-in's training state, where a scenario puts them (0.47.0 review B1)."""
+    from spectre.web.auth import session_key_for
+    from spectre.web.planning_state import get_training_state
+
+    key = session_key_for(cookie)
+    assert key is not None
+    state = get_training_state(key)
     return {a.name for a in state.blue_assets} | {t.name for t in state.red_tracks}
 
 

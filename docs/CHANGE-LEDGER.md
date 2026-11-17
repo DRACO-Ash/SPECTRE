@@ -1429,3 +1429,14 @@ The Pree scoring core taken into the domain layer; the PostgreSQL CI job's setup
 | DAST | **HYGIENE** | None: no route, template or screen calls the module | No web surface changed. | n/a. |
 | SCA | **HYGIENE** | No dependency added | The module imports the standard library only, and a test fails if that changes. | n/a. |
 | Other gates | **HYGIENE** | CI's PostgreSQL job on actions/setup-python 7.1.0 (pull request 37); the test and quality gate jobs' limit raised from 60 to 90 minutes | Pull request 37's own CI run passed. On pull request 43 the quality gate's suite finished at 20:12:27 and the job was cancelled at 20:12:29, on its 60-minute limit. | Then the job's log shows where the time went; a run near 90 minutes points at the runner or the suite, not at the limit. |
+
+## 0.47.0
+
+The console and training faults the 16 November training audit found (`docs/training-audit-2026-11-16.md`); training given its own planning state.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | New `element_card.py` and `training_frame.py`; changes to `routes/maneuver.py`, `astro/maneuvers.py`, `astro/tactical.py`, `routes/threat.py`, `routes/operator.py`, `routes/udl.py`, `routes/decision.py`, `routes/training.py`, `planning_state.py`, `training/*.py` and their templates and scripts | Each of three slices built in its own worktree and reviewed independently until nothing blocked: Intercept Engine 3 rounds (two physics re-reviews against sgp4 and scipy references), training 3 rounds (one on state isolation), assets 1 round. `scripts/sonar_rules.py` per slice: 0 blocking. Full suite on Python 3.12 with Chromium required: no failures; coverage 98.55%. | Then the named rule points at one of these files; the slice's own tests name the behaviour it guards. |
+| DAST | **HYGIENE** | New element cards, Asset Screening options, a Manoeuvring field, a Miss Dist column, the training strip, debrief objectives | Names are autoescaped (a hostile asset name was tested in the card, the option value and the screening result); no inline script or handler was added; the `blue:` option resolves only by exact name within the session's own assets. | n/a. |
+| SCA | **HYGIENE** | No dependency added | Standard library and the existing stack only. | n/a. |
+| Other gates | **HYGIENE** | Training requests use a separate per-sign-in planning state, chosen by a middleware from the training frame's marker | Operations requests never read or write the training state; tested both ways, across two sign-ins, for UDL credentials, background tasks, expiry and decision records. | Then a frame request was not marked: check the request's `X-Spectre-Frame` header or `Sec-Fetch-Dest`. |

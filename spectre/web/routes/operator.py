@@ -14,6 +14,13 @@ from spectre.config.constants import BLUE_PREFIX, RED_PREFIX
 from spectre.domain.models import BlueAsset, RedTrack
 from spectre.web.auth import optional_login, require_login
 from spectre.web.deps import get_templates, render
+from spectre.web.element_card import (
+    BLUE_CHANGED,
+    BLUE_LIST_TEMPLATE,
+    RED_LIST_TEMPLATE,
+    element_cards,
+    lists_out_of_band,
+)
 from spectre.web.elsets import RefusedElset, provenance, provider, refused
 from spectre.web.models import User
 from spectre.web.planning_state import SessionState, get_session_state
@@ -23,23 +30,30 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_RED_LIST_TEMPLATE = "partials/red_list.html"
-_BLUE_LIST_TEMPLATE = "partials/blue_list.html"
+_RED_LIST_TEMPLATE = RED_LIST_TEMPLATE
+_BLUE_LIST_TEMPLATE = BLUE_LIST_TEMPLATE
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
 
-def _list_response(request: Request, template: str, context: dict[str, Any]) -> HTMLResponse:
+def _list_response(
+    template: str, context: dict[str, Any], state: SessionState, *, blue_changed: bool = False,
+) -> HTMLResponse:
     """Render a list partial plus OOB satellite-select updates for HTMX.
 
     On HTMX requests the response includes out-of-band ``<select>`` swaps
     so the Maneuver Options and Intercept Engine dropdowns stay in sync.
+    Each object in the list carries its element card (training audit
+    2026-11-16, finding 2-1). *blue_changed* is set only when the session's
+    Blue assets changed, and then the Asset Screening selector is told to
+    reload (finding 2-3); a refused or duplicate add leaves it alone.
     """
     tmpl = get_templates()
+    context = {**context, **element_cards(state)}
     list_html = tmpl.get_template(template).render(context)
     oob_html = tmpl.get_template("partials/sat_select_oob.html").render(context)
-    return HTMLResponse(list_html + oob_html)
+    return HTMLResponse(list_html + oob_html, headers=BLUE_CHANGED if blue_changed else None)
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -67,6 +81,7 @@ async def dashboard(
         "user": current_user,
         "blue_assets": state.blue_assets,
         "red_tracks": state.red_tracks,
+        **element_cards(state),
         "results": state.results,
         "log_entries": state.log_entries,
         "udl_user": state.udl_username,
@@ -145,20 +160,20 @@ async def add_blue_asset(
     refusal = _add_refusal(name, tle)
     if refusal is not None:
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": refusal}
-        return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
+        return _list_response(_BLUE_LIST_TEMPLATE, ctx, state)
     asset = BlueAsset(
         name=name, tle=tle, data_mode=provenance(elset_mode), elset_source=provider(elset_mode, elset_source),
     )
 
     if any(a.stk_name == asset.stk_name for a in state.blue_assets):
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": f"{asset.stk_name} is already in the session."}
-        return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
+        return _list_response(_BLUE_LIST_TEMPLATE, ctx, state)
 
     state.blue_assets.append(asset)
     state.append_log(f"[BLUE] Added asset: {asset.stk_name}")
 
     ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": None}
-    return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
+    return _list_response(_BLUE_LIST_TEMPLATE, ctx, state, blue_changed=True)
 
 
 @router.post("/assets/blue/quick-add", response_class=HTMLResponse)
@@ -182,13 +197,13 @@ async def quick_add_blue_asset(
     if any(a.stk_name == prospective_stk for a in state.blue_assets):
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks,
                "error": f"{prospective_stk} is already in the session."}
-        return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
+        return _list_response(_BLUE_LIST_TEMPLATE, ctx, state)
 
     # Fetch TLE from UDL.
     if not state.udl_username or not state.udl_password:
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks,
                "error": "Not connected to UDL — cannot fetch TLE."}
-        return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
+        return _list_response(_BLUE_LIST_TEMPLATE, ctx, state)
 
     from spectre.web.routes.udl import fetch_tle_for_satno
 
@@ -200,7 +215,7 @@ async def quick_add_blue_asset(
     error = _fetch_error(_result, clean_name, satno)
     if error is not None or not isinstance(_result, FetchedElset):
         ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": error}
-        return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
+        return _list_response(_BLUE_LIST_TEMPLATE, ctx, state)
 
     asset = BlueAsset(name=clean_name, tle=_result.tle, data_mode=_result.data_mode, elset_source=_result.source)
     state.blue_assets.append(asset)
@@ -208,7 +223,7 @@ async def quick_add_blue_asset(
     note = _passed_over_note(state, _result, clean_name, satno)
 
     ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": None, "note": note}
-    resp_html = _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
+    resp_html = _list_response(_BLUE_LIST_TEMPLATE, ctx, state, blue_changed=True)
 
     oob_badge = ""
     if btn_id:
@@ -220,7 +235,7 @@ async def quick_add_blue_asset(
         )
     body = resp_html.body
     list_html = bytes(body).decode() if not isinstance(body, bytes) else body.decode()
-    return HTMLResponse(list_html + oob_badge)
+    return HTMLResponse(list_html + oob_badge, headers=BLUE_CHANGED)
 
 
 @router.post("/assets/red/quick-add", response_class=HTMLResponse)
@@ -244,12 +259,12 @@ async def quick_add_red_track(
     if any(t.stk_name == prospective_stk for t in state.red_tracks):
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets,
                "error": f"{prospective_stk} is already in the session."}
-        return _list_response(request, _RED_LIST_TEMPLATE, ctx)
+        return _list_response(_RED_LIST_TEMPLATE, ctx, state)
 
     if not state.udl_username or not state.udl_password:
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets,
                "error": "Not connected to UDL — cannot fetch TLE."}
-        return _list_response(request, _RED_LIST_TEMPLATE, ctx)
+        return _list_response(_RED_LIST_TEMPLATE, ctx, state)
 
     from spectre.web.routes.udl import fetch_tle_for_satno
 
@@ -261,7 +276,7 @@ async def quick_add_red_track(
     error = _fetch_error(_result, clean_name, satno)
     if error is not None or not isinstance(_result, FetchedElset):
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": error}
-        return _list_response(request, _RED_LIST_TEMPLATE, ctx)
+        return _list_response(_RED_LIST_TEMPLATE, ctx, state)
 
     track = RedTrack(name=clean_name, tle=_result.tle, data_mode=_result.data_mode, elset_source=_result.source)
     state.red_tracks.append(track)
@@ -269,7 +284,7 @@ async def quick_add_red_track(
     note = _passed_over_note(state, _result, clean_name, satno)
 
     ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": None, "note": note}
-    resp_html = _list_response(request, _RED_LIST_TEMPLATE, ctx)
+    resp_html = _list_response(_RED_LIST_TEMPLATE, ctx, state)
 
     oob_badge = ""
     if btn_id:
@@ -294,10 +309,11 @@ async def remove_blue_asset(
 ) -> HTMLResponse:
     """Remove a blue asset by name and return the updated partial."""
     state = get_session_state(current_user)
+    held = len(state.blue_assets)
     state.blue_assets = [a for a in state.blue_assets if a.name != name]
     state.append_log(f"[BLUE] Removed asset: {name}")
     ctx = {"blue_assets": state.blue_assets, "red_tracks": state.red_tracks, "error": None}
-    return _list_response(request, _BLUE_LIST_TEMPLATE, ctx)
+    return _list_response(_BLUE_LIST_TEMPLATE, ctx, state, blue_changed=len(state.blue_assets) != held)
 
 
 @router.post("/assets/red", response_class=HTMLResponse)
@@ -320,20 +336,20 @@ async def add_red_track(
     refusal = _add_refusal(name, tle)
     if refusal is not None:
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": refusal}
-        return _list_response(request, _RED_LIST_TEMPLATE, ctx)
+        return _list_response(_RED_LIST_TEMPLATE, ctx, state)
     track = RedTrack(
         name=name, tle=tle, data_mode=provenance(elset_mode), elset_source=provider(elset_mode, elset_source),
     )
 
     if any(t.stk_name == track.stk_name for t in state.red_tracks):
         ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": f"{track.stk_name} is already in the session."}
-        return _list_response(request, _RED_LIST_TEMPLATE, ctx)
+        return _list_response(_RED_LIST_TEMPLATE, ctx, state)
 
     state.red_tracks.append(track)
     state.append_log(f"[RED] Added track: {track.stk_name}")
 
     ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": None}
-    return _list_response(request, _RED_LIST_TEMPLATE, ctx)
+    return _list_response(_RED_LIST_TEMPLATE, ctx, state)
 
 
 @router.delete("/assets/red/{name:path}", response_class=HTMLResponse)
@@ -347,7 +363,7 @@ async def remove_red_track(
     state.red_tracks = [t for t in state.red_tracks if t.name != name]
     state.append_log(f"[RED] Removed track: {name}")
     ctx = {"red_tracks": state.red_tracks, "blue_assets": state.blue_assets, "error": None}
-    return _list_response(request, _RED_LIST_TEMPLATE, ctx)
+    return _list_response(_RED_LIST_TEMPLATE, ctx, state)
 
 
 # ── Scenario time ────────────────────────────────────────────────────────────
@@ -389,6 +405,8 @@ async def set_scenario_time(
     return HTMLResponse(
         f'<p class="badge-ok">Scenario: {start_dt.strftime("%Y-%m-%d %H:%M")} → '
         f'{stop_dt.strftime("%Y-%m-%d %H:%M")} UTC</p>'
+        # Both lists again, so each element card's age and longitude follow the new scenario time.
+        + lists_out_of_band(state)
     )
 
 

@@ -23,7 +23,8 @@ from fastapi.responses import HTMLResponse
 from spectre.astro.elset_check import ElsetCheck, check_elset, tle_epoch
 from spectre.config.settings import UDL_BASE_URL
 from spectre.web.auth import require_login
-from spectre.web.deps import render
+from spectre.web.deps import get_templates, render
+from spectre.web.element_card import BLUE_CHANGED, lists_out_of_band
 from spectre.web.elsets import (
     ElsetHistory,
     PassedOver,
@@ -42,6 +43,7 @@ from spectre.web.planning_state import (
     get_catalog_status,
     get_onorbit_catalog,
     get_session_state,
+    in_training_request,
     set_catalog_status,
     set_onorbit_catalog,
 )
@@ -397,7 +399,10 @@ def _newest_accepted(ordered: list[Any], satno: int) -> _Walk:
 #: to tasks, so a discarded handle could be collected before the task finished
 #: (audit F-143); these sets hold them until they are done.
 _BACKGROUND: set[asyncio.Task[None]] = set()
-_SESSION_TASKS: dict[SessionKey | None, set[asyncio.Task[None]]] = {}
+#: Filed by sign-in and side: (owner, True) holds the tasks started from training (the console in the training
+#: frame, with its own planning state and UDL login), (owner, False) the operational ones. Filed by sign-in alone, a
+#: UDL Disconnect in the frame cancelled the operational burn watch and refreshes, and the reverse (0.47.0 review B1).
+_SESSION_TASKS: dict[tuple[SessionKey | None, bool], set[asyncio.Task[None]]] = {}
 
 #: The catalogue is pulled again once it is this old.
 _CATALOG_TTL_S = 24 * 3600.0
@@ -419,29 +424,44 @@ def spawn_session_task(coro: Coroutine[Any, Any, None], owner: SessionKey | None
 
 
 def _spawn(coro: Coroutine[Any, Any, None], owner: SessionKey | None) -> asyncio.Task[None]:
-    """Start *coro* as a task held until it finishes, filed under *owner*."""
+    """Start *coro* as a task held until it finishes, filed under *owner* and the side the request is on."""
     task = asyncio.create_task(coro)
     _BACKGROUND.add(task)
-    _SESSION_TASKS.setdefault(owner, set()).add(task)
+    bucket = (owner, in_training_request())
+    _SESSION_TASKS.setdefault(bucket, set()).add(task)
 
     def _forget(t: asyncio.Task[None]) -> None:
         _BACKGROUND.discard(t)
-        owned = _SESSION_TASKS.get(owner)
+        owned = _SESSION_TASKS.get(bucket)
         if owned is not None:
             owned.discard(t)
             if not owned:
-                _SESSION_TASKS.pop(owner, None)
+                _SESSION_TASKS.pop(bucket, None)
 
     task.add_done_callback(_forget)
     return task
 
 
-def _cancel_session_tasks(owner: SessionKey | None) -> None:
-    """Cancel the background tasks still using *owner*'s UDL password."""
+def _cancel_session_tasks(owner: SessionKey | None, *, training: bool | None = None) -> None:
+    """Cancel the background tasks still using *owner*'s UDL password on one side.
+
+    The side is the request's (training or operational) unless *training* names it.
+    """
+    side = in_training_request() if training is None else training
     # cancel() only schedules the done callback that edits the set, so it is
     # safe to iterate directly.
-    for task in _SESSION_TASKS.get(owner, ()):
+    for task in _SESSION_TASKS.get((owner, side), ()):
         task.cancel()
+
+
+def _side() -> str:
+    """What the UDL open and close log lines add for a session opened in training (0.47.0 review N5)."""
+    return " (training)" if in_training_request() else ""
+
+
+def cancel_training_tasks(owner: SessionKey | None) -> None:
+    """Cancel every task started from training by *owner*, as leaving training does (0.47.0 review S2)."""
+    _cancel_session_tasks(owner, training=True)
 
 
 async def _fetch_onorbit_background(username: str, password: str) -> None:
@@ -572,7 +592,7 @@ async def udl_login(
     # Discovery adds to the list, so a login on another account without a logout between must not inherit it.
     state.udl_available_sources = []
     state.append_log(f"[UDL] Connected as {username}")
-    logger.info("UDL session opened for operator: %s", log_safe(current_user.username))
+    logger.info("UDL session opened for operator: %s%s", log_safe(current_user.username), _side())
 
     # Kick off background tasks (no-op for catalog if already loaded). The
     # element set refresh replaces every held UDL or bootstrap set with UDL's
@@ -608,6 +628,12 @@ async def elset_refresh_status(
     announce = refresh is not None and not refresh.running and not refresh.announced
     if announce and refresh is not None:
         refresh.announced = True
+    if announce and refresh is not None and refresh.updated:
+        # The refresh replaced held sets, so both asset lists are redrawn with their element cards, and the Asset
+        # Screening selector is told when a Blue asset's set changed (training audit 2026-11-16, findings 2-1, 2-3).
+        note = get_templates().get_template(_ELSET_REFRESH_TEMPLATE).render({"refresh": refresh, "announce": announce})
+        blue_updated = any(label.startswith("blue ") for label in refresh.updated)
+        return HTMLResponse(note + lists_out_of_band(state), headers=BLUE_CHANGED if blue_updated else None)
     return render(request, _ELSET_REFRESH_TEMPLATE, {"refresh": refresh, "announce": announce})
 
 
@@ -704,7 +730,7 @@ async def udl_logout(
     # The login's background tasks hold the password; stop them too (F-143).
     _cancel_session_tasks(current_user.session_key)
     state.append_log("[UDL] Disconnected")
-    logger.info("UDL session closed for operator: %s", log_safe(current_user.username))
+    logger.info("UDL session closed for operator: %s%s", log_safe(current_user.username), _side())
 
     return render(request,
         "partials/udl_status.html",

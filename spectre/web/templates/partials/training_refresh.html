@@ -1,0 +1,10 @@
+{# Every progress panel of the training page, each swapped into its place out of band. The page asks for this
+   (GET /training/refresh) whenever a response raises training-changed: a tutorial completion, a scenario start, reset,
+   abandon or submission, or a level-up then shows without a manual reload (audit 1-18, G-4).
+   Context: as training.html, from routes/training.py _hub_context #}
+<span id="training-banner-status" hx-swap-oob="innerHTML">{% include "partials/training_banner_status.html" %}</span>
+<div id="training-sidebar-status" hx-swap-oob="innerHTML">{% include "partials/training_sidebar_status.html" %}</div>
+<div id="training-dashboard" hx-swap-oob="innerHTML">{% include "partials/training_dashboard.html" %}</div>
+<div id="scenario-list" hx-swap-oob="innerHTML">{% include "partials/training_scenario_list.html" %}</div>
+<div id="training-challenge-list" hx-swap-oob="innerHTML">{% include "partials/training_challenge_list.html" %}</div>
+<div id="training-tutorial-list" hx-swap-oob="innerHTML">{% include "partials/training_tutorial_list.html" %}</div>
