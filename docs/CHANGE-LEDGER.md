@@ -1500,3 +1500,16 @@ Logs to the App Store logging standard: JSON lines on standard output, nothing o
 | DAST | **HYGIENE** | No route changed; log content only | Query strings, credentials and cookies kept out of every line (tested). | n/a. |
 | SCA | **HYGIENE** | No dependency added | Standard library only. | n/a. |
 
+## 0.48.5
+
+SPECTRE starts without `SECRET_KEY` on a throwaway signing key, so the Logging check finds it serving.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Logging | **EVIDENCED** | An absent `SECRET_KEY` resolves to a throwaway minted once per process, with a WARN line on every boot; a set key that is short or a placeholder still refuses with a FATAL line | The 0.48.4 submission's Logging check: "Your app exited before it answered on port 8080". Locally the 0.48.4 image, run with no environment, wrote one FATAL line to stdout and exited 3. A subprocess test now starts the real entrypoint with no key: it answers 200 on `/`, writes one WARN line naming `SECRET_KEY`, and nothing to stderr; a second test refuses `changeme` with a FATAL line. | Then the check is stopped by something other than the key: its job log names it. |
+| Logging | **PROBE** | None in code: the same check reported 3 lines on stderr | The 0.48.4 image was built and run here 10 ways (no environment, read-only root, an arbitrary user, Python warnings on, developer mode, a database URL, another port): stderr was empty every time. | Then the 3 lines come from the check's own run setup, and its job log shows them: the next change is decided by their text. |
+| Test | **HYGIENE** | Settings and entrypoint tests updated to the new behaviour | Unit and integration suites run in full. | n/a. |
+| Code Quality | **HYGIENE** | Two functions in `settings.py`, one warning in `app.py` | `scripts/sonar_rules.py`: 0 blocking. | n/a. |
+| DAST | **HYGIENE** | None | The scan already ran on a throwaway key. | n/a. |
+| SCA | **HYGIENE** | None | n/a. | n/a. |
+

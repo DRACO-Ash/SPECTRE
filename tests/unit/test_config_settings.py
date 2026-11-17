@@ -119,12 +119,23 @@ class TestDastScanSigningKey:
     http://dast-target:8080 within 300 seconds`. The platform's own remedy is
     to mint a throwaway key when APPSTORE_DAST_SCAN is set.
 
-    What must stay true is that the fallback is unreachable by accident: an
-    operator who simply forgets SECRET_KEY still gets the fail-closed error.
+    The platform's Logging check starts it the same way without the flag, and
+    reported "exited before it answered on port 8080", so since 0.48.5 an absent
+    key always resolves to the throwaway (owner's instruction, 17 November 2026).
+    A CONFIGURED key that is a placeholder or too short still fails closed.
     """
 
-    def test_a_missing_key_still_fails_closed_without_the_flag(self, clean_env: None) -> None:
-        assert _resolve_secret_key() == ""
+    def test_a_missing_key_is_replaced_by_a_throwaway_without_the_flag(self, clean_env: None) -> None:
+        assert not appstore_dast_scan()
+        assert secret_key_is_ephemeral()
+        assert _resolve_secret_key() == _ephemeral_secret_key()
+        validate_secret_key(Settings().secret_key)
+
+    @pytest.mark.parametrize("bad", ["changeme", "short"])
+    def test_a_configured_bad_key_still_fails_closed(
+        self, clean_env: None, monkeypatch: pytest.MonkeyPatch, bad: str
+    ) -> None:
+        monkeypatch.setenv("SECRET_KEY", bad)
         assert not secret_key_is_ephemeral()
         with pytest.raises(ConfigurationError):
             validate_secret_key(Settings().secret_key)
@@ -139,12 +150,12 @@ class TestDastScanSigningKey:
         validate_secret_key(Settings().secret_key)
 
     @pytest.mark.parametrize("flag", ["", "false", "0", "no", "off", "maybe"])
-    def test_anything_but_an_affirmative_leaves_the_gate_shut(
+    def test_without_the_flag_an_absent_key_is_still_the_throwaway(
         self, clean_env: None, monkeypatch: pytest.MonkeyPatch, flag: str
     ) -> None:
         monkeypatch.setenv("APPSTORE_DAST_SCAN", flag)
         assert not appstore_dast_scan()
-        assert Settings().secret_key == ""
+        assert Settings().secret_key == _ephemeral_secret_key()
 
     def test_a_configured_key_always_wins(
         self, clean_env: None, monkeypatch: pytest.MonkeyPatch

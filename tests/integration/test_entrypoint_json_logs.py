@@ -83,8 +83,26 @@ def _wait_for_200(process: subprocess.Popen[str], port: int) -> int:
     return 0
 
 
-def test_without_a_signing_key_it_refuses_in_one_fatal_json_line(tmp_path: Path) -> None:
-    process = _start(_environment(tmp_path, _free_port()))
+def test_without_a_signing_key_it_serves_on_a_throwaway_and_says_so(tmp_path: Path) -> None:
+    """The platform's Logging check starts the image with no environment: it must find SPECTRE answering."""
+    port = _free_port()
+    process = _start(_environment(tmp_path, port))
+    try:
+        status = _wait_for_200(process, port)
+    finally:
+        process.terminate()
+        out, err = process.communicate(timeout=30)
+    assert status == 200, out
+    assert err == "", err
+    lines = standard_lines(out)
+    warn = [line for line in lines if line["attributes"].get("spectre.boot.signing_key") == "ephemeral"]
+    assert len(warn) == 1, out
+    assert (warn[0]["severity_text"], warn[0]["severity_number"]) == ("WARN", 13)
+    assert "SECRET_KEY is not set" in warn[0]["body"]
+
+
+def test_a_placeholder_signing_key_is_refused_in_one_fatal_json_line(tmp_path: Path) -> None:
+    process = _start(_environment(tmp_path, _free_port(), SECRET_KEY="changeme"))
     out, err = process.communicate(timeout=_BOOT_TIMEOUT_S)
     assert process.returncode != 0, out
     assert err == "", err

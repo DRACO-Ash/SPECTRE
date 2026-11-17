@@ -9,6 +9,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.48.5] - 2026-11-17
+
+**SPECTRE starts without `SECRET_KEY`, on a throwaway signing key, so the App Store's Logging check finds it answering on port 8080.**
+
+### Changed
+- With no `SECRET_KEY` set, SPECTRE now signs sessions with a throwaway key minted at boot (48 bytes from the system entropy source) and logs one WARN line saying so on every boot, instead of refusing to start. Before, that applied only when the platform's DAST scan set `APPSTORE_DAST_SCAN`; the Logging check starts the image with no environment and reported "Your app exited before it answered on port 8080". A key that is set but short or a placeholder still stops the boot with a FATAL line. Sessions on a throwaway key die at restart and do not cross replicas, so every deployment should still set `SECRET_KEY`. Owner's instruction, 17 November 2026.
+
 ## [0.48.4] - 2026-11-17
 
 **Logs meet the Bluestaq App Store logging standard: one JSON object per line on standard output, nothing on standard error.**

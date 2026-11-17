@@ -67,10 +67,10 @@ upstream data services (UDL, GCAT), which their operators secure.
 | Lint and strict typing | ruff; mypy in strict mode | CI job `lint` in `.github/workflows/ci.yml`; `pyproject.toml` (`strict = true`) |
 | Tests and coverage | pytest with coverage floors | CI job `test` in `.github/workflows/ci.yml` |
 | Quality gate on changed code | No new findings, complexity limit, changed-line coverage, duplication | CI job `quality` in `.github/workflows/ci.yml`; `scripts/check-quality.sh` |
-| Container contract | Non-root numeric user, no setuid or setgid files, no package manager, refuses to boot without a real `SECRET_KEY` | CI job `container` in `.github/workflows/ci.yml`; `Dockerfile` |
+| Container contract | Non-root numeric user, no setuid or setgid files, no package manager, refuses to boot on a short or example `SECRET_KEY` and warns on every boot without one | CI job `container` in `.github/workflows/ci.yml`; `Dockerfile` |
 | Code owners | Review by the owner on CI, authentication and configuration paths | `CODEOWNERS` |
 | Pre-commit hooks | gitleaks, ruff, bandit, mypy, large files, no direct commit to `master` | `.pre-commit-config.yaml` |
-| Fail-closed signing key | Refuses to boot with a missing, short or example `SECRET_KEY` | `spectre/config/settings.py` |
+| Signing key | Refuses to boot with a short or example `SECRET_KEY`; without one, signs with a throwaway minted at boot (48 bytes from the system entropy source) and logs a WARN on every boot, since 0.48.5 by the owner's instruction, because the App Store's checks start the image with no environment | `spectre/config/settings.py` |
 | Password storage | bcrypt; sign-in verification runs off the event loop, against a dummy hash for unknown users; a password over bcrypt's 72 bytes is refused at create and reset and counted as a failed sign-in | `spectre/web/auth.py`, `spectre/web/routes/login.py`, `spectre/web/routes/admin.py` |
 | Sessions | Signed cookie bound to the account (id and a per-account random nonce), 8 hour expiry, revoked server-side on logout and password change; only a live session can log out or receive a CSRF token | `spectre/web/auth.py`, `spectre/web/routes/login.py` |
 | Cookie attributes | Secure (unless explicitly disabled for local HTTP), HttpOnly, SameSite=Lax | `spectre/web/routes/login.py` |

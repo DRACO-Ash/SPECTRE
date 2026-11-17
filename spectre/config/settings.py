@@ -105,21 +105,27 @@ def _ephemeral_secret_key() -> str:
 
 
 def _resolve_secret_key() -> str:
-    """Return the session-signing key, or a scan-only throwaway.
+    """Return the session-signing key, or a throwaway minted for this process.
 
-    A configured key always wins. The fallback is reached only when SECRET_KEY
-    is absent AND the scanner's flag is set, so no deployment can land on it by
-    accident: an operator who forgets the key still gets the fail-closed error.
+    A configured key always wins, and a configured key that is a placeholder or
+    too short still stops the boot (``validate_secret_key``). An ABSENT key is
+    replaced by a throwaway minted once per process (owner's instruction, 17
+    November 2026, release 0.48.5). The platform's DAST scan sets
+    APPSTORE_DAST_SCAN, but its Logging check starts the image with no
+    environment at all and reported "exited before it answered on port 8080"
+    when SPECTRE refused to boot. The throwaway is as strong as a configured
+    key; what it cannot do is survive a restart or be shared between replicas,
+    so every boot on one says so in a WARN line (``app.lifespan``).
     """
     configured = os.environ.get("SECRET_KEY", "")
-    if configured.strip() or not appstore_dast_scan():
+    if configured.strip():
         return configured
     return _ephemeral_secret_key()
 
 
 def secret_key_is_ephemeral() -> bool:
     """True when this process is running on a minted throwaway key."""
-    return not os.environ.get("SECRET_KEY", "").strip() and appstore_dast_scan()
+    return not os.environ.get("SECRET_KEY", "").strip()
 
 # Valid TCP port range, per RFC 6335.
 _MIN_PORT = 1

@@ -203,20 +203,20 @@ def _validate_boot(settings: Settings) -> None:
     that will not accept a write, stops the boot with a named error rather than
     letting the process start in a silently broken or insecure state.
     """
-    # Fail closed on an unusable signing key before anything can issue a token.
-    #
-    # The one exception is the platform's DAST scan, which starts the image with
-    # no environment at all. There SECRET_KEY resolves to a throwaway minted for
-    # this process. It is announced loudly because a running instance on an
-    # ephemeral key loses every session at restart, and because the flag has no
-    # business being set anywhere but the scan.
+    # Fail closed on a configured key that is unusable (a placeholder or too
+    # short) before anything can issue a token. An absent key resolves to a
+    # throwaway minted for this process, so the platform's scans and checks,
+    # which start the image with no environment, find it serving. It is
+    # announced on every boot because sessions on it die at restart and do not
+    # cross replicas.
     if secret_key_is_ephemeral():
         logger.warning(
-            "APPSTORE_DAST_SCAN is set and SECRET_KEY is not, so this process is "
-            "signing sessions with a THROWAWAY key minted at boot. Every session "
-            "and CSRF token dies at restart. This is correct for the App Store "
-            "security scan and wrong for anything else: if you see this line in a "
-            "deployment, unset APPSTORE_DAST_SCAN and set a real SECRET_KEY."
+            "SECRET_KEY is not set, so this process is signing sessions with a "
+            "THROWAWAY key minted at boot. Every session and CSRF token dies at "
+            "restart and is not valid on another replica. That is fine for the "
+            "App Store's scans and checks and wrong for a deployment: set "
+            "SECRET_KEY to a random string of at least 16 characters.",
+            extra={"config.setting": "SECRET_KEY", "spectre.boot.signing_key": "ephemeral"},
         )
     validate_secret_key(settings.secret_key)
 
