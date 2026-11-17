@@ -113,8 +113,12 @@ cache only to operators with their own UDL session.
 marked `UNCLASS // PAIR` in the file, by the owner's ruling of 24 October 2026.
 
 ● The application holds personal data: operator accounts (username, bcrypt
-password hash, role) and log lines recording usernames and client addresses on
-sign-in attempts. That brings it within UK GDPR; see the open items.
+password hash, role), log lines recording usernames and client addresses on
+sign-in attempts, and, from 0.48.4, the `X-Auth-Request-Email` header on every
+request line as `user.email`, which the App Store logging standard requires.
+That brings it within UK GDPR; see the open items. With no single sign-on
+gateway in front of SPECTRE a client can set that header itself, so the logged
+email is what the request claimed, not proof of who sent it.
 
 ● Decision records (SPC-192) hold the username that ran each Decision Engine
 evaluation and operator-typed free text: the scenario's name, the response names,

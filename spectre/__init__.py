@@ -1,4 +1,4 @@
 """SPECTRE — Space Planning, Evaluation & Counter-Threat Response Engine."""
 
-__version__ = "0.48.3"
+__version__ = "0.48.4"
 __author__ = "SPECTRE Development Team"

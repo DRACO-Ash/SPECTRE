@@ -1488,3 +1488,15 @@ The lookup register's tests skip inside the App Store package, where `docs/` is 
 | SCA | **HYGIENE** | None | n/a. | n/a. |
 | Other gates | **HYGIENE** | None | n/a. | n/a. |
 
+## 0.48.4
+
+Logs to the App Store logging standard: JSON lines on standard output, nothing on standard error.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Logging | **EVIDENCED** | `spectre/web/json_logging.py`; the entrypoint configures it before anything can fail and gives uvicorn the same handler; the request line carries `http.request.header.x-request-id` and `user.email` | The 0.48.1 submission's Logging check: nothing on stdout, 115 lines on stderr, "exited before it answered on port 8080". A subprocess test starts the real entrypoint with no `SECRET_KEY`: exit 3, stderr empty, every line valid, the last FATAL naming the setting; with a key, and with `APPSTORE_DAST_SCAN`, it answers 200 on `/` at the given port and writes only JSON. | "Exited before it answered" remains if the check starts the image with neither `SECRET_KEY` nor `APPSTORE_DAST_SCAN`: SPECTRE refuses to start without a signing key, by design. Any other finding names the field. |
+| Test | **HYGIENE** | 57 new tests | Inside the unpacked package: unit 9,121 passed, integration 1,669 passed, 0 failed, 0 errors. | n/a. |
+| Code Quality | **HYGIENE** | New module and changes to `app.py` and `_entrypoint.py` | `scripts/sonar_rules.py`: 0 blocking; no function over complexity 15. | Then the named rule points at `json_logging.py`. |
+| DAST | **HYGIENE** | No route changed; log content only | Query strings, credentials and cookies kept out of every line (tested). | n/a. |
+| SCA | **HYGIENE** | No dependency added | Standard library only. | n/a. |
+

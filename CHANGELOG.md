@@ -9,6 +9,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.48.4] - 2026-11-17
+
+**Logs meet the Bluestaq App Store logging standard: one JSON object per line on standard output, nothing on standard error.**
+
+### Changed
+- Every log line is JSON on standard output with `timestamp` (UTC, milliseconds), `severity_text`, `severity_number`, `body` and flat `attributes`; exceptions as `exception.type`, `exception.message` and `exception.stacktrace`. Uvicorn's loggers, Python warnings, uncaught exceptions and dying threads go through the same handler (`spectre/web/json_logging.py`). Before, plain text went to standard error, which the platform's Logging check flagged (advisory now, blocking from 1 December 2026).
+- Each request writes one line with the method, the path (never the query string), the status, the duration, the `X-Request-Id` header and the `X-Auth-Request-Email` header as `user.email`, as the standard requires. Authorization and Cookie values, tokens, passwords and query strings never appear; a test sends each and searches every line.
+- A refusal to start (no `SECRET_KEY`, or unusable storage) is one FATAL line on standard output naming the setting, with exit code 3. SPECTRE still refuses to start without a signing key.
+- `httpx` and `httpcore` log at WARN and above, because at INFO they write every outbound URL with its query string.
+
 ## [0.48.3] - 2026-11-17
 
 ### Fixed

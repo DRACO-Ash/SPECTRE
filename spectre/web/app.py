@@ -17,6 +17,8 @@ from fastapi.templating import Jinja2Templates
 
 from spectre import __version__
 from spectre.config.settings import (
+    ConfigurationError,
+    Settings,
     get_settings,
     secret_key_is_ephemeral,
     uses_sqlite,
@@ -30,6 +32,7 @@ from spectre.web.database import init_db
 from spectre.web.decision_job import jobs_ended, server_starting, server_stopping
 from spectre.web.format_units import format_m_s, format_tof_label, is_computed
 from spectre.web.health import router as health_router
+from spectre.web.json_logging import ensure_logging
 from spectre.web.log_safety import log_safe
 from spectre.web.planning_state import (
     in_training_request,
@@ -193,21 +196,13 @@ def _load_hrr_from_disk() -> None:
         logger.exception("Failed to pre-load %s", _HRR_FILENAME)
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Validate configuration, then initialise logging, storage and the database.
+def _validate_boot(settings: Settings) -> None:
+    """Prove the signing key and the storage, raising :class:`ConfigurationError` on either.
 
     Fails closed. A missing or placeholder ``SECRET_KEY``, or a data directory
     that will not accept a write, stops the boot with a named error rather than
     letting the process start in a silently broken or insecure state.
     """
-    settings = get_settings()
-    numeric_level = getattr(logging, settings.log_level.upper(), logging.INFO)
-    logging.basicConfig(
-        level=numeric_level,
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
-    )
-
     # Fail closed on an unusable signing key before anything can issue a token.
     #
     # The one exception is the platform's DAST scan, which starts the image with
@@ -251,6 +246,24 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             "SPECTRE %s storage: external database, durable. Data volume at %s",
             __version__, resolved_data_dir,
         )
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Configure logging, validate configuration, then initialise storage and the database.
+
+    Logging first, so every line from here on is one JSON object on stdout
+    (App Store logging standard, 0.48.4); under the entrypoint it is already
+    configured, and a host with handlers of its own keeps them. A refusal to
+    boot is a FATAL line, then the error propagates and the server stops.
+    """
+    settings = get_settings()
+    ensure_logging(settings.log_level)
+    try:
+        _validate_boot(settings)
+    except ConfigurationError as exc:
+        logger.critical("SPECTRE refused to start: %s", exc, extra={"spectre.boot.outcome": "refused"})
+        raise
 
     await init_db()
     _load_hrr_from_disk()
@@ -372,26 +385,59 @@ app = FastAPI(
 _UNLOGGED_PATHS = frozenset({"/healthz", "/livez", "/ping", "/readyz"})
 
 
+def _request_attributes(request: Request, status_code: int, started: float) -> dict[str, object]:
+    """The request line's attributes: never a header but the two below, never the query string.
+
+    The request id and the platform's asserted user are taken from their
+    headers when present and left out when not. Authorization, Cookie,
+    Set-Cookie, CSRF and session values are never read here (audit F-258).
+    """
+    attributes: dict[str, object] = {
+        "http.request.method": log_safe(request.method),
+        "url.path": log_safe(request.url.path),
+        "http.response.status_code": status_code,
+        "http.server.request.duration": round(time.perf_counter() - started, 6),
+    }
+    request_id = request.headers.get("x-request-id")
+    if request_id:
+        attributes["http.request.header.x-request-id"] = log_safe(request_id)
+    email = request.headers.get("x-auth-request-email")
+    if email:
+        attributes["user.email"] = log_safe(email)
+    if in_training_request():
+        attributes["spectre.frame"] = "training"
+    return attributes
+
+
+def _write_request_line(request: Request, status_code: int, started: float) -> None:
+    if request.url.path in _UNLOGGED_PATHS:
+        return
+    # Served from the training planning state (0.47.0 review N5).
+    training = " training" if in_training_request() else ""
+    _access_log.info(
+        "%s %s %d%s", log_safe(request.method), log_safe(request.url.path), status_code, training,
+        extra=_request_attributes(request, status_code, started),
+    )
+
+
 @app.middleware("http")
 async def _log_request(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:
-    """One access line per request: method, path, status and duration.
+    """One access line per request: method, path and status, with the duration as an attribute.
 
     The path only: the query string can carry operator input, which is why
-    uvicorn's own access log is off (audit F-258).
+    uvicorn's own access log is off (audit F-258). A request whose handler
+    raises is still a line, status 500, before the error propagates.
     """
     started = time.perf_counter()
-    response = await call_next(request)
-    if request.url.path not in _UNLOGGED_PATHS:
-        _access_log.info(
-            "%s %s %d %.0f ms%s",
-            request.method, log_safe(request.url.path), response.status_code,
-            (time.perf_counter() - started) * 1000.0,
-            # Served from the training planning state (0.47.0 review N5).
-            " training" if in_training_request() else "",
-        )
+    try:
+        response = await call_next(request)
+    except Exception:
+        _write_request_line(request, 500, started)
+        raise
+    _write_request_line(request, response.status_code, started)
     return response
 
 

@@ -116,12 +116,9 @@ FastAPI application. All operator access via browser — no desktop install requ
 - **notso_cache.py** — `NOTSOCache`: persistent NOTSO record storage keyed by NORAD ID; retrieval for Decision Engine Phase 5 priors
 - **intel.py** — Intelligence data helpers (OOB lookup, nation classification)
 
-### `spectre/app_logging/`
+### Logging (`spectre/web/json_logging.py`)
 
-Configures `structlog` with:
-- Console renderer (human-readable) for terminal output
-- JSON-lines file renderer for post-run analysis
-- `run_id` UUID bound to all log records via `structlog.contextvars`
+Every log line is one JSON object on standard output, to the Bluestaq App Store logging standard: `timestamp` (UTC, milliseconds), `severity_text`, `severity_number` (TRACE 1, DEBUG 5, INFO 9, WARN 13, ERROR 17, FATAL 21), `body` and a flat `attributes` object. Nothing is written to standard error, including a refusal to start, which is a FATAL line naming the setting. Uvicorn's own loggers use the same handler. Each request writes one line (`spectre.access`) with the method, the path without its query string, the status, the duration, `http.request.header.x-request-id` and `user.email` from `X-Auth-Request-Email` when present. Authorization and Cookie values, tokens, passwords and query strings are never logged, and attributes whose keys name them are dropped.
 
 ### `spectre/config/`
 
@@ -197,7 +194,7 @@ allow less, lower `STOP_WAIT_S` with it, or a record being written at the stop c
 
 ### Provenance tagging
 
-Every planning run is assigned a `run_id` (UUID) bound to `structlog` context at run start, appearing in all log records for that run.
+Planning results carry their own provenance (data mode, element-set epochs and sources) on screen and in their records; log lines are the JSON lines described under Logging.
 
 ### Training session isolation
 
