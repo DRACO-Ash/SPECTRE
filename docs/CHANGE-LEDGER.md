@@ -1463,3 +1463,16 @@ The App Store package's test run collects again: one test module's import-time s
 | DAST | **HYGIENE** | None | No route or template changed. | n/a. |
 | SCA | **HYGIENE** | None | No dependency changed. | n/a. |
 | Other gates | **HYGIENE** | None | n/a. | n/a. |
+
+## 0.48.2
+
+The suite passes from inside the App Store package: tests that read `docs/` or `scripts/`, which the package leaves out, skip there.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Test | **EVIDENCED** | Skips where `docs/` or `scripts/` is absent in `test_threat_model_draft.py` (module), `test_decision_engine_envelope.py` (`_row`), `test_lookup_register.py`, `test_decision_tree_own_cap.py`, `test_decision_ties.py` and `tests/integration/test_replay_decision_command.py` (fixture) | The 0.48.1 package, unpacked and run as the platform runs it: unit 30 failed, integration 7 errors (the replay command), all in these files. With the skips the same files pass in the repository and skip inside the package. | Then another test reads a stripped path: the package run's tail names it. |
+| Code Quality | **HYGIENE** | Test files only | No application code changed. | n/a. |
+| DAST | **HYGIENE** | None | No route or template changed. | n/a. |
+| SCA | **HYGIENE** | None | No dependency changed. | n/a. |
+| Other gates | **HYGIENE** | None | n/a. | n/a. |
+

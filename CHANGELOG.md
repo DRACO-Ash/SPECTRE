@@ -9,6 +9,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.48.2] - 2026-11-17
+
+**The App Store package's suite passes from inside the package.**
+
+### Fixed
+- Run from inside the 0.48.1 package, 31 tests failed or errored because they read a document under `docs/` or load a script under `scripts/`, both of which `scripts/package-appstore.sh` strips from the upload: the threat model draft, the decision engine envelope, the lookup register (and the decision tree's cap test that reads it), the tie wording in the guide, and the replay command. Each now skips when its file is absent, as the package-aware tests already do; in the repository every one still runs.
+
 ## [0.48.1] - 2026-11-17
 
 **The App Store package's test run collects again.**
