@@ -33,6 +33,8 @@ _SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "replay_decision.py"
 
 @pytest.fixture(scope="module")
 def command() -> ModuleType:
+    if not _SCRIPT.is_file():
+        pytest.skip("scripts/ is excluded from the submission package")
     spec = importlib.util.spec_from_file_location("_replay_decision", _SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

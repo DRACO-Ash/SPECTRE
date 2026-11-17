@@ -96,6 +96,8 @@ def test_deep_space_is_flagged_and_not_refused() -> None:
 
 
 def _row(dimension: str) -> list[str]:
+    if not (_ROOT / _ENVELOPE).exists():
+        pytest.skip(f"{_ENVELOPE} not present in this checkout")
     (row,) = [row for row in _rows() if row[0] == dimension]
     return row
 

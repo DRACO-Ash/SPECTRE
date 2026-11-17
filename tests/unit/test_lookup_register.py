@@ -471,6 +471,8 @@ class TestThePanelStartsWhereTheRegisterSays:
 
 
 def test_the_register_follows_the_house_style() -> None:
+    if not _REGISTER.is_file():
+        pytest.skip("docs/ is excluded from the submission package")
     text = _REGISTER.read_text(encoding="utf-8")
     assert not re.search(r"\b(five|six|seven|eight|nine|ten|eleven|twelve)\b", text, re.IGNORECASE), "a number "\
         "of 5 or more in words"
