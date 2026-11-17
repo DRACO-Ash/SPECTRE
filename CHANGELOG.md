@@ -9,6 +9,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.48.3] - 2026-11-17
+
+### Fixed
+- The 0.48.2 package's suite still stopped on 25 setup errors in `tests/unit/test_lookup_register.py`: its module fixture and its relation tests read `docs/lookup-register.md` directly. Every read now goes through one helper that skips where `docs/` is not shipped. The 0.48.2 in-package check listed failures but not errors (`-rf`), which is how these were missed; the check that cleared this release lists both.
+
 ## [0.48.2] - 2026-11-17
 
 **The App Store package's suite passes from inside the package.**

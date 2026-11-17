@@ -1476,3 +1476,15 @@ The suite passes from inside the App Store package: tests that read `docs/` or `
 | SCA | **HYGIENE** | None | No dependency changed. | n/a. |
 | Other gates | **HYGIENE** | None | n/a. | n/a. |
 
+## 0.48.3
+
+The lookup register's tests skip inside the App Store package, where `docs/` is not shipped.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Test | **EVIDENCED** | `tests/unit/test_lookup_register.py` reads the register through `_register_text()`, which skips when the file is absent | The 0.48.2 package's own run: 25 setup errors, every one a `FileNotFoundError` on `docs/lookup-register.md`. The earlier in-package check reported failures only, so errors were invisible to it; this release was checked with failures and errors both listed. | Then another test reads a stripped path at setup: run the package suite with `-rfE`. |
+| Code Quality | **HYGIENE** | One test file | No application code changed. | n/a. |
+| DAST | **HYGIENE** | None | n/a. | n/a. |
+| SCA | **HYGIENE** | None | n/a. | n/a. |
+| Other gates | **HYGIENE** | None | n/a. | n/a. |
+

@@ -269,9 +269,16 @@ def _source(path: str) -> str:
     return (_ROOT / path).read_text(encoding="utf-8")
 
 
+def _register_text() -> str:
+    """The register, under docs/, which the packager strips: a test that reads it skips where it is not shipped."""
+    if not _REGISTER.is_file():
+        pytest.skip("docs/ is excluded from the submission package")
+    return _REGISTER.read_text(encoding="utf-8")
+
+
 @pytest.fixture(scope="module")
 def register() -> list[Entry]:
-    return entries(_REGISTER.read_text(encoding="utf-8"))
+    return entries(_register_text())
 
 
 class TestTheRegisterMatchesTheCode:
@@ -331,12 +338,12 @@ class TestTheLookupModelsRelations:
     register's."""
 
     def test_every_relation_is_listed_with_its_basis_and_the_labels_words(self, register: list[Entry]) -> None:
-        rows = relations(_REGISTER.read_text(encoding="utf-8"))
+        rows = relations(_register_text())
         assert len(rows) == len(LookupRelation) == 7
         assert relation_problems(rows, register) == []
 
     def test_none_has_a_source(self, register: list[Entry]) -> None:
-        assert {r.basis for r in relations(_REGISTER.read_text(encoding="utf-8"))} == {UNSOURCED}
+        assert {r.basis for r in relations(_register_text())} == {UNSOURCED}
 
     @pytest.mark.parametrize("name", [
         "_BASE_CA_KM", "_OTHER_CA_KM", "_MANOEUVRE_CA_PER_COST", "_POSTURE_CA_PER_COST", "_LOOKUP_DV_KM_S_PER_COST",
@@ -354,7 +361,7 @@ class TestTheLookupModelsRelations:
         assert not {e.name for e in register} & {r.value for r in LookupRelation}
 
     def test_a_relation_out_of_step_is_caught(self, register: list[Entry]) -> None:
-        rows = relations(_REGISTER.read_text(encoding="utf-8"))
+        rows = relations(_register_text())
         moved = [dataclasses.replace(rows[1], words="half its time", basis="Smith (2020)"), *rows[2:]]
         problems = relation_problems(moved, register)
         assert problems[0].startswith("the register lists ['sensor-retask gap', ")
@@ -365,7 +372,7 @@ class TestTheLookupModelsRelations:
     def test_a_constant_the_function_does_not_read_or_the_table_does_not_mark_is_caught(
         self, register: list[Entry],
     ) -> None:
-        rows = relations(_REGISTER.read_text(encoding="utf-8"))
+        rows = relations(_register_text())
         wrong = dataclasses.replace(rows[1], constants="`_CA_NORMALISATION_KM`", owner="", when="")
         assert relation_problems([rows[0], wrong, *rows[2:]], register) == [
             "sensor-retask gap: no owner or date",
@@ -374,7 +381,7 @@ class TestTheLookupModelsRelations:
         ]
 
     def test_an_unknown_relation_has_no_words(self, register: list[Entry]) -> None:
-        rows = relations(_REGISTER.read_text(encoding="utf-8"))
+        rows = relations(_register_text())
         problems = relation_problems([dataclasses.replace(rows[0], name="tide rule"), *rows[1:]], register)
         assert "tide rule: the register's words differ from the label's" in problems
 
@@ -471,9 +478,7 @@ class TestThePanelStartsWhereTheRegisterSays:
 
 
 def test_the_register_follows_the_house_style() -> None:
-    if not _REGISTER.is_file():
-        pytest.skip("docs/ is excluded from the submission package")
-    text = _REGISTER.read_text(encoding="utf-8")
+    text = _register_text()
     assert not re.search(r"\b(five|six|seven|eight|nine|ten|eleven|twelve)\b", text, re.IGNORECASE), "a number "\
         "of 5 or more in words"
     assert "—" not in text and "–" not in text, "a long dash"
