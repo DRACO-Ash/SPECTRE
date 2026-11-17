@@ -1451,3 +1451,15 @@ SPECTRE: Orbital Watch, part 1 (SPC-248): the mission engine on real catalogue o
 | DAST | **HYGIENE** | New routes under `/training/m` (campaign, start, hud, answer, choose, hint, finish, abandon, restart) | CSRF on every post (403 without the token, tested); attempts filtered by user; autoescaped templates with no `|safe`; no inline script or handler (Chromium policy watch clean across every play). | n/a. |
 | SCA | **HYGIENE** | No dependency added | Standard library, sgp4 and the existing stack only. | n/a. |
 | Other gates | **HYGIENE** | One new table, `training_mission_attempts`, with a partial unique index of one open attempt per account | Created with the other training tables; removed with the account. | Then the database refused the index: check the engine supports partial indexes (SQLite and PostgreSQL both do). |
+
+## 0.48.1
+
+The App Store package's test run collects again: one test module's import-time skip lacked `allow_module_level=True`.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Test | **EVIDENCED** | `tests/unit/test_mutation_runner_kills.py` skips at module level with `allow_module_level=True` when `scripts/` is absent | `scripts/package-appstore.sh` for 0.48.0 ran the suite inside the package and stopped at collection: "Using pytest.skip outside of a test will skip the entire module". With the fix, collection inside the unpacked package reports no error and the module shows as skipped. | Then another module skips or imports `scripts/` at import time: the package run's tail names it. |
+| Code Quality | **HYGIENE** | One keyword argument in a test file | No application code changed. | n/a. |
+| DAST | **HYGIENE** | None | No route or template changed. | n/a. |
+| SCA | **HYGIENE** | None | No dependency changed. | n/a. |
+| Other gates | **HYGIENE** | None | n/a. | n/a. |

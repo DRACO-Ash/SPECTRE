@@ -28,7 +28,7 @@ _SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "mutate.py"
 def _load_runner():
     """``scripts/mutate.py`` imported as a module: scripts/ is not a package."""
     if not _SCRIPT.is_file():
-        pytest.skip("scripts/ is not in this tree")
+        pytest.skip("scripts/ is not in this tree", allow_module_level=True)
     spec = importlib.util.spec_from_file_location("_mutate_runner", _SCRIPT)
     module = importlib.util.module_from_spec(spec)
     sys.modules["_mutate_runner"] = module

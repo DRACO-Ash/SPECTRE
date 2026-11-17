@@ -9,6 +9,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.48.1] - 2026-11-17
+
+**The App Store package's test run collects again.**
+
+### Fixed
+- `tests/unit/test_mutation_runner_kills.py` skipped itself from module import with `pytest.skip` without `allow_module_level=True`. In the App Store package, which leaves out `scripts/`, that is a collection error and pytest stops the whole run before any test executes, so the platform's Test stage would have failed. The skip now covers the module, as `tests/unit/test_sonar_rules.py` already does. Found by `scripts/package-appstore.sh`, which runs the suite from inside the package.
+
 ## [0.48.0] - 2026-11-17
 
 **SPECTRE: Orbital Watch. Training becomes a game of short missions flown in the real console against real satellites, with every figure computed and every objective checked by the console.**
