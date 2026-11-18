@@ -638,11 +638,11 @@ SPECTRE.action('hrrSearch', function (el) { window._hrrSearch(el.value); });
 
 /* ── Theme switcher ─────────────────────────────────────────────────────── */
 (function () {
-  var THEMES = ['ops', 'steel'];
+  var THEMES = new Set(['ops', 'steel']);
   var KEY    = 'spectre-theme';
 
   function spectreSetTheme(theme) {
-    if (!THEMES.includes(theme)) return;        // only allow known themes
+    if (!THEMES.has(theme)) return;        // only allow known themes
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.spectreTheme = theme === 'steel' ? 'light' : 'dark';
     try { localStorage.setItem(KEY, theme); } catch (_) {}
