@@ -277,10 +277,11 @@ def computed_misses(burns: Sequence[ig.Burn], before_tle: str, after_tle: str, t
 
 
 def _probe_note(held: HeldConjunctions | None) -> tuple[str, ...]:
-    if held is None:
-        return ()
-    n = len(held.rows)
-    return (_PROBE.format(n=n, s="" if n == 1 else "s", are="is" if n == 1 else "are", at=held.looked_up_at),)
+    notes: list[str] = []
+    if held is not None:
+        n = len(held.rows)
+        notes.append(_PROBE.format(n=n, s="" if n == 1 else "s", are="is" if n == 1 else "are", at=held.looked_up_at))
+    return tuple(notes)
 
 
 class SweepFindings(NamedTuple):

@@ -144,6 +144,7 @@ import numpy as np
 
 from spectre.astro.along_track import ERROR_MODEL_WORDS, error_rate_words, regime_basis
 from spectre.astro.closest_approach import ClosestApproach
+from spectre.astro.copies import replaced
 from spectre.astro.elset_approach import (
     ElsetApproach,
     ElsetFailure,
@@ -644,7 +645,7 @@ def _pointed(hypothesis: ManoeuvreHypothesis, unit: tuple[float, float, float]) 
     """
     scaled = tuple(hypothesis.delta_v_magnitude_km_s * c for c in unit)
     parts = scaled if _sampler_reads(scaled) else unit
-    return dataclasses.replace(
+    return replaced(
         hypothesis, delta_v_radial=parts[0], delta_v_in_track=parts[1], delta_v_cross_track=parts[2],
     )
 
@@ -668,8 +669,8 @@ def _nominal(dv_km_s: float, unit: tuple[float, float, float], at: PreManoeuvreS
 def _dispersed(hypothesis: ManoeuvreHypothesis, archetype: ManoeuvreType | None, n_samples: int) -> ManoeuvreHypothesis:
     """*hypothesis* with *archetype*'s dispersions and name; the ManoeuvreHypothesis defaults when there is none."""
     if archetype is None:
-        return dataclasses.replace(hypothesis, n_samples=n_samples)
-    return dataclasses.replace(
+        return replaced(hypothesis, n_samples=n_samples)
+    return replaced(
         hypothesis,
         delta_v_magnitude_1sigma_km_s=hypothesis.delta_v_magnitude_km_s * archetype.delta_v_1sigma_fraction,
         delta_v_pointing_1sigma_deg=archetype.pointing_1sigma_deg,
@@ -829,11 +830,11 @@ class AdversaryHypothesis:
     def with_spread(self, delta_v_1sigma_m_s: float) -> AdversaryHypothesis:
         """This hypothesis with a delta-V spread the operator entered, in m/s (1 sigma); the other spreads stay."""
         spread = dataclasses.replace(self.hypothesis, delta_v_magnitude_1sigma_km_s=to_km_s(delta_v_1sigma_m_s))
-        return dataclasses.replace(self, hypothesis=spread, spread_entered=True)
+        return replaced(self, hypothesis=spread, spread_entered=True)
 
     def with_transfer(self, then: Sequence[TransferBurn]) -> AdversaryHypothesis:
         """This hypothesis as the first burn of a transfer whose later burns are *then*, in time order (SPC-184)."""
-        return dataclasses.replace(self, then=tuple(then))
+        return replaced(self, then=tuple(then))
 
     @classmethod
     def from_detection(
@@ -1827,7 +1828,7 @@ class ThreatPicture:
         """The sweep's collect first, act on the ceiling, or below the action line, at *now* (concept section 4.10),
         over *cues*, every cue held when None, with the picture's age beside it."""
         advice = self.unaged(now, cues)
-        return dataclasses.replace(advice, sentence=_beside(advice.sentence, self.age(now)))
+        return replaced(advice, sentence=_beside(advice.sentence, self.age(now)))
 
     def unaged(self, now: datetime, cues: tuple[Cue, ...] | None = None) -> CollectionAdvice:
         """The advice as advice() gives it, before the picture's age is put beside it."""
@@ -2030,7 +2031,7 @@ def with_remainder(scenario: Scenario) -> Scenario:
     wanted = [*rows, *(() if rest is None else (remainder_row(rest),))]
     if wanted == scenario.adversary_actions:
         return scenario
-    return dataclasses.replace(scenario, adversary_actions=wanted)
+    return replaced(scenario, adversary_actions=wanted)
 
 
 def without_remainder(scenario: Scenario) -> Scenario:
@@ -2038,7 +2039,7 @@ def without_remainder(scenario: Scenario) -> Scenario:
     rows = [a for a in scenario.adversary_actions if not a.remainder]
     if len(rows) == len(scenario.adversary_actions):
         return scenario
-    return dataclasses.replace(scenario, adversary_actions=rows)
+    return replaced(scenario, adversary_actions=rows)
 
 
 def row_shares(scenario: Scenario) -> tuple[float, ...]:
@@ -2302,7 +2303,7 @@ class ScenarioResult:
         refused = next((seen for seen in relevance.values() if seen.refused is not None), None)
         if refused is not None:
             sentence = CUE_NOT_AVAILABLE.format(observation=refused.cue.observation, why=refused.refused)
-            return dataclasses.replace(swept, sentence=_beside(f"{swept.sentence} {sentence}", picture.age(now)))
+            return replaced(swept, sentence=_beside(f"{swept.sentence} {sentence}", picture.age(now)))
         # The matrix is said to read no Threat band only when no cue's outcome moved a cell: earned, not assumed.
         band_read = any(seen.moved for seen in relevance.values())
         if swept.advice is not Advice.COLLECT_FIRST:
@@ -2311,7 +2312,7 @@ class ScenarioResult:
         if named.advice is Advice.COLLECT_FIRST:
             chosen = relevance[cast("Cue", named.cue)]
             picks = OUTCOME_PICKS.format(benign=_named(chosen.benign), hostile=_named(chosen.hostile))
-            return dataclasses.replace(named, sentence=_beside(f"{named.sentence} {picks}", picture.age(now)))
+            return replaced(named, sentence=_beside(f"{named.sentence} {picks}", picture.age(now)))
         cue = cast("Cue", swept.cue)
         sentence = (SAME_EITHER_WAY.format(observation=cue.observation, pick=_named(relevance[cue].benign))
                     if band_read else CANNOT_CHANGE.format(observation=cue.observation, why=NO_BAND_READ))
@@ -2326,7 +2327,7 @@ class ScenarioResult:
         key = (floor, ceiling)
         if key not in self._built_under:
             held = cast("ThreatPicture", self.scenario.threat)
-            outcome = dataclasses.replace(self.scenario, threat=dataclasses.replace(held, floor=floor, ceiling=ceiling))
+            outcome = replaced(self.scenario, threat=replaced(held, floor=floor, ceiling=ceiling))
             self._built_under[key] = (_rescored(self, outcome) if self.matrix_plan is None
                                       else _build_matrix(outcome, self.matrix_plan))
         return self._built_under[key]
@@ -4314,7 +4315,7 @@ def _burn_at(scenario: Scenario, friendly: FriendlyResponse) -> datetime:
 def _burnt_series(series: SeparationSeries, after: BurnSeries) -> SeparationSeries:
     """The row's series as it stands after one of our burns: the same samples, against the burnt blue asset."""
     stats = after.stats
-    return dataclasses.replace(
+    return replaced(
         series, approaches=after.approaches, closing_speeds_km_s=after.closing_speeds_km_s, n_failed=after.n_failed,
         miss_km_p5=stats.p5, miss_km_p50=stats.p50, miss_km_p95=stats.p95, miss_km_std=stats.std,
         percentile_half_width_km=stats.half_width_km, converged=stats.converged, tolerance_km=stats.tolerance_km,
@@ -4437,7 +4438,7 @@ def _refused_cell(metrics: OutcomeMetrics, refusal: str | None) -> OutcomeMetric
     """The lookup cell, with the refusal in the cell and in its closest approach's note; its custody is kept."""
     note = f"{LOOKUP_BASES.closest_approach_km.note}. {refusal}"
     bases = dataclasses.replace(metrics.figure_bases, closest_approach_km=FigureBasis(Basis.LOOKUP, note))
-    return dataclasses.replace(metrics, figure_bases=bases, ca_refusal=refusal)
+    return replaced(metrics, figure_bases=bases, ca_refusal=refusal)
 
 
 #: The custody figures, which read one burn of a row: the earliest it applies (SPC-184).
@@ -4476,7 +4477,7 @@ def _burns_named(cell: OutcomeMetrics, burns: RowBurns | None, end: datetime) ->
         name: FigureBasis(basis.kind, basis.note + _burns_suffix(name, basis, cell, burns, flown))
         for name, basis in cell.figure_bases.items()
     }
-    return dataclasses.replace(cell, figure_bases=OutcomeBases(**named))
+    return replaced(cell, figure_bases=OutcomeBases(**named))
 
 
 def _row_notes(scenario: Scenario, plan: Sequence[RowSampling | None]) -> tuple[str | None, ...]:
@@ -5327,10 +5328,10 @@ def _with_none_can_change(
     """The sweep's advice to act on the ceiling, or that the range is below the action line, with the picture's age
     beside it; and when the picture holds a cue and none of them can change the recommended response, saying so."""
     if not relevance or any(seen.changes for seen in relevance.values()):
-        return dataclasses.replace(swept, sentence=_beside(swept.sentence, picture.age(now)))
+        return replaced(swept, sentence=_beside(swept.sentence, picture.age(now)))
     why = EACH_THE_SAME if band_read else NO_BAND_READ
     none_can = NONE_CAN_CHANGE.format(why=why)
-    return dataclasses.replace(swept, sentence=_beside(f"{swept.sentence} {none_can}", picture.age(now)))
+    return replaced(swept, sentence=_beside(f"{swept.sentence} {none_can}", picture.age(now)))
 
 
 #: Beside the sweep's advice when a cue's outcome matrix held a score that is not finite (V0.42 review of SPC-221).
@@ -5374,7 +5375,7 @@ def cue_relevance(result: ScenarioResult, cue: Cue, rule: SelectorStrategy) -> C
     for floor, ceiling in (cue.benign, cue.hostile):
         matrix = result.matrix_under(floor, ceiling)
         moved = moved or matrix != as_held
-        outcome = dataclasses.replace(result.scenario, threat=dataclasses.replace(held, floor=floor, ceiling=ceiling))
+        outcome = replaced(result.scenario, threat=replaced(held, floor=floor, ceiling=ceiling))
         try:
             picks.append(find_robust_response(outcome, matrix, rule))
         except NonFiniteScoreError:
@@ -5684,6 +5685,13 @@ def interval_lines(
     rows = [i for i, a in enumerate(scenario.adversary_actions) if a.accepted_prior is not None]
     if not rows or not permitted_responses(scenario):
         return ()
+    return _rows_interval_lines(scenario, matrix, strategy, rows)
+
+
+def _rows_interval_lines(
+    scenario: Scenario, matrix: Sequence[Sequence[OutcomeMetrics]], strategy: SelectorStrategy, rows: Sequence[int],
+) -> tuple[str, ...]:
+    """interval_lines for *rows*, the rows holding an applied suggestion, when a response is permitted."""
     if strategy is not SelectorStrategy.EXPECTED_VALUE:
         return (_PROBABILITY_IGNORED.format(rule=strategy.value.capitalize(), rows=_rows_named(rows)),)
     alone = tuple(_interval_line(scenario, matrix, row) for row in rows)

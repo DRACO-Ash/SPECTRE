@@ -1,5 +1,10 @@
 #!/bin/sh
-# SonarQube-equivalent quality check for changed code.
+# SonarQube-equivalent quality check for changed code, and the SonarQube gate.
+#
+# Since 18 November 2026 the bar is ZERO SonarQube issues across the whole
+# codebase (docs/CODE-QUALITY-GATE.md), and the leg that decides it runs the
+# real analyser through scripts/sonar-gate.sh. The changed-code legs below stay
+# as fast approximations of the platform's other conditions.
 #
 # The App Store quality gate scores NEW and CHANGED code only, on six
 # conditions: zero new bugs, zero new vulnerabilities, zero new code smells,
@@ -173,6 +178,20 @@ if python3 scripts/sonar_rules.py "$BASE"; then
     pass "no rule the gate has raised before lands on changed code"
 else
     fail "the findings above are rules the gate has already failed a submission on"
+fi
+
+# ── SonarQube itself: zero issues, whole package ─────────────────────────────
+# Owner's instruction, 18 November 2026, superseding the new-code ruling of 12
+# November: zero open issues and zero unreviewed hotspots across the whole
+# codebase, measured by SonarQube at check time. The legs above and below are
+# fast approximations scoped to changed code; this one is the verdict. It runs
+# before the "nothing changed" exit because it does not depend on a diff, and
+# it needs docker: without it, this leg fails (scripts/sonar-gate.sh exit 3).
+printf '\n== SonarQube gate: zero issues, whole package (docs/CODE-QUALITY-GATE.md) ==\n'
+if sh scripts/sonar-gate.sh; then
+    pass "SonarQube reports zero open issues and zero hotspots to review"
+else
+    fail "SonarQube did not pass the package (findings or the reason are above)"
 fi
 
 if [ -z "$SRC_FILES" ] && [ -z "$TST_FILES" ]; then

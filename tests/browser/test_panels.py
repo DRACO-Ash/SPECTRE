@@ -319,6 +319,66 @@ class TestPatternOfLife:
         assert header.locator(".hrr-sort-ind").text_content() == " ▼"
         _assert_clean(console)
 
+    _GEO_CANVASES = ("pol-alt-chart", "pol-inc-chart", "pol-ecc-chart", "pol-raan-chart", "pol-period-chart",
+                     "pol-dv-chart", "pol-lon-chart", "pol-drift-chart", "pol-dv-hist", "pol-interval-hist")
+
+    def _geo_charts(self, console: Console, data: dict[str, Any]) -> Any:
+        page = console.open()
+        page.click('.htab[data-panel="hero-pol"]')
+        page.wait_for_selector("#pol-results", state="attached")
+        page.route("**/pol/chart-data/**", lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps(data)))
+        canvases = "".join(f'<div><canvas id="{c}"></canvas></div>' for c in self._GEO_CANVASES)
+        with page.expect_request("**/pol/chart-data/**"):
+            console.inject(canvases + '<span hidden data-init="pol-charts" data-satno="90001" data-geo="true"></span>',
+                           "#pol-results")
+        page.wait_for_timeout(300)
+        return page
+
+    def test_every_geo_chart_draws_and_colours_its_segments(self, console: Console) -> None:
+        """Each chart pol.js draws for a GEO object, its histograms binned and its segments coloured by phase and
+        drift rate, east green, west red, anything else grey."""
+        epochs = [f"2026-01-0{d}T00:00:00" for d in range(1, 6)]
+        data = {"elements": {"epochs": epochs, "altitude": [35786] * 5, "inclination": [0.05] * 5,
+                             "eccentricity": [0.0002] * 5, "raan": [95] * 5, "period": [1436] * 5},
+                "manoeuvres": {"epochs": epochs[1:4], "dvs_ms": [0.5, 1.5, 4.0], "colors": ["#3b8beb"] * 3,
+                               "lons": [10.0, None, 10.4]},
+                "geo": {"epochs": epochs, "longitude": [10.0, 10.1, 10.2, 10.3, 10.4],
+                        "drift_rate": [0.1, -0.1, 0.0, 0.2, 0.01],
+                        "drift_phases": [{"start": epochs[0], "end": epochs[1], "direction": "EAST"},
+                                         {"start": epochs[2], "end": epochs[3], "direction": "WEST"},
+                                         {"start": epochs[4], "end": epochs[4], "direction": "STATION"}]}}
+        page = self._geo_charts(console, data)
+        for canvas in self._GEO_CANVASES:
+            assert page.evaluate(f"!!Chart.getChart(document.getElementById('{canvas}'))") is True, canvas
+        lon = page.evaluate("""() => { const ds = Chart.getChart(document.getElementById('pol-lon-chart')).data.datasets;
+            return {colours: [0, 1, 2, 3, 4, 5].map(i => ds[0].segment.borderColor({p0DataIndex: i})),
+                    scatter: ds[1].data}; }""")
+        assert lon["colours"] == ["#22c55e", "#22c55e", "#ef4444", "#ef4444", "#6b7280", "#8899aa"]
+        assert lon["scatter"] == [{"x": epochs[1], "y": 10.0}, {"x": epochs[3], "y": 10.4}]
+        drift = page.evaluate("""() => { const ds = Chart.getChart(document.getElementById('pol-drift-chart')).data.datasets;
+            return [0, 1, 2, 3, 4].map(i => ds[0].segment.borderColor({p0DataIndex: i})); }""")
+        assert drift == ["#22c55e", "#ef4444", "#6b7280", "#22c55e", "#6b7280"]
+        dv_hist = page.evaluate("Chart.getChart(document.getElementById('pol-dv-hist')).data.datasets[0].data")
+        assert len(dv_hist) == 10 and sum(dv_hist) == 3 and dv_hist[0] == 1 and dv_hist[9] == 1
+        iv_hist = page.evaluate("Chart.getChart(document.getElementById('pol-interval-hist')).data.datasets[0].data")
+        assert sum(iv_hist) == 2
+        assert "Station Keeping" in page.inner_text("#pol-results")
+        _assert_clean(console)
+
+    def test_with_no_manoeuvres_or_drift_the_charts_that_need_them_are_left_out(self, console: Console) -> None:
+        epochs = ["2026-01-01T00:00:00", "2026-01-02T00:00:00", "2026-01-03T00:00:00"]
+        data = {"elements": {"epochs": epochs, "altitude": [35786] * 3, "inclination": [0.05] * 3,
+                             "eccentricity": [0.0002] * 3, "raan": [95] * 3},
+                "manoeuvres": None,
+                "geo": {"epochs": epochs, "longitude": [10.0, 10.0, 10.0], "drift_rate": [0, 0, 0]}}
+        page = self._geo_charts(console, data)
+        drawn = {c: page.evaluate(f"!!Chart.getChart(document.getElementById('{c}'))") for c in self._GEO_CANVASES}
+        assert drawn == {c: c in ("pol-alt-chart", "pol-inc-chart", "pol-ecc-chart", "pol-raan-chart", "pol-lon-chart")
+                         for c in self._GEO_CANVASES}
+        assert "No manoeuvres to chart." in page.inner_text("#pol-results")
+        _assert_clean(console)
+
 
 @pytest.fixture
 def gcat_cached() -> Iterator[None]:

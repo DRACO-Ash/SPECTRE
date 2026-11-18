@@ -1,38 +1,49 @@
-# SonarQube rules the App Store gate has raised on SPECTRE
+# SonarQube rules: the gate and the fast pre-check
 
-The App Store's Code Quality gate is SonarQube scoring new and changed code
-only. Every failed submission from 0.6.0 to 0.6.3 was a rule in the table
-below. Each one is a check in `scripts/sonar_rules.py` (SPC-233), which runs
-in `scripts/check-quality.sh` (and so in CI's Quality Gate job) and in
-`scripts/package-appstore.sh`, so a package cannot be built with a known rule
-broken on changed code.
+## The policy (owner's instruction, 18 November 2026)
 
+**Zero open SonarQube issues and zero unreviewed security hotspots, across the
+whole codebase, measured by SonarQube itself at check time.** Not new code, not
+changed lines: every file in the App Store package, every rule in the profile.
+
+This supersedes the owner's ruling of 12 November 2026, under which latent
+issues were converted as their lines were touched and the checker gated new
+code only. That approach let 0.48.5 ship with 174 platform findings (165 code
+smells, 9 bugs) while `scripts/sonar_rules.py`, which checks 14 rules on
+changed lines, reported it clean. A replica of a few rules cannot see what the
+analyser sees, so the gate now runs the analyser.
+
+● **The gate** is `scripts/sonar-gate.sh`. It runs a pinned SonarQube
+  Community Build in docker against the package tree with the profile in
+  `scripts/sonar-profile.json`, and fails on one issue or one hotspot to
+  review. The packager, `scripts/check-quality.sh` and CI's `sonarqube` job
+  all run it. How it works, how to run it and what the profile holds are in
+  `docs/CODE-QUALITY-GATE.md`.
+● **The fast pre-check** is `scripts/sonar_rules.py`, the subject of the rest
+  of this page. It still runs first in the packager and in
+  `scripts/check-quality.sh`, because it answers in seconds where the gate
+  takes minutes, and it names the rules the platform has failed a submission
+  on. It is never the verdict: a clean pre-check with a failing gate is a
+  failure.
+
+## The pre-check and its ledger
+
+The rules below are the ones the platform failed submissions on from 0.6.0 to
+0.6.3. Each is a check in `scripts/sonar_rules.py` (SPC-233).
 `tests/unit/test_sonar_rules.py` holds this table and the checker to the same
 list of rule ids: a row without a check, or a check without a row, fails the
 suite. Each rule also has a test that reproduces the gate's line.
 
-This page is the rule ledger. How the gate scopes new code in general, the
-cognitive complexity meter (S3776) and the fix pattern for each rule class are
-in `docs/CODE-QUALITY-GATE.md`, and are not repeated here.
+The pre-check still scopes the way the platform's new-code window did, to lines
+changed since a base (`master` by default, `SONAR_BASE` in the packager), and
+`python3 scripts/sonar_rules.py --all` checks every line. Under the zero policy
+a finding `--all` reports is a real issue whether or not its line changed, and
+the gate will report it too.
 
-## Where the new-code window starts
+## How the platform scoped new code (historical)
 
-The platform measures new code from master, and master has stood at 0.6.4
-(`77a1088`) since that release was merged for the App Store. Every line
-changed since then is new to the gate, not only the latest release's lines.
-So there are two useful bases:
-
-● `python3 scripts/sonar_rules.py` (base master, the default): what the next
-  submission will be scored on. Pass the same to the packager as
-  `SONAR_BASE`, or leave it to default.
-● `sh scripts/check-quality.sh <previous release commit>`: what one release
-  adds, which is how each ledger entry is measured.
-
-Owner ruling, 12 November 2026: latent issues are converted as their lines are
-touched, and the checker gates new code only. A latent issue on a line nobody
-has edited since master is not reported.
-
-## How the gate scopes, which matters as much as the rules
+These observations explain the pre-check's design and its calibration. They
+no longer limit what must be fixed.
 
 ● **An edit to a line brings what is already on it into scope.** 0.6.3 rewrote
   `title` attributes on 9 fields that had never had a label, and the 9 missing
@@ -49,10 +60,7 @@ has edited since master is not reported.
   issue, and further uses do not create a new one.
 ● **Which lines count as changed depends on how the diff aligns.** Adding a
   label line above an input can make git pair a later, already-changed line
-  differently, so a finding can appear on a line the edit did not touch. Each
-  one seen so far was a real change since master (the Time to execute fields'
-  `step`, changed on 10 November 2026), so treat it as real. A blame-based
-  cross-check against master agreed with the diff-based count after SPC-233.
+  differently, so a finding can appear on a line the edit did not touch.
 
 ## The rules
 
@@ -70,19 +78,20 @@ has edited since master is not reported.
 | `javascript:S7773` | 0.6.1 (2) | `parseFloat` and `isNaN` in the intercept sort, added by the 0.6.1 fix itself | `Number.parseFloat`, `Number.isNaN` | Bare `parseFloat`, `parseInt`, `isNaN`, `isFinite` in `spectre/web/static/js/` and templates | `Number.isNaN` does not coerce, so it is equivalent only on a number: every site SPC-233 changed tests the result of `Number.parseFloat`. |
 | `javascript:S7761` | 0.6.0 | `item.setAttribute('data-idx', ...)` | `item.dataset.idx = ...` | `get/set/remove/hasAttribute` with a whole literal `data-*` name | FACT: `getAttribute('data-sort-' + col)` passed; a built name is not flagged. An absent attribute reads `undefined` through `dataset`, not `null`, so a test for presence becomes `=== undefined`. |
 | `Web:InputWithoutLabelCheck` | 0.6.3 (9) | Fields whose `title` was rewritten, which had a placeholder and no label | An `id` and a `<label for>`, visually hidden where the layout shows the purpose | An `input`, `select` or `textarea` (not hidden, submit, button, reset or image) with no wrapping `<label>`, no `<label for>` matching its `id`, and no non-blank `aria-label` or `aria-labelledby` | FACT: a wrapping label passes (the Max ΔV inputs, touched in 0.6.3, were not flagged). FACT: markup inside a `<script>` string is not parsed. INFERENCE, not yet scored: `aria-label` passes, as it gives the field its accessible name. SPC-233 uses it only on the Decision Engine's adversary and friendly rows: `decision.js` clones a `<template>` row, so an `id` could not be unique, and `tests/unit/test_decision_row_templates.py` holds the template and the server row to the same text, which a visually hidden label would break. Everywhere else a field gets an `id` and a `<label for>`. If the gate raises an `aria-label` field, `decisionAddRow` must number ids as it numbers values. |
-| `Web:S6819` | 0.6.0, 0.6.3 | `role="button"` and `role="heading"` on spans, `role="status"` on a static banner | A native element (`<button>`, `<h3>`), `role="note"` for a static banner, `aria-live="polite"` for a live region | A role with a native element equivalent, `role="img"` on `<svg>` and `<img>` aside | `role="note"` and `aria-live` have passed every scan (0.6.4 shipped `aria-live` in place of `role="status"`). `aria-atomic="true"` keeps what `role="status"` implied. FACT: the gate raises `role="img"` on a `<canvas>` (PR 35, against master); see below. |
+| `Web:S6819` | 0.6.0, 0.6.3 | `role="button"` and `role="heading"` on spans, `role="status"` on a static banner | A native element (`<button>`, `<h3>`), `role="note"` for a static banner, `aria-live="polite"` for a live region | A role with a native element equivalent, `role="img"` on `<svg>` and `<img>` aside | `role="note"` and `aria-live` have passed every scan (0.6.4 shipped `aria-live` in place of `role="status"`). `aria-atomic="true"` keeps what `role="status"` implied. FACT: the gate raises `role="img"` on a `<canvas>` (PR 35, against master); fixed there with a `<figure>` whose visually hidden caption names the chart, and the canvas hidden from assistive technology. |
 | `Web:JinjaCommentInTag` | 0.6.0 (3) | `{# #}` comments inside `<tr>` tags mentioning `role="button"`, `aria-controls`, `aria-label` | Comment moved above the tag | A `{# #}` inside a tag: blocking when it holds `=`, `role` or `aria-`, a warning otherwise | FACT: Sonar's HTML parser read the comment's words as attributes and raised S6819 and S6793 on them. A comment without such words inside a `<button>` passed 0.6.3. |
 
 Rules raised once and fixed by restructuring rather than by a pattern, so not
 encoded: `javascript:S3776` (cognitive complexity in `aiSort`, 0.6.0; the
 Python scorer does not read JavaScript) and `Web:S6793` (an artefact of the
-Jinja comments above). A JavaScript function grown past 15 is the one known
-way to fail the gate that no script here catches.
+Jinja comments above). The pre-check cannot see a JavaScript function grown
+past 15; the gate can, because `javascript:S3776` is in the profile.
 
 Vendored, minified libraries (`spectre/web/static/*.min.js`) are out of the
-checker's scope. They are never edited here, their versions are pinned in
-`spectre/web/static/vendored.json`, and they enter the window only when an
-upgrade replaces one whole.
+pre-check's scope. They are never edited here and their versions are pinned in
+`spectre/web/static/vendored.json`. The scanner's bundle detection skips files
+that look generated, and neither the platform's scan nor the gate's raised an
+issue on one in 0.48.5.
 
 ## The calibration
 
@@ -104,36 +113,25 @@ repository does not record. The port's one change to a verdict is the
 `aria-label` acceptance, and no field in 0.6.1 to 0.6.5 carried one, so the
 table stands.
 
-## Where the tree stands (12 November 2026)
+## Where the tree stood
 
-Against master (`77a1088`), the window the next submission is scored in, the
-checker found 99 blocking findings before SPC-233: 34 S7761, 19 S1244, 16 S7632,
-13 S7773, 6 S3358, 4 labels, 3 S6819, 3 S6353 and 1 S1192. SPC-233 cleared 98
-of them, and the clearing brought 2 more labels into the window (the Time to
-execute fields above), which it also cleared. One remains:
+On 12 November 2026 `python3 scripts/sonar_rules.py --all` found 124 blocking
+issues, 123 of them on lines nobody had touched since master. Under the ruling
+of that day none counted. Under the policy of 18 November every one counts, and
+the gate measured the 0.48.5 package at 206 open issues with the profile in
+`scripts/sonar-profile.json` (the platform's own scan listed 174 of them).
+Release 0.48.6 clears them; the gate holds the count at zero from then on.
 
-● `Web:S6819` on `<canvas id="tca-hist-chart" role="img" aria-label="...">` in
-  `partials/decision_results.html`. FACT: the gate raised it on PR 35, scored
-  against master on 13 November 2026. Fixed there the way this ledger set out,
-  a call Claude made for the owner to confirm: the canvas sits in a `<figure>`
-  whose visually hidden caption names the chart and points to the table below,
-  and the canvas is hidden from assistive technology, so a screen reader reads
-  the caption and the table's exact counts rather than an image.
+## When the platform raises something new
 
-`python3 scripts/sonar_rules.py --all` checks every line, not just changed
-ones. On 12 November 2026 it found 124 blocking issues: the canvas above, and
-123 on lines nobody has touched since master (S8410 85, S1192 14,
-InputWithoutLabelCheck 13, S7632 8, S1244 2, S3358 1). None of the 123 counts
-today, and each fires the day its line is edited, so fix it in the same
-change.
-
-## When the gate raises something new
-
-1. Add a row to the table above: the rule, the release, the line the gate
-   named, and what passed.
-2. Add a check to `scripts/sonar_rules.py` and its id to `RULES`.
-3. Add a test to `tests/unit/test_sonar_rules.py` that reproduces the gate's
-   line as a failure and the fix that passed as a pass, and see it fail
-   before the check exists.
-4. Replay the failed release with the checker and confirm it reports the
-   gate's lines and no others, then fix the code.
+1. Add the rule key to its language in `scripts/sonar-profile.json`. If the
+   Community Build cannot run it (as with `pythonbugs:S6466`), list it under
+   `not_in_community_build` with the reason and how it is held instead.
+2. Add it to `_PLATFORM_RAISED` in `tests/unit/test_sonar_gate.py`, so the
+   profile cannot lose it.
+3. Run `sh scripts/sonar-gate.sh` and fix what it reports.
+4. If the rule is cheap to approximate and has failed a submission, it may also
+   join the pre-check: add a row to the table above, a check to
+   `scripts/sonar_rules.py` and its id to `RULES`, and a test to
+   `tests/unit/test_sonar_rules.py` that reproduces the platform's line as a
+   failure and the fix that passed as a pass.

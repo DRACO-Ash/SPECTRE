@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, NamedTuple
 
+from spectre.astro.copies import replaced
 from spectre.astro.monte_carlo import MANOEUVRE_ARCHETYPES
 from spectre.data.intel import satno_from_tle
 from spectre.domain.decision import longest_horizon_h, picture_age_words
@@ -368,7 +369,7 @@ def _transfer_row(
         draft.left.append(_ALL_DROPPED.format(n=len(burns), red=name, epoch=dated))
     _too_big(burns, draft)
     starts = burns[kept[0] - 1].at_utc if kept and kept[0] != 1 else None
-    return dataclasses.replace(row, then=burns[1:], burn_lines=lines, starts_at=starts, sampled=bool(kept))
+    return replaced(row, then=burns[1:], burn_lines=lines, starts_at=starts, sampled=bool(kept))
 
 
 def _departure_row(

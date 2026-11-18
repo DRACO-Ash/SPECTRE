@@ -1170,7 +1170,6 @@ def nmc_intercept(
     along_track_km: float = 2.0,
     cross_track_km: float = 0.0,
     coast_s: float = 0.0,
-    mu: float = MU_EARTH,
 ) -> InterceptSolution:
     """Establish a passively safe relative orbit (NMC) around the target.
 
@@ -1194,7 +1193,6 @@ def nmc_intercept(
         along_track_km: Desired along-track amplitude (km).
         cross_track_km: Desired cross-track amplitude (km).
         coast_s: Coast before burn (seconds).
-        mu: Gravitational parameter.
 
     Raises:
         ValueError: when the ellipse through red's position is not the one
@@ -1475,7 +1473,6 @@ def intent_predict_intercept(
     blue_tle: str,
     manoeuvre_start: datetime,
     coast_s: float = 0.0,
-    mu: float = MU_EARTH,
 ) -> InterceptSolution:
     """Assess adversary intercept intent from relative orbital geometry.
 
@@ -1510,7 +1507,7 @@ def intent_predict_intercept(
 
     result = assess_intercept_intent(
         delta_a, delta_inc, delta_raan,
-        relative_range, range_rate, is_coplanar, mu,
+        relative_range, range_rate, is_coplanar,
     )
 
     # A zero-burn solution; the indicator score travels in score
@@ -1799,11 +1796,11 @@ def terrain_intercept(
     blue_tle: str,
     manoeuvre_start: datetime,
     coast_s: float = 0.0,
-    mu: float = MU_EARTH,
 ) -> InterceptSolution:
     """Map the orbital terrain (risk assessment) for both satellites.
 
-    Returns risk assessment for the red satellite's orbital regime.
+    Returns risk assessment for the red satellite's orbital regime. The blue_tle parameter is not read: the terrain
+    is red's own orbit, and blue_tle is taken so every coast-only solver is called alike.
     """
     red_orbit = TLEOrbit(red_tle)
 
@@ -2015,7 +2012,7 @@ def flown_approach(
         r, _ = propagate_two_body(leg.r, leg.v, t - (leg.epoch - sv.epoch).total_seconds(), mu)
         return float(np.linalg.norm(r - target.propagate(when).r))
 
-    if not span_s > 0.0:
+    if math.isnan(span_s) or span_s <= 0.0:  # a NaN span reads as none, as it did
         return FlownApproach(separation(0.0), sv.epoch)
     periods = [p for p in (orbit_period_s(s, mu) for s in flown) if p is not None]
     step_s = min(min(periods, default=span_s) / _APPROACH_SAMPLES_PER_REV, span_s)

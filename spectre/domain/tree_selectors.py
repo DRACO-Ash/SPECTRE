@@ -286,13 +286,14 @@ def _pick_line(scenario: Scenario, pick: TurnPick) -> str:
 
 def _matrix_line(
     scenario: Scenario, strategy: SelectorStrategy, turns: int, picks: Sequence[TurnPick], matrix_pick: int | None,
-) -> tuple[str, ...]:
+) -> str | None:
+    """The line saying the tree's first pick differs from the matrix's; None when it does not, or with one turn."""
     tree_pick = picks[0].pick
     if turns == 1 or tree_pick is None or matrix_pick is None or matrix_pick in picks[0].choices:
-        return ()
+        return None
     names = [f.name for f in scenario.friendly_responses]
     rule = strategy.value.replace("_", " ")
-    return (MATRIX_DIFFERS.format(turns=turns, rule=rule, tree=names[tree_pick], matrix=names[matrix_pick]),)
+    return MATRIX_DIFFERS.format(turns=turns, rule=rule, tree=names[tree_pick], matrix=names[matrix_pick])
 
 
 def _stated(observed: Seen | None, posts: Sequence[Posterior]) -> Posterior | None:
@@ -359,9 +360,10 @@ def select(
     stated = _stated(scenario.observed, posts)
     span = _SPAN_ONE if turns == 1 else _SPAN.format(turns=turns)
     partial = (PARTIAL.format(k=turns, turns=scenario.turns),) if turns < scenario.turns else ()
+    differs = _matrix_line(scenario, strategy, turns, picks, matrix_pick)
     recommendation = (
         RULES[strategy].format(span=span), *partial, *(_pick_line(scenario, p) for p in picks), *_excluded(scenario),
-        *_matrix_line(scenario, strategy, turns, picks, matrix_pick), SCORE_LINE,
+        *(() if differs is None else (differs,)), SCORE_LINE,
     )
     update = _update_lines(scenario, strategy, gives, stated)
     return TreeSelection(

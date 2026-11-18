@@ -49,7 +49,7 @@ function threatFilter(q) {
     var parentText = parent.textContent.toLowerCase();
     var childTexts = Array.from(children).map(function(r) { return r.textContent.toLowerCase(); });
     var allText = parentText + ' ' + childTexts.join(' ');
-    var match = term === '' || allText.indexOf(term) !== -1;
+    var match = term === '' || allText.includes(term);
     parent.style.display = match ? '' : 'none';
     /* Hide children if parent is hidden; otherwise preserve their toggle state */
     if (!match) {
@@ -96,7 +96,7 @@ function childSort(gIdx, col, type) {
        .textContent: for every group that had target intel, child sort did
        nothing at all, and an aria-sort written after the sort would never
        have been reached. */
-    else if (r.id.indexOf('threat-row-') === 0) { dataRows.push(r); }
+    else if (r.id.startsWith('threat-row-')) { dataRows.push(r); }
   });
 
   dataRows.sort(function(a, b) {
@@ -115,22 +115,24 @@ function childSort(gIdx, col, type) {
     ref = r;
   });
 
-  /* Say which column is sorted and which way, to the eye and to the
-     accessibility tree, and only within THIS group's header row: each
-     expanded group sorts independently, so a shared reset would wipe the
-     state of a group the operator did not touch. */
-  if (headerRow) {
-    headerRow.querySelectorAll('th').forEach(function(h) {
-      if (h.hasAttribute('aria-sort')) { h.setAttribute('aria-sort', 'none'); }
-      var i = h.querySelector('.hrr-sort-ind');
-      if (i) { i.textContent = ''; }
-    });
-    var th = headerRow.querySelector('#tsw-child-' + gIdx + '-' + col);
-    if (th) {
-      th.setAttribute('aria-sort', state.asc ? 'ascending' : 'descending');
-      var ind = th.querySelector('.hrr-sort-ind');
-      if (ind) { ind.textContent = state.asc ? ' ▲' : ' ▼'; }
-    }
+  if (headerRow) { childSortMark(headerRow, gIdx, col, state.asc); }
+}
+
+/* Say which column is sorted and which way, to the eye and to the
+   accessibility tree, and only within THIS group's header row: each
+   expanded group sorts independently, so a shared reset would wipe the
+   state of a group the operator did not touch. */
+function childSortMark(headerRow, gIdx, col, asc) {
+  headerRow.querySelectorAll('th').forEach(function(h) {
+    if (h.hasAttribute('aria-sort')) { h.setAttribute('aria-sort', 'none'); }
+    var i = h.querySelector('.hrr-sort-ind');
+    if (i) { i.textContent = ''; }
+  });
+  var th = headerRow.querySelector('#tsw-child-' + gIdx + '-' + col);
+  if (th) {
+    th.setAttribute('aria-sort', asc ? 'ascending' : 'descending');
+    var ind = th.querySelector('.hrr-sort-ind');
+    if (ind) { ind.textContent = asc ? ' ▲' : ' ▼'; }
   }
 }
 

@@ -884,7 +884,7 @@ async def _award_pass(db: AsyncSession, user: User, first_pass: bool) -> tuple[l
     if not first_pass:
         return [], 0
     progress = await _get_or_create_progress(user, db)
-    award = award_points(MISSION_PAY_ACTION, progress.axis_points)
+    award = award_points(MISSION_PAY_ACTION)
     axis = progress.axis_points.copy()
     for name, delta in award.axis_deltas.items():
         axis[name] = axis.get(name, 0.0) + delta
@@ -900,12 +900,20 @@ def _no_rank_points(stars: int) -> str:
     return "Replays pay no rank points." if stars else "Rank points are paid for a first pass: every objective met."
 
 
+def _following(campaign: Campaign, mission: Mission) -> Mission | None:
+    """The mission after *mission* in its campaign; None after the last, or for a mission not in the campaign."""
+    missions = iter(campaign.missions)
+    for each in missions:
+        if each == mission:
+            return next(missions, None)
+    return None
+
+
 def next_lock_reason(campaign: Campaign, mission: Mission, progress: TrainingProgress, bests: dict[str, Best]) -> (
         str | None):
     """Why the mission after *mission* is still locked, in words naming its chapter when the chapter is the lock;
     None when it is open or there is none."""
-    order = list(campaign.missions)
-    following = order[order.index(mission) + 1] if mission in order and order.index(mission) + 1 < len(order) else None
+    following = _following(campaign, mission)
     if following is None:
         return None
     reason = mission_lock(campaign, following, progress, bests)
@@ -919,11 +927,9 @@ def next_lock_reason(campaign: Campaign, mission: Mission, progress: TrainingPro
 
 def _next_mission(campaign: Campaign, mission: Mission, progress: TrainingProgress, bests: dict[str, Best]) -> dict[
         str, str] | None:
-    order = list(campaign.missions)
-    following = order[order.index(mission) + 1:] if mission in order else []
-    for candidate in following[:1]:
-        if not mission_lock(campaign, candidate, progress, bests):
-            return {"id": candidate.id, "title": candidate.title}
+    candidate = _following(campaign, mission)
+    if candidate is not None and not mission_lock(campaign, candidate, progress, bests):
+        return {"id": candidate.id, "title": candidate.title}
     return None
 
 

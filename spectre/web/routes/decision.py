@@ -31,6 +31,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from spectre.astro.copies import replaced
 from spectre.astro.monte_carlo import MANOEUVRE_ARCHETYPES
 from spectre.astro.propagator import TLE_ERRORS
 from spectre.astro.response_burn import BurnAxis
@@ -1152,7 +1153,7 @@ async def decision_evaluate(
         return _err(problem)
     # The sweep's picture for this red track, beside the rows: its collect-first rows are listed, never scored (SPC-171).
     scenario = _scenario(form, parsed, applied.actions, binding, now)
-    scenario = dataclasses.replace(scenario, threat=held_picture(state, binding, now))
+    scenario = replaced(scenario, threat=held_picture(state, binding, now))
     # A turn depth whose tree cannot fit is refused here, naming the largest that would, before anything runs (SPC-142).
     too_deep = await asyncio.to_thread(depth_refusal, scenario)
     if too_deep is not None:
@@ -1179,7 +1180,7 @@ def _custody_reader(state: SessionState, now: datetime, fetch: str) -> CustodyRe
     async def read(scenario: Scenario) -> Scenario:
         binding = cast("ScenarioBinding", scenario.binding)
         status = await red_custody(state, cast("BoundElset", binding.red), now)
-        return dataclasses.replace(scenario, binding=with_red_custody(binding, status))
+        return replaced(scenario, binding=with_red_custody(binding, status))
     return CustodyRead(read, HISTORY_WAIT_S, fetch)
 
 

@@ -469,7 +469,9 @@
               <input type="hidden" name="blue_epoch" value="{{ link.blue_epoch }}">
               <input type="hidden" name="context" value="{{ link.context }}">
               <input type="hidden" name="our_burn" value="{{ 'true' if link.our_burn else 'false' }}">
-              <button type="submit" class="btn-secondary" aria-label="{{ link.aria_label }}" style="font-size:0.55rem; padding:0.1rem 0.35rem">Show trajectory</button>
+              {# WCAG 2.5.3 Label in Name: the name is written here starting with the visible label, so the template
+                 itself keeps the two together whatever the cell's wording; the rest is the cell, from aria_label. #}
+              <button type="submit" class="btn-secondary" aria-label="Show trajectory{{ link.aria_label | replace('Show trajectory', '', 1) }}" style="font-size:0.55rem; padding:0.1rem 0.35rem">Show trajectory</button>
               {% if link.note is not none %}
               <span class="trajectory-note" style="display:block; font-size:0.52rem; color:var(--text-dim)">{{ link.note }}</span>
               {% endif %}
@@ -555,8 +557,10 @@
   <figure style="margin:0">
     <figcaption class="visually-hidden">Histogram of sampled times of closest approach for the selected cell;
       the table below gives the same counts.</figcaption>
-    <div style="position:relative; height:200px">
-      <canvas id="tca-hist-chart" aria-hidden="true"></canvas>
+    {# The drawing is hidden from a screen reader as a whole, at its frame: the caption names it and the table
+       below carries the same counts. #}
+    <div class="tca-hist-frame" aria-hidden="true" style="position:relative; height:200px">
+      <canvas id="tca-hist-chart"></canvas>
     </div>
   </figure>
   <details style="font-size:0.58rem; color:var(--text-dim); margin-top:0.3rem">

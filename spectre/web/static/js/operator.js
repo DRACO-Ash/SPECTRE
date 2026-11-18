@@ -161,8 +161,8 @@ function openDecisionPanel() {
 /* One delegated listener for every control marked data-opens-decision, so none carries an hx-on handler, which
    htmx compiles with new Function and the policy refuses (app.py) */
 document.body.addEventListener('htmx:afterRequest', function (e) {
-  var elt = e.detail && e.detail.elt;
-  if (e.detail.successful && elt && elt.dataset && elt.dataset.opensDecision !== undefined) openDecisionPanel();
+  var elt = e.detail?.elt;
+  if (e.detail?.successful && elt?.dataset?.opensDecision !== undefined) openDecisionPanel();
 });
 
 SPECTRE.action('sbTab', sbTab);
@@ -219,7 +219,7 @@ SPECTRE.switchToEngine = switchToEngine;
   document.body.addEventListener('htmx:afterSettle', function(e) {
     /* detail is absent on the plain Event spectreRereadRedCard raises, so it is read with a guard: unguarded it
        threw an uncaught TypeError on every element-set refresh that updated a set. */
-    var id = ((e.detail && e.detail.target) || {}).id || '';
+    var id = e.detail?.target?.id || '';
     /* Always re-check after events that could change the select list or session state */
     if (id === 'udl-status' || id === 'blue-hrr-list' ||
         id === 'blue-list'  || id === 'red-list') {
@@ -230,7 +230,7 @@ SPECTRE.switchToEngine = switchToEngine;
   /* Also fire on direct user selection (hx-trigger="change" on #ts-red-sat
      handles the HTMX update, but we track _lastConfigSat here too). */
   document.body.addEventListener('change', function(e) {
-    if (e.target && e.target.id === 'ts-red-sat') {
+    if (e.target?.id === 'ts-red-sat') {
       _lastConfigSat = '';   /* reset so next afterSettle re-evaluates */
     }
   });
@@ -296,6 +296,50 @@ SPECTRE.switchToEngine = switchToEngine;
     return (min / 1440).toFixed(1) + ' days';
   }
 
+  /** One scatter dataset per method, keyed by method name, in the order the methods first appear. */
+  function _tradeSpaceDatasets(data) {
+    var datasets = {};
+    data.forEach(function(pt) {
+      var key = pt.method;
+      if (!datasets[key]) {
+        datasets[key] = {
+          label: key.replaceAll('_', ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); }),
+          backgroundColor: METHOD_COLOURS[key] || '#999',
+          borderColor: METHOD_COLOURS[key] || '#999',
+          pointRadius: 7, pointHoverRadius: 10, data: []
+        };
+      }
+      datasets[key].data.push({ x: pt.transfer_time_min, y: pt.delta_v, label: pt.label, miss: pt.miss_km, score: pt.score });
+    });
+    return Object.values(datasets);
+  }
+
+  /** A log axis once the values spread over more than a factor of 50. */
+  function _axisType(values) {
+    var spread = Math.max.apply(null, values) / Math.min.apply(null, values);
+    return values.length > 1 && spread > 50 ? 'logarithmic' : 'linear';
+  }
+
+  /* A flown miss the search could not compute arrives as null, never NaN (SPC-238). */
+  function _missText(km) {
+    if (km === null || km === undefined) { return 'Miss: not computed'; }
+    return 'Miss: ' + km.toFixed(1) + ' km';
+  }
+
+  function _tradeSpaceTooltip(ctx) {
+    var pt = ctx.raw;
+    return [pt.label, '\u0394V: ' + pt.y.toFixed(1) + ' m/s',
+            'Transfer: ' + fmtTime(pt.x),
+            pt.score === undefined ? _missText(pt.miss) : 'Score: ' + pt.score + '/100'];
+  }
+
+  /* The chart cannot be drawn: the button stays disabled and the status line says why. */
+  function _tradeSpaceUnavailable(btn, status, message) {
+    btn.disabled = true;
+    btn.textContent = 'View Chart';
+    if (status) status.textContent = message;
+  }
+
   /** Called from intercept_result partial after each new solve. */
   window._spectreRenderTradeSpace = function() {
     var btn = document.getElementById('ts-chart-btn');
@@ -314,41 +358,15 @@ SPECTRE.switchToEngine = switchToEngine;
       .then(function(data) {
         data = data.filter(function(pt) { return pt.transfer_time_min > 0 && pt.delta_v > 0; });
         if (!data.length) {
-          btn.disabled = true;
-          btn.textContent = 'View Chart';
-          if (status) status.textContent = 'No plottable data (need positive \u0394V and transfer time)';
+          _tradeSpaceUnavailable(btn, status, 'No plottable data (need positive \u0394V and transfer time)');
           if (badge) badge.textContent = '';
           return;
         }
 
-        /* Build datasets */
-        var datasets = {};
-        data.forEach(function(pt) {
-          var key = pt.method;
-          if (!datasets[key]) {
-            datasets[key] = {
-              label: key.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); }),
-              backgroundColor: METHOD_COLOURS[key] || '#999',
-              borderColor: METHOD_COLOURS[key] || '#999',
-              pointRadius: 7, pointHoverRadius: 10, data: []
-            };
-          }
-          datasets[key].data.push({ x: pt.transfer_time_min, y: pt.delta_v, label: pt.label, miss: pt.miss_km, score: pt.score });
-        });
-
-        var allX = data.map(function(p) { return p.transfer_time_min; });
-        var allY = data.map(function(p) { return p.delta_v; });
-        var xSpread = Math.max.apply(null, allX) / Math.min.apply(null, allX);
-        var ySpread = Math.max.apply(null, allY) / Math.min.apply(null, allY);
-        var useLogX = allX.length > 1 && xSpread > 50;
-        var useLogY = allY.length > 1 && ySpread > 50;
-
         /* Render into the canvas */
         var canvas = document.getElementById('tradeSpaceChart');
         if (!canvas || typeof Chart === 'undefined') {
-          btn.disabled = true;
-          btn.textContent = 'View Chart';
-          if (status) status.textContent = 'Chart library not loaded';
+          _tradeSpaceUnavailable(btn, status, 'Chart library not loaded');
           return;
         }
 
@@ -356,38 +374,26 @@ SPECTRE.switchToEngine = switchToEngine;
 
         _tsChartInstance = new Chart(canvas, {
           type: 'scatter',
-          data: { datasets: Object.values(datasets) },
+          data: { datasets: _tradeSpaceDatasets(data) },
           options: {
             responsive: true, maintainAspectRatio: false,
             plugins: {
               legend: { labels: { color: '#D0D8E8', font: { family: 'Segoe UI', size: 11 } } },
               tooltip: {
-                callbacks: {
-                  label: function(ctx) {
-                    // A flown miss the search could not compute arrives as null, never NaN (SPC-238).
-                    function missText(km) {
-                      if (km === null || km === undefined) { return 'Miss: not computed'; }
-                      return 'Miss: ' + km.toFixed(1) + ' km';
-                    }
-                    var pt = ctx.raw;
-                    return [pt.label, '\u0394V: ' + pt.y.toFixed(1) + ' m/s',
-                            'Transfer: ' + fmtTime(pt.x),
-                            pt.score === undefined ? missText(pt.miss) : 'Score: ' + pt.score + '/100'];
-                  }
-                },
+                callbacks: { label: _tradeSpaceTooltip },
                 backgroundColor: '#001529', titleColor: '#C8A415',
                 bodyColor: '#D0D8E8', borderColor: '#0A3355', borderWidth: 1
               }
             },
             scales: {
               x: {
-                type: useLogX ? 'logarithmic' : 'linear',
+                type: _axisType(data.map(function(p) { return p.transfer_time_min; })),
                 title: { display: true, text: 'Transfer Time', color: '#5A7A9A', font: { size: 11 } },
                 ticks: { color: '#5A7A9A', callback: function(v) { return fmtTime(v); } },
                 grid: { color: 'rgba(10,51,85,0.4)' }
               },
               y: {
-                type: useLogY ? 'logarithmic' : 'linear',
+                type: _axisType(data.map(function(p) { return p.delta_v; })),
                 title: { display: true, text: '\u0394V (m/s)', color: '#5A7A9A', font: { size: 11 } },
                 ticks: { color: '#5A7A9A' },
                 grid: { color: 'rgba(10,51,85,0.4)' }
@@ -406,9 +412,7 @@ SPECTRE.switchToEngine = switchToEngine;
         if (clearBtn) clearBtn.style.display = '';
       })
       .catch(function(err) {
-        btn.disabled = true;
-        btn.textContent = 'View Chart';
-        if (status) status.textContent = 'Chart render failed: ' + err.message;
+        _tradeSpaceUnavailable(btn, status, 'Chart render failed: ' + err.message);
       });
   };
 
@@ -461,7 +465,7 @@ SPECTRE.init('trade-space-render', function () { window._spectreRenderTradeSpace
       var wrap = document.getElementById(t.id);
       if (!wrap) return;
       var tbl = wrap.querySelector('table.hrr-table');
-      if (!tbl || !tbl.tBodies[0]) return;
+      if (!tbl?.tBodies[0]) return;
       Array.from(tbl.tBodies[0].rows).forEach(function(row) {
         var cells = row.cells;
         if (cells.length < 5) return;
@@ -514,8 +518,8 @@ SPECTRE.init('trade-space-render', function () { window._spectreRenderTradeSpace
       var score = -1;
       if (nameL.indexOf(query) === 0)  score = 100;  /* name starts with */
       else if (satnoL.indexOf(query) === 0) score = 90; /* satno starts with */
-      else if (nameL.indexOf(query) >= 0) score = 70;  /* name contains */
-      else if (haystack.indexOf(query) >= 0) score = 50; /* any field contains */
+      else if (nameL.includes(query)) score = 70;  /* name contains */
+      else if (haystack.includes(query)) score = 50; /* any field contains */
       if (score > 0) scored.push({ e: e, score: score });
     });
 
@@ -593,7 +597,7 @@ SPECTRE.init('trade-space-render', function () { window._spectreRenderTradeSpace
 
   window._hrrSelect = function(idx) {
     var matches = window._hrrMatches;
-    if (!matches || !matches[idx]) return;
+    if (!matches?.[idx]) return;
     var entry = matches[idx].e;
     var row = entry.row;
 
@@ -638,7 +642,7 @@ SPECTRE.action('hrrSearch', function (el) { window._hrrSearch(el.value); });
   var KEY    = 'spectre-theme';
 
   function spectreSetTheme(theme) {
-    if (THEMES.indexOf(theme) === -1) return;        // only allow known themes
+    if (!THEMES.includes(theme)) return;        // only allow known themes
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.spectreTheme = theme === 'steel' ? 'light' : 'dark';
     try { localStorage.setItem(KEY, theme); } catch (_) {}

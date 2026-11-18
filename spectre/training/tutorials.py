@@ -52,7 +52,7 @@ def load_tutorials() -> list[TutorialDef]:
         logger.warning("Tutorial config not found: %s", _CONFIG_PATH)
         return []
     except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError) as exc:
-        logger.error("Failed to load tutorials: %s", exc)
+        logger.exception("Failed to load tutorials: %s", exc)
         return []
 
 

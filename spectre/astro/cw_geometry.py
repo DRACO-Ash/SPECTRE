@@ -487,7 +487,7 @@ def compute_relative_geometry(
     try:
         state0, n, initial_range, ecc = _initial_hill_state(red_tle, blue_tle, burn_epoch)
     except Exception as exc:
-        logger.error(
+        logger.exception(
             "cw_geometry: failed to compute initial state for %r/%r: %s",
             red_name_safe, blue_name_safe, exc,
         )

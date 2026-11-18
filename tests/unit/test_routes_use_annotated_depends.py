@@ -1,9 +1,9 @@
-"""No new route takes a bare ``Depends(...)`` default (H1).
+"""No route takes a bare ``Depends(...)`` default (H1).
 
 The Code Quality gate reports python:S8410, FastAPI dependencies without
-``Annotated``. The 77 that predate this guard convert file by file as those
-files are touched (docs/CODE-QUALITY-GATE.md); this keeps the count from
-growing. The allowlist may only shrink: when a file's count falls, lower it.
+``Annotated``. The 77 that predated this guard were converted in release
+0.48.6, so every route file is now held at zero. The allowlist stays as the
+mechanism, empty: no file may hold a bare default.
 """
 
 from __future__ import annotations
@@ -13,11 +13,8 @@ from pathlib import Path
 
 _ROUTES = Path(__file__).resolve().parents[2] / "spectre" / "web" / "routes"
 
-# Frozen on 2 November 2026 (0.9.0). Lower a figure when a file improves.
-_ALLOWED: dict[str, int] = {
-    "admin.py": 12, "decision.py": 0, "gcat.py": 3, "geometry.py": 0, "maneuver.py": 4, "operator.py": 7,
-    "plan.py": 1, "pol.py": 5, "threat.py": 6, "training.py": 20, "udl.py": 16,
-}
+# Empty since 0.48.6: every route file holds zero bare Depends defaults.
+_ALLOWED: dict[str, int] = {}
 
 
 def _is_route(node: ast.AST) -> bool:
@@ -48,6 +45,10 @@ def _route_files() -> list[Path]:
     return sorted(_ROUTES.glob("*.py"))
 
 
+def _routes(path: Path) -> int:
+    return sum(1 for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))) if _is_route(node))
+
+
 def test_no_route_file_adds_a_bare_depends_default() -> None:
     over = _over(_route_files(), _ALLOWED)
     assert not over, f"use Annotated[..., Depends(...)] in new route parameters: {over}"
@@ -74,8 +75,9 @@ def test_the_guard_sees_a_file_grow_past_its_allowance(tmp_path: Path) -> None:
 
 
 def test_the_guard_reads_every_file_in_its_allowance() -> None:
-    """SPC-074: the comparison passes on no files at all, so the scan must find each file the allowance names."""
+    """SPC-074: the comparison passes on no files at all, so the scan must find the route files and their routes."""
     scanned = {path.name for path in _route_files()}
     assert set(_ALLOWED) <= scanned, f"the allowance names files the scan no longer finds: {set(_ALLOWED) - scanned}"
-    # And the scan reads real routes: the files still holding bare defaults are counted, not skipped.
-    assert sum(_bare_depends(path) for path in _route_files() if path.name in _ALLOWED) >= 50
+    assert {"admin.py", "decision.py", "threat.py", "udl.py"} <= scanned
+    # And the scan reads real routes: a zero count is a count of routes read, not of none found.
+    assert sum(_routes(path) for path in _route_files()) >= 50

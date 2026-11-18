@@ -471,13 +471,13 @@
         </tr>
         {% endif %}
         {% set group_idx = loop.index0 %}
-        {# These five are a repeated header row emitted once per group inside
+        {# These headings are a repeated header row emitted once per group inside
            the single tbody, not a thead row. scope="col" would claim the whole
            remainder of the column, so with several groups expanded a cell would
            answer to every earlier group's heading as well as its own. An id per
            group, referenced by headers= on that group's child cells, binds each
            cell to its own heading and satisfies Web:TableHeaderHasIdOrScopeCheck
-           just as scope does. #}
+           just as scope does. Action, which does not sort, is bound the same way. #}
         <tr class="threat-child threat-child-header threat-children-{{ group_idx }}" style="display:none">
           <td></td>
           <th data-action="childSort" data-group="{{ group_idx }}" data-col="1" data-kind="str" tabindex="0" data-activate id="tsw-child-{{ group_idx }}-1" aria-sort="none">Location <span class="hrr-sort-ind"></span></th>
@@ -486,7 +486,7 @@
           <th data-action="childSort" data-group="{{ group_idx }}" data-col="4" data-kind="num" tabindex="0" data-activate id="tsw-child-{{ group_idx }}-4" aria-sort="none">TOF <span class="hrr-sort-ind"></span></th>
           <th data-action="childSort" data-group="{{ group_idx }}" data-col="5" data-kind="str" tabindex="0" data-activate id="tsw-child-{{ group_idx }}-5" aria-sort="none">Method <span class="hrr-sort-ind"></span></th>
           <th data-action="childSort" data-group="{{ group_idx }}" data-col="6" data-kind="str" tabindex="0" data-activate id="tsw-child-{{ group_idx }}-6" aria-sort="none">Posture <span class="hrr-sort-ind"></span></th>
-          <th class="no-sort">Action</th>
+          <th class="no-sort" id="tsw-child-{{ group_idx }}-7">Action</th>
         </tr>
         {% for child in group.children %}
         <tr class="threat-child threat-children-{{ group_idx }}"
@@ -505,7 +505,7 @@
              this word comes from, so the colour and the word now agree. They
              did not: the tint read geometric access, which inverts posture. #}
           <td class="col-dim" headers="tsw-child-{{ group_idx }}-6">{{ child.entry.posture_label or '—' }}</td>
-          <td class="col-actions" style="white-space:nowrap">
+          <td class="col-actions" headers="tsw-child-{{ group_idx }}-7" style="white-space:nowrap">
             {# group_idx travels with entry_index so the fragment that comes
                back can bind its own cells to THIS group's headings with
                headers=. The server cannot recover it afterwards:

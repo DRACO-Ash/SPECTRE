@@ -80,14 +80,21 @@ def _tracked_tree(destination: Path) -> None:
         subprocess.run(command, cwd=destination, check=True, capture_output=True)  # noqa: S603
 
 
-def _run_packager(tree: Path) -> subprocess.CompletedProcess[str]:
+def _run_packager(
+    tree: Path, *, extra_env: dict[str, str] | None = None, args: tuple[str, ...] = ("--docker-only", "out"),
+) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
         "SKIP_PACKAGE_TESTS": "1",  # the suite is exercised by its own run
+        # The SonarQube gate needs docker and minutes; it has its own cases
+        # below and in tests/integration/test_sonar_gate_live.py. Every other
+        # case here tests a guard that runs before it.
+        "SKIP_SONAR_GATE": "1",
+        **(extra_env or {}),
     }
     # S603: fixed argv, no shell, and every path is test-controlled.
     return subprocess.run(  # noqa: S603
-        [_SH, _PACKAGER, "--docker-only", "out"],
+        [_SH, _PACKAGER, *args],
         check=False,
         cwd=tree, env=env, capture_output=True, text=True, timeout=300,
     )
@@ -260,6 +267,35 @@ class TestSecretGate:
             target.write_text('SECRET_KEY=a-real-looking-value\n', encoding="utf-8")
 
         _assert_refused(tree, "populated secret value", break_it)
+
+
+class TestSonarQubeGate:
+    """Owner's instruction, 18 November 2026: no package without a SonarQube verdict of zero."""
+
+    def test_refuses_to_build_without_docker(self, tree: Path) -> None:
+        result = _run_packager(tree, extra_env={"SKIP_SONAR_GATE": "0", "DOCKER": str(tree / "no-docker-here")})
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0, f"built without a SonarQube verdict.\n{combined[-1500:]}"
+        assert "docker is not available" in combined
+        assert not list((tree / "out").glob("*.zip")), "an archive was written before the gate refused"
+
+    def test_a_skipped_gate_is_loud_and_travels_in_the_record(self, tree: Path) -> None:
+        result = _run_packager(tree)
+        assert result.returncode == 0, (result.stdout + result.stderr)[-2000:]
+        assert "WARNING: SONAR GATE SKIPPED" in result.stdout
+        (record,) = (tree / "out").glob("*.sha256")
+        lines = record.read_text(encoding="utf-8").splitlines()
+        assert lines[0].endswith(".zip")
+        assert any(line.startswith("SONAR GATE SKIPPED") for line in lines[1:])
+
+    def test_stage_only_hands_over_the_tree_and_builds_nothing(self, tree: Path) -> None:
+        result = _run_packager(tree, args=("--stage-only", "staged"))
+        assert result.returncode == 0, (result.stdout + result.stderr)[-2000:]
+        staged = tree / "staged"
+        assert (staged / "Dockerfile").is_file() and (staged / "spectre" / "__init__.py").is_file()
+        assert (staged / "tests").is_dir(), "the python template ships the suite, so the gate scans it"
+        assert not (staged / "scripts").exists() and not (staged / "docs").exists()
+        assert not (tree / "dist").exists() and not (tree / "out").exists(), "stage-only built a package"
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

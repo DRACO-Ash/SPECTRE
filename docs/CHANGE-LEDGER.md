@@ -1513,3 +1513,14 @@ SPECTRE starts without `SECRET_KEY` on a throwaway signing key, so the Logging c
 | DAST | **HYGIENE** | None | The scan already ran on a throwaway key. | n/a. |
 | SCA | **HYGIENE** | None | n/a. | n/a. |
 
+## 0.48.6
+
+Zero SonarQube issues across the whole codebase, and the packager runs SonarQube itself before it zips.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | 206 issues fixed in `spectre/` and `tests/`; `scripts/sonar-gate.sh` with `scripts/sonar-profile.json` | The platform's list for 0.48.5: 165 code smells, 9 bugs. A local SonarQube Community Build 26.11 with Sonar way extended plus every platform rule found 206 on the same zip, every platform finding among them except `pythonbugs:S6466`, which only commercial editions run and which was fixed by hand. After the fixes the gate reports 0 open issues and 0 hotspots on the package tree. | Then the platform runs a rule the profile does not: add it to `scripts/sonar-profile.json` and the gate catches it from then on. |
+| Test | **HYGIENE** | New tests for the gate, the regex equivalence, the mission order fix and six browser behaviours | The suite runs inside the package, in one process, as the platform runs it. | n/a. |
+| DAST | **HYGIENE** | Login no longer autofocuses; labels and table headers added | No route or header changed. | n/a. |
+| SCA | **HYGIENE** | No dependency added | The gate's images are pinned by digest and used only at check time. | n/a. |
+

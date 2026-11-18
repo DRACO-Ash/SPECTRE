@@ -192,8 +192,15 @@ def row_hypotheses(scenario: Scenario, action: AdversaryAction) -> tuple[tuple[i
     samples it (SPC-184); empty with no hypothesis. Under equal turns, the row's first burn alone, as it was then."""
     if action.hypothesis is None:
         return ()
+    return _numbered_burns(scenario, action, action.hypothesis.hypothesis)
+
+
+def _numbered_burns(
+    scenario: Scenario, action: AdversaryAction, stated: ManoeuvreHypothesis,
+) -> tuple[tuple[int, ManoeuvreHypothesis], ...]:
+    """row_hypotheses for a row with a hypothesis, whose first burn as stated is *stated*."""
     if scenario.turn_rule is TurnRule.EQUAL:
-        return ((1, action.hypothesis.hypothesis),)
+        return ((1, stated),)
     red = None if scenario.binding is None else scenario.binding.red
     burns = cast("RowBurns", _row_burns(action, red))
     # A row whose every burn is dropped is refused before any tree is planned (decision._after_burn): its own burn 1.

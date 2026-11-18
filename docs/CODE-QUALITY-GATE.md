@@ -1,47 +1,165 @@
 # Code Quality: the SonarQube gate
 
-**The gate scopes to NEW CODE.** That single fact explains the shape of every
-report it has produced, and it is the first thing to understand before fixing
-anything.
+**Zero open SonarQube issues and zero unreviewed security hotspots, across the
+whole codebase, measured by SonarQube itself at check time.** That is the
+owner's instruction of 18 November 2026, and it is the whole policy.
 
-## What the report is, and is not
+It supersedes the owner's ruling of 12 November 2026 (latent issues converted
+as their lines are touched, new code only). Under that ruling 0.48.5 reached
+the App Store with 174 findings on the platform's SonarQube, 165 code smells
+and 9 bugs, while our own checks passed it: `scripts/sonar_rules.py` checked 14
+rules on changed lines, and the platform's analyser checks hundreds on every
+line. Approximating the analyser is over. The gate runs it.
 
-SonarQube reported 57 findings against release 0.5.23. The tree contains far
-more than 57 instances of those same rules. Examples measured directly:
+## What the gate is
 
-| Rule | Reported | Actually in the tree |
-|---|---|---|
-| python:S3776 cognitive complexity over 15 | 16 | 43 |
-| python:S8410 FastAPI dependency injection without `Annotated` | 4 | 108 |
-| python:S7632 malformed suppression comment | 5 | 21 |
-| Web:MouseEventWithoutKeyboardEquivalentCheck | 7 | 50 |
+`scripts/sonar-gate.sh`, with its HTTP half in `scripts/sonar_gate.py`. Given a
+directory (by default the App Store package tree, staged by
+`scripts/package-appstore.sh --stage-only`), it:
 
-The difference is not an oversight by the scanner. Sonar reports a rule against
-a function or a line only when that code is inside the new-code window, which
-for this project runs from master. Every file in the report had changed; no
-unchanged file appeared, and `udl.py:fetch_tle` scores 67 without being
-reported because nobody has touched its lines.
+1. **Finds or starts a server.** It reuses a SonarQube that answers at
+   `SONAR_HOST_URL` (default `http://127.0.0.1:9000`). If none answers and the
+   host is local, it starts SonarQube Community Build 26.11 in docker, pinned
+   by digest, with its data on tmpfs (Elasticsearch refuses a disk under 10%
+   free) and the Elasticsearch bootstrap checks off, and waits for status UP.
+2. **Secures it.** On a server it started, it replaces `admin`/`admin` with a
+   random password and mints a token. On a server it reuses, it reads the
+   credentials given and mints a temporary token, revoked on exit. Either way
+   the secrets live only in a 0600 file in a private temporary folder, deleted
+   on exit, and are never printed. No secret is in the repository.
+3. **Builds the profile** from `scripts/sonar-profile.json` (below) and sets it
+   as the default on a server it started. On a reused server it binds the
+   project to the profile and leaves the server's defaults alone.
+4. **Recreates the project** (`spectre-gate` unless `SONAR_PROJECT_KEY` says
+   otherwise). A resolution made by hand in the UI on an earlier analysis
+   (won't fix, false positive, safe) therefore cannot carry over and pass the
+   gate. The code is the only place a finding can be settled.
+5. **Scans the whole tree** with the SonarScanner CLI, pinned by digest. The
+   platform analyses every file in the archive and does not honour
+   `sonar.sources`, so the gate does the same: sources are the whole tree, and
+   `tests/` is analysed as test code. These settings override any
+   `sonar-project.properties` in the tree, so a package cannot narrow its own
+   analysis. It then waits for the server to finish processing.
+6. **Reads the verdict:** every open issue and every security hotspot not yet
+   reviewed. Each is printed as `file:line rule message`, with a count by rule,
+   and written to a JSON report (`dist/sonar-gate-report.json` by default;
+   `SONAR_REPORT` moves it). The report also lists every `NOSONAR` marker in
+   the tree, so a suppression is never invisible. **One finding fails the gate.**
+7. **Cleans up:** removes the container it started and its volumes, unless
+   `SONAR_KEEP=1`.
 
-Master has not moved with the releases. It has stood at 0.6.4 (`77a1088`)
-since that release was merged for the App Store, so every line changed since
-then is new code to the platform, not only the latest release's lines. A run
-of `scripts/check-quality.sh` against the previous release shows what one
-release adds; a run against master shows what the next submission is scored
-on. `docs/SONAR-RULES.md` has both, and the owner's ruling that latent issues
-are converted as they are touched.
+Exit status: 0 pass; 1 issues or hotspots found; 2 the gate could not reach a
+verdict (a server that will not start, a scan that fails); 3 docker is not
+available. Only 0 is a pass. There is no fallback that counts as one.
 
-Two consequences follow, and they pull in opposite directions.
+## Where it runs
 
-● **A fix is cheaper than it looks.** You do not have to clear the whole tree
-  to clear the gate.
-● **A refactor is more expensive than it looks.** Every line you touch enters
-  the window. A function you edit for one rule is then scanned against ALL of
-  them, so a refactor that clears S3776 and introduces a duplicated literal has
-  cost a submission rather than saved one.
+● **The packager.** `scripts/package-appstore.sh` runs the gate on the staged
+  tree, which is exactly what the zip will hold, after the fast pre-check and
+  before the zip is written. A failure stops the build. So does a missing
+  docker, with a message saying so. `SKIP_SONAR_GATE=1` is the only override:
+  it prints a loud warning and writes `SONAR GATE SKIPPED` into the package's
+  `.sha256` record, so a skipped package is visibly unverified and must not be
+  submitted. A gated build leaves its report beside the zip as
+  `<package>.sonar-gate.json`.
+● **`scripts/check-quality.sh`**, as the leg before the changed-code legs. It
+  does not depend on a diff, so it runs even when no Python changed.
+● **CI.** The `sonarqube` job in `.github/workflows/ci.yml` runs on every push
+  and every pull request (the gate is the whole codebase, so master is
+  measured too). It runs the gate's own tests, the live SonarQube test
+  included, then `sh scripts/sonar-gate.sh` on the package tree, and keeps the
+  report as an artefact. GitHub-hosted Ubuntu runners have docker.
 
-The second is why `scripts/check-quality.sh` now runs a complexity check scoped
-the same way, and why the refactors in 0.5.24 were each reviewed by a second
-pass before they were kept.
+## Run it locally
+
+You need docker, `python3` and about 4 GB of free memory. The first run pulls
+the two pinned images (about 3.5 GB on disk).
+
+```
+sh scripts/sonar-gate.sh                       stage the package tree and gate it
+sh scripts/sonar-gate.sh <directory>           gate any tree, an unzipped package for example
+SONAR_HOST_URL=http://127.0.0.1:9100 \
+  sh scripts/sonar-gate.sh                     start the throwaway server on another port
+SONAR_KEEP=1 sh scripts/sonar-gate.sh          keep the server to browse the findings; the
+                                               credentials file's path is printed (never its
+                                               contents); delete it when done
+SONAR_HOST_URL=http://127.0.0.1:9000 \
+  SONAR_AUTH_FILE=<file> sh scripts/sonar-gate.sh
+                                               reuse a running server; the file holds
+                                               user:password, a token, or what a kept run left
+```
+
+If something already answers at `SONAR_HOST_URL` and no credentials are given,
+the gate stops and says so rather than guessing: give `SONAR_AUTH_FILE` or
+`SONAR_TOKEN`, or point `SONAR_HOST_URL` at a free port. A full run on the
+package takes about five minutes, most of it the server starting.
+
+## The profile
+
+`scripts/sonar-profile.json` defines one profile, **SPECTRE gate**, for the four
+languages SPECTRE is written in. For each, the base is the built-in **Sonar way
+extended** profile, and an explicit list of rule keys is activated on top: every
+rule the platform's SonarQube has raised on SPECTRE (its own list, and every
+rule in the full 0.48.5 issue export).
+
+| Language | Base | Named rules | Active on 26.11 |
+|---|---|---|---|
+| Python (`py`) | Sonar way extended | 17 | 272 |
+| JavaScript (`js`) | Sonar way extended | 11 | 260 |
+| CSS (`css`) | Sonar way extended | 1 | 30 |
+| HTML and templates (`web`) | Sonar way extended | 9 | 52 |
+
+Why Sonar way extended: Community Build 26.11 ships "Sonar way core", "Sonar
+way extended" and "Sonar way comprehensive" for these languages, and no
+profile called plain "Sonar way". Extended is the closest to what the platform
+raises: of the 38 named rules, 23 are already in it and the other 15 are the
+additions. Comprehensive would add over a hundred rules each for Python and
+JavaScript that the platform has never raised on SPECTRE.
+
+Every other language the scanner finds in the package (Dockerfile, YAML, JSON,
+secrets detection and the rest) is analysed with the server's built-in default
+profile, and any issue there fails the gate too.
+
+One rule the platform raised cannot run here: `pythonbugs:S6466` (an index
+that may raise `IndexError`, raised at `spectre/web/routes/missions.py:924` on
+0.48.5) ships only in the commercial editions. It is listed under
+`not_in_community_build` with that reason, and the gate prints it as NOT RUN on
+every run so the gap stays visible. It is held by hand review and by the tests
+on that route.
+
+The profile cannot lose a rule silently: `tests/unit/test_sonar_gate.py` holds
+it to every rule the platform has raised, and the gate refuses to run if the
+server does not know a named rule (unless it is listed, with a reason, as not
+in the Community Build) or if any named or base rule fails to activate. To add
+a rule, follow the steps at the end of `docs/SONAR-RULES.md`.
+
+## Suppressions
+
+Fix for real. `# NOSONAR` (or the JavaScript and HTML equivalent) is allowed
+only where the rule is wrong for this code or the fix would break the product,
+with the reason on the line above, and each one goes to the owner (the
+Information Security Manager) for review. A VULNERABILITY or a BUG is never
+suppressed silently. The gate's report lists every `NOSONAR` marker in the
+tree. Marking an issue resolved in the SonarQube UI does nothing, because the
+gate recreates the project on every run.
+
+## What the gate does not measure
+
+● `pythonbugs:S6466`, above.
+● **Coverage and duplication.** The platform's gate also asks for 80% coverage
+  and at most 3% duplication on new code. The SonarQube gate reads issues and
+  hotspots only; `scripts/check-quality.sh` keeps its changed-code coverage
+  and duplication legs for those conditions.
+● **Rules the platform's profile holds and has never raised here.** The
+  platform's profile is not published. When it raises a rule this profile
+  lacks, the rule joins the profile the same day.
+
+## The fast pre-check
+
+`scripts/sonar_rules.py` still runs first in the packager and in
+`scripts/check-quality.sh`. It encodes 14 rules the platform has failed a
+submission on and answers in seconds. It is a convenience, not the verdict:
+`docs/SONAR-RULES.md` is its ledger.
 
 ## Measuring cognitive complexity locally
 
@@ -84,17 +202,17 @@ scripts/cognitive_complexity.py --calibrate          check against Sonar's own s
 scripts/cognitive_complexity.py --json               machine-readable
 ```
 
-`--changed` is the one that mirrors the gate, and it is the one wired into
-`scripts/check-quality.sh`. It is scoped to `sonar.sources`, so a complex
-function in `scripts/` does not fail a loop over code the gate never sees.
+`--changed` is the leg wired into `scripts/check-quality.sh`, a fast warning
+on the functions a branch touched. The whole-tree run (no flag) is the one
+that matches the zero policy: the gate fails on any function over 15, touched
+or not. It is scoped to `sonar.sources`, so a complex function in `scripts/`
+is not counted.
 
-## How each rule class was cleared
+## How each rule class is fixed
 
-The rules the gate has actually raised on this project, from 0.6.0 on, are each
-a check in `scripts/sonar_rules.py`, which `scripts/check-quality.sh` and the
-packager run on changed lines. Their ledger, with the evidence and the limits
-of each check, is `docs/SONAR-RULES.md`. What follows is how to fix each rule
-class once a check or a report names it.
+What follows is how to fix each rule class once the gate's report names it.
+Fourteen of these rules are also checks in the fast pre-check, whose ledger is
+`docs/SONAR-RULES.md`.
 
 ● **S3776** cognitive complexity over 15. Extract the deepest nested block whole
   into a module-private helper that takes exactly what it needs. Guard clauses
@@ -133,71 +251,36 @@ class once a check or a report names it.
   `--spectre-color-caution-amber-text` token resolves to `#8A5600` on light
   surfaces (5.59:1 on `#F3F4F6`, 6.16:1 on `#FFFFFF`).
 
-## What clearing them cost, and the trap to expect
 
-Clearing the sixteen reported functions pulled THREE MORE into the window that
-had never been reported, because the fixes for other findings added a line
-inside each of them:
+## What the new-code years taught (history)
 
-| function | score | how it entered the window |
-|---|---|---|
-| `udl.py:fetch_tle` | 67 | one `log_safe()` call added for the S5145 fix |
-| `maneuver.py:_run_intercept` | 38 | a duplicated-literal fix on a line inside it |
-| `maneuver.py:apply_all_intercepts` | 27 | the same |
+From 0.5.23 to 0.48.5 the platform scored new code only, and these pages
+explained how to live inside that window: fix what the report names, and
+budget a second pass because every touched line enters the window. Clearing
+sixteen reported functions in 0.5.24 pulled three more into it
+(`udl.py:fetch_tle` at 67 among them), and lifting helpers moved old findings
+onto added lines. The lesson that survives the change of policy is the one
+about evidence: a local check that reports clean while the artefact is not is
+the most expensive thing a gate can do. That is why the verdict now comes from
+SonarQube itself, run on the staged package, and why no docker means no
+package rather than a pass.
 
-`fetch_tle` was the worst function in the repository and the gate had never
-seen it. All three are now cleared, 12, 2 and 12 respectively, but the lesson
-generalises: **budget a second pass.** Clearing a report moves code, moving
-code enlarges the window, and the window is where the gate looks.
-
-The same mechanism applies to findings rather than functions. Lifting a helper
-out of `threat_sweep` moved the file's one unsuppressed broad catch onto an
-added line, and lifting the diagnostics block out of `fetch_tle` did the same
-for a magic value. Neither was a new defect; both became new findings. Check
-with `--changed` before you call a file done.
-
-That check had to be corrected before it could see any of this. It compared
-commits, so it reported the tree clean while the artefact, which is built from
-the working tree, was not. It now measures the merge base against the working
-tree.
-
-## What is deliberately not fixed
-
-● **The out-of-scope population**, measured above. Clearing all 43 complex
-  functions in one release would mean restructuring code the report never
-  touched, with every one of those refactors carrying behaviour risk, to clear
-  findings the gate is not raising. They are measurable at any time with
-  `scripts/cognitive_complexity.py`, and the worst of them,
-  `udl.py:fetch_tle` at 67, is a landmine: the next person to edit that function
-  for any reason puts it in scope.
-● **`_entrypoint.py:27` and `gcat.py:274`.** Both need two suppression
-  directives on one line, one for ruff and one for bandit, and Python allows one
-  comment per line. The alternative is moving a narrow, justified, per-line
-  suppression into a project-wide bandit skip, which is worse security hygiene
-  than a comment Sonar dislikes. Neither line is currently in scope; if one ever
-  is, the honest answer is the project-wide skip with the rationale recorded
-  here, not a silent deletion of the bandit directive.
-● **The remaining `Depends(...)` defaults** (104 when this was written;
-  `scripts/sonar_rules.py --all` counted 85 route parameters with a FastAPI
-  default on 12 November 2026, and `tests/unit/test_routes_use_annotated_depends.py`
-  holds each routes file's count from rising). Converting them is mechanical
-  but not free: `Annotated` removes the default, which forces parameter
-  reordering across a hundred route signatures, and a mistake there is a 500 on
-  a live route rather than a scanner finding. They convert file by file as those
-  files are touched for other reasons.
+There is no longer a population of known issues left alone on purpose. The
+remaining `Depends(...)` defaults, the complex functions nobody had touched and
+the two lines that needed both a ruff and a bandit directive are issues like
+any other, and the gate counts them.
 
 ## Before you upload
 
 ```
-scripts/check-quality.sh                       includes the scoped complexity and rule legs
-scripts/sonar_rules.py                         the raised rules against master, the window the gate scores
-scripts/cognitive_complexity.py --calibrate    the meter still agrees with Sonar
-scripts/preflight-gate.py .                    the package contract
+sh scripts/package-appstore.sh                 builds only if the SonarQube gate passes
+sh scripts/sonar-gate.sh                       the gate on its own, on the package tree
+sh scripts/check-quality.sh                    the gate, then the changed-code legs
+python3 scripts/sonar_rules.py                 the fast pre-check
+python3 scripts/cognitive_complexity.py --calibrate   the meter still agrees with Sonar
+python3 scripts/preflight-gate.py .            the package contract
 ```
 
-A green local loop is necessary and never sufficient: the Sonar ruleset is
-server-side and reveals rule classes progressively. When it reveals one, add
-it to `docs/SONAR-RULES.md` and the checker by the steps at the end of that
-page. Expect the next scan to
-surface something these three checks cannot see, and read the report as a sample
-of a population rather than as the work list.
+The packager's `.sha256` record must hold one line, the checksum. A record that
+says `SONAR GATE SKIPPED` belongs to a package that was never checked: do not
+submit it.

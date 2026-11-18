@@ -16,7 +16,7 @@ function decisionAddRow(containerId, templateId) {
   container.dataset.rowCount = String(c);
   var row = template.content.firstElementChild.cloneNode(true);
   row.querySelectorAll('input').forEach(function (input) {
-    if (input.value.indexOf('__ROW__') !== -1) { input.value = input.value.replace('__ROW__', String(c)); }
+    if (input.value.includes('__ROW__')) { input.value = input.value.replace('__ROW__', String(c)); }
   });
   container.appendChild(row);
 }
@@ -36,7 +36,7 @@ SPECTRE.init('geometry-opener', function (region) {
   if (!table) { return; }
   table.addEventListener('submit', function (event) {
     var form = event.target;
-    if (!form.classList || !form.classList.contains('show-trajectory')) { return; }
+    if (!form.classList?.contains('show-trajectory')) { return; }
     table.querySelectorAll('form.show-trajectory[data-geometry-opener]').forEach(function (f) {
       delete f.dataset.geometryOpener;
     });

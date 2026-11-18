@@ -1,0 +1,68 @@
+{
+  "name": "SPECTRE gate",
+  "server": "SonarQube Community Build 26.11.0.134175",
+  "policy": "Zero open issues and zero unreviewed security hotspots across the whole package, measured at check time (owner instruction, 18 November 2026). See docs/CODE-QUALITY-GATE.md.",
+  "languages": {
+    "py": {
+      "base": "Sonar way extended",
+      "rules": [
+        "python:S1172",
+        "python:S1192",
+        "python:S1244",
+        "python:S1940",
+        "python:S3358",
+        "python:S3776",
+        "python:S4830",
+        "python:S5655",
+        "python:S5863",
+        "python:S5886",
+        "python:S7503",
+        "python:S7508",
+        "python:S8392",
+        "python:S8410",
+        "python:S8495",
+        "python:S8572",
+        "python:S8786"
+      ]
+    },
+    "js": {
+      "base": "Sonar way extended",
+      "rules": [
+        "javascript:S1481",
+        "javascript:S3358",
+        "javascript:S3776",
+        "javascript:S4138",
+        "javascript:S6557",
+        "javascript:S6582",
+        "javascript:S6661",
+        "javascript:S7721",
+        "javascript:S7765",
+        "javascript:S7781",
+        "javascript:S9383"
+      ]
+    },
+    "css": {
+      "base": "Sonar way extended",
+      "rules": [
+        "css:S4656"
+      ]
+    },
+    "web": {
+      "base": "Sonar way extended",
+      "rules": [
+        "Web:ImgWithoutAltCheck",
+        "Web:InputWithoutLabelCheck",
+        "Web:S5256",
+        "Web:S6819",
+        "Web:S6825",
+        "Web:S6853",
+        "Web:S7927",
+        "Web:S9379",
+        "Web:TableHeaderHasIdOrScopeCheck"
+      ]
+    }
+  },
+  "not_in_community_build": {
+    "pythonbugs:S6466": "Raised by the platform on 0.48.5 (spectre/web/routes/missions.py:924, an index that may raise IndexError). The rule ships only in the commercial editions, so this gate cannot run it; it is held by hand review and by the test that covers that route."
+  }
+}

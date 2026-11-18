@@ -211,7 +211,7 @@ class TestChildSortSurvivesAGroupWithIntel:
         been reached.
         """
         source = _script_of("function childSort(")
-        assert "r.id.indexOf('threat-row-') === 0" in source, (
+        assert "r.id.startsWith('threat-row-')" in source, (
             "childSort collects rows by class alone, so the single-cell intel "
             "row reaches the comparator and throws"
         )

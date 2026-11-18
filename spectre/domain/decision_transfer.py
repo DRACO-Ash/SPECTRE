@@ -23,7 +23,6 @@ km/s, as the astro package does.
 
 from __future__ import annotations
 
-import dataclasses
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -32,6 +31,7 @@ from typing import NamedTuple
 
 import numpy as np
 
+from spectre.astro.copies import replaced
 from spectre.astro.monte_carlo import ManoeuvreHypothesis, elset_state
 from spectre.domain.manoeuvre_calibration import from_km_s, to_km_s
 
@@ -126,7 +126,7 @@ def _as_hypothesis(
     sigma = first.delta_v_magnitude_1sigma_km_s
     if first.delta_v_magnitude_km_s > _NO_SIZE_KM_S:
         sigma *= size / first.delta_v_magnitude_km_s
-    return dataclasses.replace(
+    return replaced(
         first, epoch_utc=burn.at_utc, delta_v_magnitude_km_s=size, delta_v_radial=radial,
         delta_v_in_track=in_track, delta_v_cross_track=cross, delta_v_magnitude_1sigma_km_s=sigma,
         random_seed=_seed(first.random_seed, number),

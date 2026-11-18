@@ -311,6 +311,19 @@ class TestSingleIntercept:
         assert page.evaluate("navigator.clipboard.readText()") == copy.get_attribute("data-clip")
         _assert_clean(console)
 
+    def test_a_refused_copy_says_so_on_the_button_and_then_restores_it(self, console: Console) -> None:
+        """The clipboard's promise is handled both ways (Sonar S9383): a refusal shows on the button, then the
+        button reads as before, and nothing is left unhandled."""
+        page = self._result(console)
+        copy = page.locator('button[data-clip]').first
+        before = copy.text_content()
+        page.evaluate("() => { navigator.clipboard.writeText = () => Promise.reject(new Error('refused')); }")
+        copy.click()
+        page.wait_for_selector("button[data-clip]:has-text('Copy failed')")
+        page.wait_for_selector("button[data-clip]:has-text('Copy failed')", state="detached", timeout=5000)
+        assert copy.text_content() == before
+        _assert_clean(console)
+
     def test_the_geometry_panel_draws_switches_view_and_closes_on_escape(self, console: Console) -> None:
         page = self._result(console)
         opener = page.locator('#intercept-result form[hx-post="/plan/geometry/intercept"] button[type="submit"]')

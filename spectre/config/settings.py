@@ -147,6 +147,9 @@ def _resolve_data_dir() -> str:
     return str(Path.cwd() / "data")
 
 
+_ASYNC_POSTGRES_PREFIX = "postgresql+asyncpg://"
+
+
 def _normalise_database_url(url: str) -> str:
     """Return *url* with an async driver, whatever dialect spelling arrives.
 
@@ -155,13 +158,13 @@ def _normalise_database_url(url: str) -> str:
     driver is filled in here rather than requiring the operator to hand-edit a
     value the platform generated.
     """
-    for prefix in ("postgresql+asyncpg://", "sqlite+aiosqlite://"):
+    for prefix in (_ASYNC_POSTGRES_PREFIX, "sqlite+aiosqlite://"):
         if url.startswith(prefix):
             return url
     if url.startswith("postgresql://"):
-        return "postgresql+asyncpg://" + url[len("postgresql://"):]
+        return _ASYNC_POSTGRES_PREFIX + url[len("postgresql://"):]
     if url.startswith("postgres://"):
-        return "postgresql+asyncpg://" + url[len("postgres://"):]
+        return _ASYNC_POSTGRES_PREFIX + url[len("postgres://"):]
     if url.startswith("sqlite://"):
         return "sqlite+aiosqlite://" + url[len("sqlite://"):]
     return url
@@ -229,7 +232,7 @@ def split_database_url(url: str) -> tuple[str, dict[str, Any]]:
     anything resembling a configuration error. The TLS intent is preserved by
     translating it into asyncpg's ``ssl`` argument.
     """
-    if not url.startswith("postgresql+asyncpg://"):
+    if not url.startswith(_ASYNC_POSTGRES_PREFIX):
         return url, {}
 
     parts = urlsplit(url)
@@ -255,8 +258,10 @@ def split_database_url(url: str) -> tuple[str, dict[str, Any]]:
         # rejects the private certificate authorities managed databases
         # normally use. Match libpq's semantics rather than asyncpg's default.
         context = ssl.create_default_context(cafile=cafile)
+        # python:S4830 is kept on purpose: this is libpq's documented "require"
+        # mode, used by the platform's Postgres add-on; verify-ca/verify-full verify.
         context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
+        context.verify_mode = ssl.CERT_NONE  # NOSONAR
         connect_args["ssl"] = context
     elif sslmode and sslmode not in _SSLMODE_NEGOTIATE:
         # Any other value used to land in the branch above, so a typo such as

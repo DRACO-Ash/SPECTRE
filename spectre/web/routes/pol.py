@@ -201,7 +201,7 @@ async def _fetch_udl_latest(
 @router.get("/panel", response_class=HTMLResponse)
 async def pol_panel(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return the PoL panel — credential form + results placeholder.
 
@@ -1177,7 +1177,7 @@ def _chart_type(classification: str) -> str:
 async def pol_chart_data(
     satno: int,
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> JSONResponse:
     """Return Chart.js-ready JSON for the most recent PoL analysis."""
     state = get_session_state(current_user)
@@ -1250,7 +1250,7 @@ async def pol_chart_data(
 @router.get("/notso-panel", response_class=HTMLResponse)
 async def pol_notso_panel(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return the NOTSO correlation input panel."""
     from spectre.data.notso_cache import get_notso_cache
@@ -1385,7 +1385,7 @@ def notso_behaviour_profile(pol: Any, notsos: list[Any]) -> tuple[list[Any], Any
 @router.post("/notso-correlate", response_class=HTMLResponse)
 async def pol_notso_correlate(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Correlate NOTSOs with the last PoL analysis.
 
@@ -1439,7 +1439,7 @@ async def pol_notso_correlate(
 @router.get("/photometry-panel", response_class=HTMLResponse)
 async def pol_photometry_panel(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Return the photometry analysis input panel."""
     state = get_session_state(current_user)

@@ -9,6 +9,25 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.48.6] - 2026-11-18
+
+**Zero SonarQube issues across the whole codebase, and a SonarQube gate that refuses to package otherwise.**
+
+The App Store's analysis of 0.48.5 listed 165 code smells and 9 bugs. SPECTRE's own check (`scripts/sonar_rules.py`) only ever looked at 14 rules on code changed since master, so the rest went through. The owner's instruction of 18 November 2026: zero issues, measured by SonarQube itself at check time.
+
+### Added
+- `scripts/sonar-gate.sh`: runs SonarQube Community Build 26.11 in docker (both images pinned by digest), builds the "SPECTRE gate" quality profile from `scripts/sonar-profile.json` (Sonar way extended plus every rule the platform has raised), scans exactly what the App Store package holds, and fails on any open issue or security hotspot to review, whole codebase, not only new code. The scan project is recreated each run, so an issue marked "won't fix" in the UI cannot pass; every `NOSONAR` in the tree is listed in the report. On 0.48.5 it fails with 206 issues, a superset of the platform's 174.
+- The packager runs the gate before it zips, and refuses without docker; `SKIP_SONAR_GATE=1` is the only override and writes "SONAR GATE SKIPPED" into the `.sha256` record. CI has a `sonarqube` job; `scripts/check-quality.sh` runs the gate too.
+
+### Fixed (206 issues)
+- Python web layer (94): FastAPI dependencies as `Annotated` (57), repeated literals as constants, `logging.exception` in handlers, unused parameters, nested conditionals, a redundant sort, tuples of one length, an `async` function that awaited nothing, the platform's `missions.py:924` possible `IndexError` (fixed by hand: the rule runs only in commercial editions), and tests that compared a value with itself.
+- Domain and orbital mechanics (51): `dataclasses.replace` results through one typed helper (`spectre/astro/copies.py`), Optional where a function returned zero or one item, unused parameters, NaN-preserving comparisons, a float-equality sentinel replaced by a computed field, and a backtracking regex in the element-set check replaced by one proved equivalent over about 1.1 million strings. Results are byte-identical to 0.48.5 across every intercept solver, the transfers and the Decision Engine reference cases.
+- JavaScript and templates (61): three over-complex functions split, optional chains, `includes`, a refused clipboard copy now says so, form controls labelled, data tables given row headers, decorative SVGs hidden from screen readers, the login page no longer steals focus, and a duplicate CSS property removed.
+
+### Security: two suppressions for the owner
+- `spectre/config/settings.py`: with `sslmode=require` the Postgres connection is encrypted without verifying the server certificate (python:S4830). This is libpq's documented meaning of `require`, which the platform's Postgres add-on uses; `verify-ca` and `verify-full` do verify. Kept, marked `NOSONAR` with its reason, pending the owner's ruling.
+- `spectre/web/_entrypoint.py`: the server binds every interface (python:S8392), which the container needs for the platform ingress and readiness probe. Marked `NOSONAR` with its reason.
+
 ## [0.48.5] - 2026-11-17
 
 **SPECTRE starts without `SECRET_KEY`, on a throwaway signing key, so the App Store's Logging check finds it answering on port 8080.**

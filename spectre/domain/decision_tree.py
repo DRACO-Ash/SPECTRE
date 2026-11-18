@@ -40,6 +40,7 @@ from typing import NamedTuple, cast
 
 import numpy as np
 
+from spectre.astro.copies import replaced
 from spectre.astro.elset_approach import ELSET_PROPAGATOR, ElsetFailure
 from spectre.astro.monte_carlo import (
     SEPARATION_PROPAGATOR,
@@ -565,7 +566,7 @@ def largest_tree(scenario: Scenario) -> int:
     for k in range(2, MAX_TURNS + 1):
         if branches(rows, responses, k) > MAX_TREE_BRANCHES:
             break
-        if tree_cost(dataclasses.replace(scenario, turns=k)) > tree_cap(scenario):
+        if tree_cost(replaced(scenario, turns=k)) > tree_cap(scenario):
             break
         fits = k
     return fits
@@ -806,7 +807,7 @@ def path_figures(
     delta_v = sum(s.delta_v_km_s for s in steps)
     tte = min(sum(s.response.time_to_execute_hours for s in steps), scenario.horizon_hours)
     reversibility = min(s.response.reversibility for s in steps)
-    standing = dataclasses.replace(steps[-1].response, time_to_execute_hours=tte, reversibility=reversibility)
+    standing = replaced(steps[-1].response, time_to_execute_hours=tte, reversibility=reversibility)
     scored = closest_km if sampled or elset is None else lower_edge_km(closest_km, elset.combined_km)
     figures = _Figures(custody.maintained, custody.gap_hours, scored, delta_v, custody.degraded_hours)
     score = _score(scenario, standing, figures)
@@ -1120,7 +1121,7 @@ class _Tree:
     def _seeded(self, k: int, red_path: Sequence[int], hypothesis: ManoeuvreHypothesis) -> ManoeuvreHypothesis:
         """*hypothesis* drawing afresh in turn *k* on *red_path*, from its own seed, the turn and the path."""
         seed = int(np.random.SeedSequence([hypothesis.random_seed, k, *red_path]).generate_state(1)[0])
-        return dataclasses.replace(hypothesis, random_seed=seed)
+        return replaced(hypothesis, random_seed=seed)
 
     def _turn_burn(self, k: int, red_path: Sequence[int], a: int) -> TurnBurn | None:
         """Row *a*'s burns as red's move in turn *k*, timed from the turn's start: its burn j the same time after turn
@@ -1151,7 +1152,7 @@ class _Tree:
         stated = (*carry.nominal_pending, *nominal_turn_burns(burn))
         turn = _RedTurn(burn, nominal, self._draw(carry, burn, [*group[0].steps, (a, 0)]), stated)
         pad = shift_pad_s(carry.blue_shift_s if turn.drawn is None else turn.drawn.blue_shift_s)
-        blues = [blue for parent in group for blue in self._responses(k, parent, (a, pad), window, nominal[0])]
+        blues = [blue for parent in group for blue in self._responses(parent, (a, pad), window, nominal[0])]
         sampled = group[0].sampled or burn is not None
         found = (
             self._sampled(k, (a, carry, turn), blues, window) if sampled else self._computed(k, nominal[0], blues, window)
@@ -1172,10 +1173,11 @@ class _Tree:
         return _Drawn(red, np.repeat(carry.red_bstar, n), along_track_shifts_s(offsets[:, 1], carry.blue))
 
     def _responses(
-        self, k: int, parent: _Branch, move: tuple[int, float], window: SeparationWindow, nominal: Trajectory,
+        self, parent: _Branch, move: tuple[int, float], window: SeparationWindow, nominal: Trajectory,
     ) -> list[_Blue]:
-        """Each response's blue over turn *k* from *parent*: our burn sized again against red's nominal burn. *move*
-        is red's move and how far past each end blue's arcs run for each sample's shift to read (SPC-202)."""
+        """Each response's blue over the turn *window* spans from *parent*: our burn sized again against red's nominal
+        burn. *move* is red's move and how far past each end blue's arcs run for each sample's shift to read
+        (SPC-202)."""
         a, pad = move
         try:
             coast = rk45_arc(cast("_Carry", parent.carry).blue, window.span_s, self.blue0.bstar, pad)
@@ -1489,7 +1491,7 @@ def evaluate_tree(
     refusal = refused_before_run(scenario)
     if refusal is not None:
         result = evaluate_scenario(scenario, strategy, sampler=sampler, run=run)
-        return dataclasses.replace(result, tree=GameTree(scenario.turns, (), (), 0, refusal, (refusal,)))
+        return replaced(result, tree=GameTree(scenario.turns, (), (), 0, refusal, (refusal,)))
     # Not refused, so the turns were set (SPC-187): turn 1's sampling keeps each sample where turn 1 ends.
     plan = cast("TurnPlan", turn_plan(scenario))
     result, one = _evaluate(scenario, strategy, sampler, run, plan.length_s(1))
@@ -1501,4 +1503,4 @@ def evaluate_tree(
         matrix = None if best is None else scenario.friendly_responses.index(best)
         picked = select(scenario, tree.roots, tree.complete_turns, strategy, matrix_pick=matrix)
         tree = dataclasses.replace(tree, selection=picked)
-    return dataclasses.replace(result, tree=tree, budget_ran_out=_ran_out(one.budget))
+    return replaced(result, tree=tree, budget_ran_out=_ran_out(one.budget))

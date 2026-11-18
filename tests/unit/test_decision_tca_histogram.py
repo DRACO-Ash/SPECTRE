@@ -291,12 +291,15 @@ class TestThePage:
 
     def test_the_chart_is_a_figure_named_by_its_caption(self, sampled: ScenarioResult) -> None:
         """Sonar raises S6819 on role="img" on a canvas (PR 35). The figure's caption names the chart for a screen
-        reader; the canvas is hidden from it, and the table beside it carries the same counts."""
+        reader; the canvas is hidden from it, at the frame that holds it, since Sonar S6825 refuses aria-hidden on
+        the canvas itself, and the table beside it carries the same counts."""
         panel = _histogram_panel(_render(sampled))
         canvas = re.search(r"<canvas[^>]*>", panel)
         assert canvas is not None
-        assert 'id="tca-hist-chart"' in canvas.group(0) and 'aria-hidden="true"' in canvas.group(0)
+        assert 'id="tca-hist-chart"' in canvas.group(0)
         assert "role=" not in canvas.group(0) and "aria-label=" not in canvas.group(0)
+        frame = re.search(r'<div class="tca-hist-frame" aria-hidden="true"[^>]*>\s*(<canvas[^>]*>)', panel)
+        assert frame is not None and frame.group(1) == canvas.group(0)
         figure = re.search(r"<figure[^>]*>(.*?)</figure>", panel, re.S)
         assert figure is not None and canvas.group(0) in figure.group(1)
         assert re.search(

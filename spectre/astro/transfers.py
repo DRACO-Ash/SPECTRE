@@ -7,7 +7,7 @@ Inputs/outputs in km and km/s unless noted otherwise.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from spectre.astro.constants import MU_EARTH, R_EARTH
 
@@ -19,13 +19,14 @@ class TransferResult:
     delta_v_1: float          # km/s — first burn magnitude
     delta_v_2: float          # km/s — second burn magnitude
     delta_v_3: float = 0.0    # km/s — third burn (bi-elliptic only)
-    total_delta_v: float = 0.0
+    # km/s, always the burns' sum, so it is no argument: 0.0 was the "not given" sentinel when it was one, and no
+    # caller gave it (python:S1244, release 0.48.6).
+    total_delta_v: float = field(init=False)
     transfer_time_s: float = 0.0
     method: str = ""
 
     def __post_init__(self) -> None:
-        if self.total_delta_v == 0.0:
-            self.total_delta_v = self.delta_v_1 + self.delta_v_2 + self.delta_v_3
+        self.total_delta_v = self.delta_v_1 + self.delta_v_2 + self.delta_v_3
 
 
 def _v_vis_viva(r: float, a: float, mu: float = MU_EARTH) -> float:

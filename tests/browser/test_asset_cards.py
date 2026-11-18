@@ -82,3 +82,23 @@ class TestTheScreeningSelector:
         assert reloads == [], "a duplicate add reloaded the selector"
         assert page.input_value("#scr-max-dv") == "1234"
         assert console.problems() == []
+
+
+class TestTheSatelliteSelectors:
+    def test_an_added_track_and_asset_reach_every_satellite_picker_without_a_reload(self, console: Console) -> None:
+        """The list answer carries the pickers' options out of band, each in a plain carrier aimed at its select
+        (partials/sat_select_oob.html): the options land in the select, which keeps its id and its label, and no
+        carrier is left behind in the list."""
+        page = console.open()
+        page.fill("#red-tle-name", "PICK-RED")
+        page.fill("#red-tle-text", _GEO)
+        with page.expect_response("**/assets/red"):
+            page.click('#red-track-form button[type="submit"]')
+        page.wait_for_timeout(300)
+        _add_blue(console, "PICK-BLUE")
+        for select, name in (("#ie-red-sat", "PICK-RED"), ("#ts-red-sat", "PICK-RED"), ("#ie-blue-sat", "PICK-BLUE")):
+            assert page.locator(f'{select} option[value="{name}"]').count() == 1, (select, name)
+            assert page.locator(f"label:has({select})").count() == 1, f"{select} is still named by its label"
+        assert page.locator("#red-list [hx-swap-oob], #blue-list [hx-swap-oob]").count() == 0
+        assert page.locator("#red-list option, #blue-list option").count() == 0, "an option was left in a list"
+        assert console.problems() == []

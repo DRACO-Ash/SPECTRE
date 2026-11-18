@@ -1,12 +1,15 @@
-<select name="red_sat" id="ie-red-sat" hx-swap-oob="innerHTML">
+{# Out-of-band refresh of the three satellite pickers. Each carrier is a plain element whose options htmx swaps into
+   the select named after the colon (hx-swap-oob="innerHTML:#id"), then drops. The selects, and the labels that name
+   them, stay in the page; the fragment no longer repeats them as three unlabelled controls of its own. -#}
+<div hx-swap-oob="innerHTML:#ie-red-sat">
   {% include "partials/red_options.html" %}
-</select>
-<select name="blue_sat" id="ie-blue-sat" hx-swap-oob="innerHTML">
+</div>
+<div hx-swap-oob="innerHTML:#ie-blue-sat">
   {% include "partials/blue_options.html" %}
-</select>
-<select name="red_sat" id="ts-red-sat" hx-swap-oob="innerHTML">
+</div>
+<div hx-swap-oob="innerHTML:#ts-red-sat">
   {% include "partials/red_options.html" %}
-</select>
+</div>
 <div id="ts-target-summary" class="label-dim" hx-swap-oob="outerHTML">
   Targets: <strong>{{ blue_assets|length }}</strong> blue asset{{ 's' if blue_assets|length != 1 else '' }}
 </div>

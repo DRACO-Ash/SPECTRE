@@ -176,7 +176,9 @@ class TestDastScanSigningKey:
         and CSRF token would fail validation part-way through the scan.
         """
         monkeypatch.setenv("APPSTORE_DAST_SCAN", "true")
-        assert get_settings().secret_key == get_settings().secret_key
+        first, second = get_settings(), get_settings()
+        assert first is not second
+        assert first.secret_key == second.secret_key
         assert Settings().secret_key == get_settings().secret_key
 
     def test_the_throwaway_key_is_not_a_weak_one(self) -> None:

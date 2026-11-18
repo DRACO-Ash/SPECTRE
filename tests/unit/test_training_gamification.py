@@ -87,26 +87,26 @@ class TestGetConfig:
 
 class TestAwardPoints:
     def test_returns_point_award(self):
-        pa = award_points("scenario_completed", {})
+        pa = award_points("scenario_completed")
         assert (pa.base_points, pa.total_points) == (150, 150)
         assert sum(pa.axis_deltas.values()) == pytest.approx(150.0)
 
     def test_base_points_match_config(self):
         cfg = get_config()
         action_def = cfg.actions_by_id["challenge_passed"]
-        pa = award_points("challenge_passed", {})
+        pa = award_points("challenge_passed")
         assert pa.base_points == action_def.base_points == 250
 
     def test_axis_deltas_sum_to_total_points(self):
-        pa = award_points("scenario_completed", {})
+        pa = award_points("scenario_completed")
         assert abs(sum(pa.axis_deltas.values()) - pa.total_points) < 0.01
 
     def test_unknown_action_raises(self):
         with pytest.raises(KeyError):
-            award_points("non_existent_action_xyz", {})
+            award_points("non_existent_action_xyz")
 
     def test_challenge_passed_first_try_earns_points(self):
-        pa = award_points("challenge_passed_first_try", {})
+        pa = award_points("challenge_passed_first_try")
         assert pa.total_points > 0
 
 

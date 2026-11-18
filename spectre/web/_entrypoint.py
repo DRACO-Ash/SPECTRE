@@ -57,7 +57,8 @@ def main() -> None:
             extra={"config.setting": "SECRET_KEY", "spectre.boot.outcome": "refused"},
         )
         sys.exit(_REFUSED)
-    uvicorn.run(
+    # python:S8392 kept on purpose: the container must bind all interfaces (reason at host= below).
+    uvicorn.run(  # NOSONAR
         "spectre.web.app:app",
         # SECURITY HOTSPOT, REVIEWED AND ACCEPTED (Sonar python:S6829, bandit B104).
         # Binding all interfaces is required, not incidental: the process runs in a

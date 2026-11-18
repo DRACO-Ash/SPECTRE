@@ -7,6 +7,7 @@ pass with the static files and listeners that replaced them.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from tests.browser.conftest import Console
@@ -157,6 +158,53 @@ class TestIntercepEngineControls:
         page.click("#ts-chart-clear")
         assert not page.is_visible("#trade-space-canvas-wrap")
         assert page.text_content("#ts-chart-status") == "Run 2+ intercepts to enable"
+        _assert_clean(console)
+
+    def _trade_space(self, console: Console, points: list[dict[str, Any]]) -> Any:
+        page = console.open()
+        page.click('.htab[data-panel="hero-engine"]')
+        page.route("**/plan/maneuver/trade-space-data", lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps(points)))
+        with page.expect_response("**/plan/maneuver/trade-space-data"):
+            page.evaluate("() => window._spectreRenderTradeSpace()")
+        page.wait_for_timeout(300)
+        return page
+
+    def test_the_trade_space_draws_one_series_per_method_with_its_axes_and_tooltip(self, console: Console) -> None:
+        """One series per method, named in words; an axis turns logarithmic past a factor of 50; the tooltip names
+        the point, its delta-v and transfer time, then its score, or its miss, or says the miss was not computed."""
+        points = [
+            {"method": "rbar_hop", "transfer_time_min": 30, "delta_v": 2.0, "label": "A", "miss_km": 1.25},
+            {"method": "lambert", "transfer_time_min": 600, "delta_v": 3.0, "label": "B", "miss_km": None},
+            {"method": "rbar_hop", "transfer_time_min": 3000, "delta_v": 4.0, "label": "C", "miss_km": 0.5,
+             "score": 87},
+            {"method": "lambert", "transfer_time_min": 0, "delta_v": 1.0, "label": "dropped", "miss_km": 1.0},
+        ]
+        page = self._trade_space(console, points)
+        chart = page.evaluate("""() => { const c = Chart.getChart(document.getElementById('tradeSpaceChart'));
+            const label = c.options.plugins.tooltip.callbacks.label;
+            return {series: c.data.datasets.map(d => [d.label, d.data.length, d.borderColor]),
+                    x: c.options.scales.x.type, y: c.options.scales.y.type,
+                    tips: c.data.datasets.flatMap(d => d.data.map(p => label({raw: p})))}; }""")
+        assert chart["series"] == [["Rbar Hop", 2, "#8E44AD"], ["Lambert", 1, "#00659E"]]
+        assert (chart["x"], chart["y"]) == ("logarithmic", "linear")
+        assert chart["tips"] == [
+            ["A", "\u0394V: 2.0 m/s", "Transfer: 30.0 min", "Miss: 1.3 km"],
+            ["C", "\u0394V: 4.0 m/s", "Transfer: 2.1 days", "Score: 87/100"],
+            ["B", "\u0394V: 3.0 m/s", "Transfer: 10.0 hr", "Miss: not computed"],
+        ]
+        assert page.text_content("#ts-chart-status") == "3 solutions plotted"
+        assert page.text_content("#ts-badge") == "(3 pts)"
+        assert page.text_content("#ts-chart-btn") == "View Chart (3 pts)"
+        _assert_clean(console)
+
+    def test_with_nothing_plottable_the_trade_space_says_why_and_stays_off(self, console: Console) -> None:
+        page = self._trade_space(console, [
+            {"method": "lambert", "transfer_time_min": 0, "delta_v": 1.0, "label": "A", "miss_km": 1.0}])
+        assert page.text_content("#ts-chart-status") == "No plottable data (need positive \u0394V and transfer time)"
+        assert page.text_content("#ts-chart-btn") == "View Chart"
+        assert page.is_disabled("#ts-chart-btn")
+        assert page.text_content("#ts-badge") == ""
         _assert_clean(console)
 
 

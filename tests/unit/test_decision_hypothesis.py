@@ -464,8 +464,10 @@ class TestTheHypothesisIsRecorded:
                 "A", "a", ActionType.MANOEUVRE, 0.5, 0.5, hypothesis=AdversaryHypothesis.from_archetype("phasing", _AT),
             )
 
-        assert action() == action()
-        assert hash(action().hypothesis) == hash(action().hypothesis)
+        first, second = action(), action()
+        assert first is not second
+        assert first == second
+        assert hash(first.hypothesis) == hash(second.hypothesis)
         assert action().hypothesis != AdversaryHypothesis.from_archetype("evasive", _AT)
         assert action().hypothesis != "phasing"
 

@@ -22,7 +22,6 @@ The grids are tuned, not sourced: Claude's choice in d3447e2, kept by this port.
 
 from __future__ import annotations
 
-import dataclasses
 import itertools
 import math
 from collections.abc import Callable, Iterable
@@ -30,6 +29,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import NamedTuple
 
+from spectre.astro.copies import replaced
 from spectre.astro.events import find_orbital_events
 from spectre.astro.maneuvers import InterceptSolution, orbit_period_s
 from spectre.astro.propagator import TLEOrbit
@@ -209,4 +209,4 @@ def search(solve: Solve, measure: Measure, candidates: list[Choice], approach_km
             best = found
     if best is None:
         raise last
-    return dataclasses.replace(best, tried=len(candidates), refused=refused)
+    return replaced(best, tried=len(candidates), refused=refused)

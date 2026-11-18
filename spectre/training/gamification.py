@@ -189,18 +189,16 @@ class PointAward:
     axis_deltas:  dict[str, float]   # axis_id → points to add to that axis
 
 
-def award_points(
-    action_id: str,
-    axis_points: dict[str, float],
-) -> PointAward:
+def award_points(action_id: str) -> PointAward:
     """Compute a point award for *action_id*.
+
+    The award depends on the action alone, not on the operator's current
+    per-axis totals; the caller adds the deltas to those totals.
 
     Parameters
     ----------
     action_id:
         One of the ``action_id`` values from gamification.yaml.
-    axis_points:
-        Current per-axis totals (read-only; not modified here).
 
     Returns
     -------

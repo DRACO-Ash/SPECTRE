@@ -29,7 +29,6 @@ so the record compares each row's P with the panel's text instead.
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 import math
 import re
@@ -37,6 +36,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, NamedTuple
 
+from spectre.astro.copies import replaced
 from spectre.astro.notso import NOTSORecord
 from spectre.data.notso_cache import get_notso_cache
 from spectre.domain.decision import DEFAULT_PROBABILITY, ActionType, AdversaryAction, BoundElset
@@ -194,7 +194,7 @@ def _applied(action: AdversaryAction, prior: NotsoPrior) -> AdversaryAction:
     """*action* holding *prior*'s P, and its Conf when it offers one, with the suggestion it accepted: P edited by
     the operator's tick, so never untouched (SPC-183)."""
     conf = action.confidence if prior.confidence is None else prior.confidence
-    return dataclasses.replace(
+    return replaced(
         action, probability=prior.probability, confidence=conf, accepted_prior=prior, probability_edited=True,
     )
 

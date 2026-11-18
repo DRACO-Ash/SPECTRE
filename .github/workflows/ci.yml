@@ -79,6 +79,9 @@ jobs:
         env:
           # Boot now fails closed on a missing or placeholder signing key.
           SECRET_KEY: ci-only-ephemeral-signing-key-not-a-secret
+          # The live SonarQube test starts a server for minutes; the sonarqube
+          # job runs it with SPECTRE_SONAR_TESTS=require, so it runs once.
+          SPECTRE_SONAR_TESTS: skip
         run: >
           pytest tests/ -q --cov=spectre --cov=tle_clustering --cov-report=term-missing
           --cov-report=xml
@@ -163,6 +166,8 @@ jobs:
         env:
           SECRET_KEY: ci-only-ephemeral-signing-key-not-a-secret
           DATABASE_URL: postgresql+asyncpg://postgres:ci-only-postgres-password@localhost:5432/spectre_test
+          # Run once, with require, in the sonarqube job.
+          SPECTRE_SONAR_TESTS: skip
         run: pytest tests/ -q
 
   # ── SAST — bandit ────────────────────────────────────────────────────────────
@@ -307,6 +312,44 @@ jobs:
         if: always()
         run: docker rm -f spectre-ci || true
 
+  # ── SonarQube gate — zero issues, whole codebase, the real analyser ──────────
+  sonarqube:
+    name: SonarQube Gate (zero issues, whole codebase)
+    # Owner's instruction, 18 November 2026: zero open issues and zero
+    # unreviewed security hotspots across the whole package, measured by
+    # SonarQube itself (docs/CODE-QUALITY-GATE.md). The gate starts a pinned
+    # SonarQube Community Build in docker, builds the profile from
+    # scripts/sonar-profile.json, scans the App Store package tree and fails on
+    # one issue. No `if:`: the gate is the whole codebase, not a diff, so a
+    # push to master is measured as well as a pull request.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install the locked runtime, test and tooling sets
+        run: |
+          pip install --require-hashes -r requirements.txt -r requirements-dev.txt
+          pip install --no-deps -e .
+      - name: The gate's own tests, the live SonarQube run included
+        env:
+          SECRET_KEY: ci-only-ephemeral-signing-key-not-a-secret
+          # A missing docker fails this step rather than skipping the live test.
+          SPECTRE_SONAR_TESTS: require
+        run: pytest tests/unit/test_sonar_gate.py tests/integration/test_sonar_gate_live.py -q
+      - name: SonarQube gate on the App Store package tree
+        run: sh scripts/sonar-gate.sh
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sonar-gate-report
+          path: dist/sonar-gate-report.json
+          if-no-files-found: warn
+
   # ── Quality gate — SonarQube-equivalent checks on changed code ───────────────
   quality:
     name: Quality Gate (changed code)
@@ -346,6 +389,8 @@ jobs:
       - name: Produce the coverage report the gate reads
         env:
           SECRET_KEY: ci-only-ephemeral-signing-key-not-a-secret
+          # Run once, with require, in the sonarqube job.
+          SPECTRE_SONAR_TESTS: skip
         run: pytest tests/ -q --cov --cov-report=xml:coverage.xml
       - name: Coverage report must exist and be non-empty
         # A comprehensive suite that emits no report scores 0% at the gate.

@@ -150,6 +150,7 @@ class TestFetchTleLatestMode:
                 satno=39034,
                 mode="latest",
                 current_user=_make_user(),
+                _rl=None,
             )
 
             call_args = mock_client.get.call_args
@@ -175,6 +176,7 @@ class TestFetchTleLatestMode:
                 satno=39034,
                 mode="latest",
                 current_user=_make_user(),
+                _rl=None,
             )
 
             ctx = render_mock.call_args[0][2]  # render(request, name, context)
@@ -200,6 +202,7 @@ class TestFetchTleEpochMode:
                 satno=39034,
                 mode="epoch",
                 current_user=_make_user(),
+                _rl=None,
             )
 
             ctx = render_mock.call_args[0][2]
@@ -235,6 +238,7 @@ class TestFetchTleEpochMode:
                 satno=39034,
                 mode="epoch",
                 current_user=_make_user(),
+                _rl=None,
             )
 
             call_args = mock_client.get.call_args
@@ -273,6 +277,7 @@ class TestFetchTleEpochMode:
                 satno=39034,
                 mode="epoch",
                 current_user=_make_user(),
+                _rl=None,
             )
 
             ctx = render_mock.call_args[0][2]
@@ -308,6 +313,7 @@ class TestFetchTleEpochMode:
                 satno=39034,
                 mode="epoch",
                 current_user=_make_user(),
+                _rl=None,
             )
 
             ctx = render_mock.call_args[0][2]
@@ -341,6 +347,7 @@ class TestFetchTleEpochMode:
                 satno=39034,
                 mode="epoch",
                 current_user=_make_user(),
+                _rl=None,
             )
 
             ctx = render_mock.call_args[0][2]
@@ -518,7 +525,7 @@ class TestARecordWithoutElementLinesIsAnError:
             mock_client.get = AsyncMock(return_value=mock_resp)
             mock_client_cls.return_value = mock_client
             from spectre.web.routes.udl import fetch_tle
-            await fetch_tle(request=_make_request(), satno=39034, mode="latest", current_user=_make_user())
+            await fetch_tle(request=_make_request(), satno=39034, mode="latest", current_user=_make_user(), _rl=None)
             return render_mock.call_args[0][2]
 
     @pytest.mark.asyncio

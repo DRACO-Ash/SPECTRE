@@ -126,11 +126,16 @@ SPECTRE.action('aiLoadEngine', function (el) {
 
 /* ── Intercept result: copy the summary ── */
 SPECTRE.action('copyClip', function (btn) {
-  navigator.clipboard.writeText(btn.dataset.clip).then(function () {
-    var orig = btn.textContent;
-    btn.textContent = '\u2713 Copied';
+  var orig = btn.textContent;
+  function flash(label) {
+    btn.textContent = label;
     setTimeout(function () { btn.textContent = orig; }, 1600);
-  });
+  }
+  /* A refused clipboard (no permission, insecure context) says so on the button rather than failing silently. */
+  navigator.clipboard.writeText(btn.dataset.clip).then(
+    function () { flash('\u2713 Copied'); },
+    function () { flash('\u2717 Copy failed'); }
+  );
 });
 
 /* ── Orbital events: an event's epoch becomes the manoeuvre start ── */
@@ -163,12 +168,6 @@ function geometryCharts(panel) {
       y: { title: { display: true, text: ylabel, color: TICK, font: { size: 11 } },
            grid: { color: GRID }, ticks: { color: TICK, font: { size: 10 } } },
     };
-  }
-
-  function _pointStyle(label, color, radius) {
-    return { label: label, data: [{x: _cwd.target.vbar, y: _cwd.target.rbar}],
-             type: 'scatter', pointRadius: radius, pointBackgroundColor: color,
-             pointBorderColor: color, showLine: false };
   }
 
   /* ── Build datasets for V-bar / R-bar (plan view) ── */

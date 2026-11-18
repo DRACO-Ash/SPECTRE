@@ -34,13 +34,13 @@ Pure functions over plain data. No I/O, no framework.
 
 from __future__ import annotations
 
-import dataclasses
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum, StrEnum
 from typing import NamedTuple
 
+from spectre.astro.copies import replaced
 from spectre.domain.normality import Normality
 
 __all__ = [
@@ -271,7 +271,7 @@ def custody_over_horizon(
     custody cannot judge whether a burn is normal, so it is degraded, not held, until held custody would be lost.
     """
     h = horizon.hours
-    if not h > 0.0:
+    if math.isnan(h) or h <= 0.0:  # NaN has no length either
         raise ValueError(f"a horizon has a length; got {h!r} h")
     if status.state is Custody.LOST or elset_hours is None or limit_hours is None or elset_hours > limit_hours:
         return CustodyOverHorizon(status.state, 0.0, h, LossCause.ALREADY_LOST, _ALREADY_LOST.format(h=h))
@@ -285,7 +285,7 @@ def custody_over_horizon(
         sentence = _DEGRADED_FIRST.format(span=span_text(degraded_h)) + over.sentence
     else:
         sentence = over.sentence
-    return dataclasses.replace(over, sentence=sentence, degraded_hours=degraded_h)
+    return replaced(over, sentence=sentence, degraded_hours=degraded_h)
 
 
 def _carried(

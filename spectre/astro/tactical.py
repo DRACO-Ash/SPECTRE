@@ -1474,7 +1474,6 @@ def assess_intercept_intent(
     relative_range_km: float,
     range_rate_km_s: float,
     is_coplanar: bool,
-    mu: float = MU_EARTH,
 ) -> IntentAssessment:
     """Assess whether an adversary satellite is attempting an intercept.
 
@@ -1492,7 +1491,6 @@ def assess_intercept_intent(
         relative_range_km: Current range between objects (km).
         range_rate_km_s: Rate of range change (km/s, negative = closing).
         is_coplanar: Whether objects share approximately the same orbital plane.
-        mu: Gravitational parameter.
     """
     score, geo_evidence = _geometry_indicators(relative_range_km, range_rate_km_s)
     orbit_weights, orbit_evidence = _orbit_matching_indicators(
@@ -1743,6 +1741,9 @@ def relative_motion_stability(
         dx0, dy0, dz0: Initial relative position (km) — radial, along-track, cross-track.
         dvx0, dvy0, dvz0: Initial relative velocity (km/s).
         mu: Gravitational parameter.
+
+    The dy0 parameter is not read: an along-track offset moves where the relative orbit is centred, not its size,
+    drift or boundedness, which are all this assesses. It is taken so the state is passed whole.
     """
     n = math.sqrt(mu / r_ref**3)
 

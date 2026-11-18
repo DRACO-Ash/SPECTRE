@@ -273,7 +273,8 @@ class TestTheStoredDocument:
         assert text.isascii()
 
     def test_the_same_inputs_store_the_same_text(self) -> None:
-        assert store_inputs(_result(_entered())) == store_inputs(_result(_entered()))
+        first, second = store_inputs(_result(_entered())), store_inputs(_result(_entered()))
+        assert first == second
 
     def test_it_names_its_schema_version_rule_remainder_scores_and_code_version(self) -> None:
         result = _result(_lookup(), SelectorStrategy.MINIMIN)

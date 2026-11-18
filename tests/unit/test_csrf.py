@@ -21,7 +21,8 @@ class TestTokenBinding:
     def test_a_token_is_stable_within_one_session(self) -> None:
         """Same session, same token: the page and its HTMX calls must agree."""
         session = "session-cookie-value"
-        assert make_csrf_token(session) == make_csrf_token(session)
+        first, second = make_csrf_token(session), make_csrf_token(session)
+        assert first == second
 
     def test_a_token_does_not_verify_against_another_session(self) -> None:
         """This is the whole point of the control: tokens are session-bound."""

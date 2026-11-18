@@ -745,7 +745,7 @@ def _award(
                 actions.append("challenge_passed_first_try")
     earned = 0
     for action in actions:
-        pa = award_points(action, axis)
+        pa = award_points(action)
         earned += pa.total_points
         for name, delta in pa.axis_deltas.items():
             axis[name] = axis.get(name, 0.0) + delta

@@ -56,8 +56,10 @@
       <button type="button" class="tree-zoom" data-zoom="reset" aria-controls="decision-tree-diagram" hidden>Reset zoom</button>
     </div>
     <div class="tree-diagram-frame" style="overflow:auto; max-height:70vh; max-width:100%; border:1px solid var(--border); border-radius:4px">
+      {# The svg's own role, a graphics document, holds the toggle buttons and takes its name from the caption;
+         role="group" added nothing a native element would not, and Sonar S6819 refuses it. #}
       <svg id="decision-tree-diagram" xmlns="http://www.w3.org/2000/svg" width="{{ "%g" | format(d.width) }}" height="{{ "%g" | format(d.height) }}" viewBox="0 0 {{ "%g" | format(d.width) }} {{ "%g" | format(d.height) }}"
-           role="group" aria-labelledby="decision-tree-diagram-caption" data-width="{{ d.width }}" data-height="{{ d.height }}" data-margin="{{ d.margin }}" data-box-w="{{ d.box_w }}" data-box-h="{{ d.box_h }}" data-col-pitch="{{ d.col_pitch }}" data-row-pitch="{{ d.row_pitch }}" data-scale="1"
+           aria-labelledby="decision-tree-diagram-caption" data-width="{{ d.width }}" data-height="{{ d.height }}" data-margin="{{ d.margin }}" data-box-w="{{ d.box_w }}" data-box-h="{{ d.box_h }}" data-col-pitch="{{ d.col_pitch }}" data-row-pitch="{{ d.row_pitch }}" data-scale="1"
            font-family="monospace" font-size="10" style="display:block">
         {% for box in d.boxes %}{% if box.edge %}
         <path class="tree-dedge" data-child="{{ box.key }}" d="{{ box.edge }}" fill="none" style="stroke:var(--text-dim); stroke-width:1"/>

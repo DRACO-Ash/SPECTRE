@@ -374,12 +374,12 @@
           <table style="width:100%; font-size:0.63rem; border-collapse:collapse">
             {% for ins in item.intel.method_insights %}
             <tr>
-              <td style="color:var(--text-dim); padding:0.15rem 0">{{ ins.label }}</td>
+              <th scope="row" style="color:var(--text-dim); padding:0.15rem 0; text-align:left; font-weight:400">{{ ins.label }}</th>
               <td style="text-align:right; font-weight:600; color:var(--text-bright); padding:0.15rem 0">{{ ins.value }}</td>
             </tr>
             {% endfor %}
             <tr>
-              <td style="color:var(--text-dim); padding:0.15rem 0">Burns</td>
+              <th scope="row" style="color:var(--text-dim); padding:0.15rem 0; text-align:left; font-weight:400">Burns</th>
               <td style="text-align:right; font-weight:600; color:var(--text-bright); padding:0.15rem 0">{{ item.result.burns | length }}</td>
             </tr>
           </table>

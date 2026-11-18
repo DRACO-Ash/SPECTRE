@@ -52,7 +52,7 @@ import math
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, NamedTuple, cast
 
@@ -61,6 +61,7 @@ from scipy.integrate import solve_ivp
 
 from spectre.astro.closest_approach import MAX_SAMPLES, ClosestApproach, _grid, closest_approach
 from spectre.astro.constants import J2_EARTH, MU_EARTH, R_EARTH, classify_orbit_regime
+from spectre.astro.copies import replaced
 
 logger = logging.getLogger(__name__)
 
@@ -1260,7 +1261,7 @@ def confirmed(first: SeparationSeries, second: SeparationSeries, seed: int) -> S
         mine._replace(stats=mine.stats._replace(converged=mine.stats.converged and theirs.stats.converged))
         for mine, theirs in zip(first.after_burns, second.after_burns, strict=True)
     )
-    return replace(first, converged=first.converged and second.converged, check=check, after_burns=burns)
+    return replaced(first, converged=first.converged and second.converged, check=check, after_burns=burns)
 
 
 @dataclass(frozen=True)
@@ -1852,7 +1853,7 @@ def _later_draws(
     if not later:
         return ()
     timed = [
-        ((h.epoch_utc - window.start_utc).total_seconds(), h.bstar_post, generate_samples(replace(h, n_samples=n)))
+        ((h.epoch_utc - window.start_utc).total_seconds(), h.bstar_post, generate_samples(replaced(h, n_samples=n)))
         for h in later
     ]
     return tuple(
@@ -2145,8 +2146,8 @@ def continue_series(
     _check_span(window)
     started = time.monotonic()
     n, burn = len(red.states), red.burn
-    draws = None if burn is None else generate_samples(replace(burn.hypothesis, n_samples=n))
-    later = [] if burn is None else [generate_samples(replace(h, n_samples=n)) for h, _ in burn.then]
+    draws = None if burn is None else generate_samples(replaced(burn.hypothesis, n_samples=n))
+    later = [] if burn is None else [generate_samples(replaced(h, n_samples=n)) for h, _ in burn.then]
     keeper = _Keeper(keep_at_s, n, len(blues), window) if keep_at_s else None
     outcomes: list[tuple[Sampled | str, ...]] = []
     shifts = np.zeros(n) if red.blue_shift_s is None else np.asarray(red.blue_shift_s, dtype=float)

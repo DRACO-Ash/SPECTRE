@@ -332,20 +332,20 @@ Observability:{{ intel.obs_level }}
     <table style="width:100%; font-size:0.67rem; border-collapse:collapse">
       {% for item in intel.method_insights %}
       <tr>
-        <td style="color:var(--text-dim); padding:0.18rem 0">{{ item.label }}</td>
+        <th scope="row" style="color:var(--text-dim); padding:0.18rem 0; text-align:left; font-weight:400">{{ item.label }}</th>
         <td style="text-align:right; font-weight:600; color:var(--text-bright); padding:0.18rem 0">
           {{ item.value }}
         </td>
       </tr>
       {% endfor %}
       <tr>
-        <td style="color:var(--text-dim); padding:0.18rem 0">Burns</td>
+        <th scope="row" style="color:var(--text-dim); padding:0.18rem 0; text-align:left; font-weight:400">Burns</th>
         <td style="text-align:right; font-weight:600; color:var(--text-bright); padding:0.18rem 0">
           {{ result.burns | length }}
         </td>
       </tr>
       <tr>
-        <td style="color:var(--text-dim); padding:0.18rem 0">Method</td>
+        <th scope="row" style="color:var(--text-dim); padding:0.18rem 0; text-align:left; font-weight:400">Method</th>
         <td style="text-align:right; font-weight:600; color:var(--ops-blue); padding:0.18rem 0">
           {{ result.method.value }}
         </td>

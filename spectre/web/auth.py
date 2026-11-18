@@ -259,8 +259,8 @@ def to_login(request: Request) -> HTTPException:
 
 async def require_login(
     request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
     spectre_session: Annotated[str | None, Cookie(alias=_COOKIE_NAME)] = None,
-    db: AsyncSession = Depends(get_db),
 ) -> User:
     """FastAPI dependency that validates the session cookie.
 
@@ -294,8 +294,8 @@ async def require_login(
     return user
 
 
-async def require_admin(
-    current_user: User = Depends(require_login),
+def require_admin(
+    current_user: Annotated[User, Depends(require_login)],
 ) -> User:
     """FastAPI dependency that requires admin role.
 

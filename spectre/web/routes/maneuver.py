@@ -874,9 +874,9 @@ _INTERCEPT_METHOD_MAP: dict[str, InterceptMethod] = {m.value: m for m in Interce
 @router.get("/orbital-events", response_model=None)
 async def orbital_events(
     request: Request,
+    current_user: Annotated[User, Depends(require_login)],
     red_sat: Annotated[str, Query()] = "",
     blue_sat: Annotated[str, Query()] = "",
-    current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Compute upcoming orbital events for both red and blue satellites.
 
@@ -1046,9 +1046,9 @@ async def apply_intercept(
                 shaping=_shaping_from_form(form.revolutions, form.hops, form.drift_days),
             ),
         )
-    # BLE001: any solver failure is reported to the operator, not raised.
-    except Exception as exc:  # noqa: BLE001
-        logger.error(
+    # Any solver failure is reported to the operator, not raised.
+    except Exception as exc:
+        logger.exception(
             "apply_intercept failed for operator %s: %s",
             log_safe(current_user.username), log_safe(exc),
         )
@@ -1338,9 +1338,10 @@ def _solver_for(method: InterceptMethod, args: _InterceptArgs, budget_m_s: float
     return solve
 
 
-def _measure_for(method: InterceptMethod, args: _InterceptArgs, approach_km: float) -> targeting.Measure:
-    """How *method*'s closest approach is measured: every red approach is flown, the V-bar and H-bar hops too, now
-    that their solvers list every burn of the sequence (V0.40 review); they read their linear model's figure before.
+def _measure_for(args: _InterceptArgs, approach_km: float) -> targeting.Measure:
+    """How a plan's closest approach is measured, the same for every method: every red approach is flown, the V-bar
+    and H-bar hops too, now that their solvers list every burn of the sequence (V0.40 review); they read their linear
+    model's figure before.
 
     A plan that arrives is also measured against the closest the target comes over the same window with no burn, so
     a target already within the radius is not an arrival. Only an arriving plan needs it, so only it pays for the
@@ -1373,7 +1374,7 @@ def _target(method: InterceptMethod, args: _InterceptArgs, plan: _Plan) -> targe
     fastest = method is InterceptMethod.MIN_TIME and args.shaping.search
     budget_m_s = plan.fastest_budget_m_s if fastest else args.max_dv_m_s
     found = targeting.search(
-        _solver_for(method, args, budget_m_s), _measure_for(method, args, plan.approach_km),
+        _solver_for(method, args, budget_m_s), _measure_for(args, plan.approach_km),
         _candidates_for(method, args, plan), plan.approach_km,
     )
     measured = dataclasses.replace(found.solution, miss_distance_km=found.closest_km)
@@ -1603,6 +1604,7 @@ async def apply_all_intercepts(
     red_sat: Annotated[str, Form()],
     blue_sat: Annotated[str, Form()],
     shaping: Annotated[_Shaping, Depends(_shaping_form)],
+    current_user: Annotated[User, Depends(require_login)],
     manoeuvre_start: Annotated[str, Form()] = "",
     coast_hours: Annotated[float, Form(ge=0.0, le=_MAX_HOURS, allow_inf_nan=False)] = 1.0,
     intercept_hours: Annotated[float, Form(gt=0.0, le=_MAX_HOURS, allow_inf_nan=False)] = 6.0,
@@ -1610,7 +1612,6 @@ async def apply_all_intercepts(
     max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0, allow_inf_nan=False)] = ENGINE_DEFAULT_BUDGET_M_S,
     intercept_data_mode: Annotated[str, Form()] = "",
     manoeuvring: Annotated[Literal["red", "blue"], Form()] = RED,
-    current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Run all intercept methods and return a ranked comparison table.
 
@@ -1761,7 +1762,7 @@ def _sides(manoeuvring: str, red: _Side, blue: _Side) -> _Sides:
 
 @router.get("/trade-space-data", response_model=None)
 async def trade_space_data(
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> JSONResponse:
     """Return JSON array of trade-space points from intercept history."""
     state = get_session_state(current_user)
@@ -1793,7 +1794,7 @@ async def trade_space_data(
 @router.post("/clear-history", response_model=None)
 async def clear_history(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Clear intercept history and last result."""
     state = get_session_state(current_user)

@@ -57,11 +57,12 @@ from __future__ import annotations
 import math
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import KW_ONLY, dataclass, replace
+from dataclasses import KW_ONLY, dataclass
 from datetime import UTC, datetime, timedelta
 from enum import Enum, IntEnum
 from typing import Any
 
+from spectre.astro.copies import replaced
 from spectre.domain.custody import Custody, age_text
 from spectre.domain.interaction_graph import MAX_HOPS, Edge, MissEdge, MissSource, SeedPath
 from spectre.domain.manoeuvre_calibration import Posture
@@ -1306,18 +1307,18 @@ def _identity_note(dated: datetime | None, source: str, single: bool, level: str
     return "; ".join(part for part in (record, unread) if part)
 
 
-def _declared_status(record: Mapping[str, Any], satno: str, dated: datetime | None) -> tuple[EvidenceItem, ...]:
-    """The recorded status: the operator's own declaration, an impaired status the model can void."""
+def _declared_status(record: Mapping[str, Any], satno: str, dated: datetime | None) -> EvidenceItem | None:
+    """The recorded status: the operator's own declaration, an impaired status the model can void; None with none."""
     status = str(record.get("status") or "").strip()
     if not status:
-        return ()
+        return None
     impaired = CapabilityEvidence(operational_status=status).is_impaired()
-    return (EvidenceItem(
+    return EvidenceItem(
         dimension=Dimension.CAPABILITY, label=f"recorded status {status}", derived_from=f"status:{satno}",
         source_grade=_STATUS_GRADE, credibility=_STATUS_CREDIBILITY, extraction=ASSESSED_LABEL_EXTRACTION,
         basis=Basis.LOOKUP, observed_at=dated, manufacturable=True, impaired_status=impaired,
         ceiling_to=_IMPAIRED_CEILING_FLOOR if impaired else None, note="declared, not observed",
-    ),)
+    )
 
 
 def intel_items(record: Mapping[str, Any] | None, satno: str) -> tuple[EvidenceItem, ...]:
@@ -1345,21 +1346,24 @@ def intel_items(record: Mapping[str, Any] | None, satno: str) -> tuple[EvidenceI
         extraction=ASSESSED_LABEL_EXTRACTION, basis=Basis.LOOKUP, observed_at=dated,
         floor_to=_PRIOR_FLOOR_CAP if prior else None, note=_identity_note(dated, source, single, level, band),
     )
-    return (identity, *_declared_status(record, satno, dated))
+    status = _declared_status(record, satno, dated)
+    return (identity,) if status is None else (identity, status)
 
 
 def gcat_items(fields: Mapping[str, str] | None, fetched_at: datetime | None, satno: str) -> tuple[EvidenceItem, ...]:
-    """The GCAT catalogue entry: Identity coverage only, dated from the cache's refresh."""
-    if fields is None:
-        return ()
+    """The GCAT catalogue entry: Identity coverage only, dated from the cache's refresh; none without an entry."""
+    return () if fields is None else (_gcat_item(fields, fetched_at, satno),)
+
+
+def _gcat_item(fields: Mapping[str, str], fetched_at: datetime | None, satno: str) -> EvidenceItem:
     named = [f"{word} {value}" for key, word in _GCAT_FIELDS
              if (value := str(fields.get(key) or "").strip()) not in _GCAT_EMPTY]
-    return (EvidenceItem(
+    return EvidenceItem(
         dimension=Dimension.IDENTITY, label="GCAT entry: " + ", ".join(named) if named else "GCAT entry",
         derived_from=f"gcat:{satno}", source_grade=_GCAT_GRADE, credibility=_GCAT_CREDIBILITY,
         extraction=CATALOGUE_FIELD_EXTRACTION, basis=Basis.LOOKUP, observed_at=fetched_at,
         note="declared fields: recorded, never move a band",
-    ),)
+    )
 
 
 def _history_item(signals: HistorySignals, grades: Mapping[str, str], **kw: Any) -> EvidenceItem:
@@ -1374,11 +1378,11 @@ def _history_item(signals: HistorySignals, grades: Mapping[str, str], **kw: Any)
     return EvidenceItem(**args)
 
 
-def _reserve_item(signals: HistorySignals, grades: Mapping[str, str]) -> tuple[EvidenceItem, ...]:
-    """Section 5.2: the discretionary reserve. Ceiling MINIMAL when spent with no later burn."""
+def _reserve_item(signals: HistorySignals, grades: Mapping[str, str]) -> EvidenceItem | None:
+    """Section 5.2: the discretionary reserve. Ceiling MINIMAL when spent with no later burn. None without one."""
     remaining, maximum = signals.reserve_remaining_m_s, signals.reserve_max_m_s
     if remaining is None or maximum is None:
-        return ()
+        return None
     figure = f"reserve {remaining:.0f} of {maximum:.0f} m/s"
     ceiling: Band | None = None
     note = "on the regime's assumed specific impulse and propellant fraction"
@@ -1388,8 +1392,8 @@ def _reserve_item(signals: HistorySignals, grades: Mapping[str, str]) -> tuple[E
         ceiling, figure = Band.MINIMAL, f"tank spent: {figure}"
     elif maximum > 0.0 and remaining / maximum < _RESERVE_SHARE_FOR_MEDIUM:
         ceiling = Band.MEDIUM
-    return (_history_item(signals, grades, dimension=Dimension.CAPABILITY, label=figure,
-                          extraction=ASSUMED_FIGURE_EXTRACTION, ceiling_to=ceiling, note=note),)
+    return _history_item(signals, grades, dimension=Dimension.CAPABILITY, label=figure,
+                         extraction=ASSUMED_FIGURE_EXTRACTION, ceiling_to=ceiling, note=note)
 
 
 def _grade_of(detection: str) -> str:
@@ -1440,15 +1444,15 @@ def _burn_items(burn: BurnSignal, grades: Mapping[str, str]) -> tuple[EvidenceIt
     return tuple(items)
 
 
-def _anomaly_item(signals: HistorySignals, grades: Mapping[str, str]) -> tuple[EvidenceItem, ...]:
-    """The anomaly index: a lookup, its rung a floor capped at MEDIUM because it is uncalibrated."""
+def _anomaly_item(signals: HistorySignals, grades: Mapping[str, str]) -> EvidenceItem | None:
+    """The anomaly index: a lookup, its rung a floor capped at MEDIUM because it is uncalibrated. None without one."""
     if signals.anomaly_score is None:
-        return ()
+        return None
     rung = min(Band[anomaly_risk_level(signals.anomaly_score)], _PRIOR_FLOOR_CAP)
-    return (_history_item(signals, grades, dimension=Dimension.BEHAVIOUR,
-                          label=f"anomaly index {signals.anomaly_score:.0f}", extraction=_ANOMALY_EXTRACTION,
-                          basis=Basis.LOOKUP, floor_to=rung if rung > Band.MINIMAL else None,
-                          note="an uncalibrated heuristic index"),)
+    return _history_item(signals, grades, dimension=Dimension.BEHAVIOUR,
+                         label=f"anomaly index {signals.anomaly_score:.0f}", extraction=_ANOMALY_EXTRACTION,
+                         basis=Basis.LOOKUP, floor_to=rung if rung > Band.MINIMAL else None,
+                         note="an uncalibrated heuristic index")
 
 
 def _absence_holds(signals: HistorySignals, access_delta_v_m_s: float, custody: Custody) -> bool:
@@ -1465,7 +1469,7 @@ def history_items(signals: HistorySignals, *, access_delta_v_m_s: float, custody
     *access_delta_v_m_s* is what the intercept costs: "no burns" counts only
     when the detection floor could have seen a burn that size.
     """
-    items = [*_reserve_item(signals, grades), *_anomaly_item(signals, grades)]
+    items = [item for item in (_reserve_item(signals, grades), _anomaly_item(signals, grades)) if item is not None]
     if signals.burns:
         items.extend(_burn_items(max(signals.burns, key=lambda b: b.epoch), grades))
     elif _absence_holds(signals, access_delta_v_m_s, custody):
@@ -1610,7 +1614,7 @@ def _propagation_item(path: SeedPath, at: datetime, grades: Mapping[str, str],
     items = [_edge_item(edge, grades, judged, hours) for edge in path.edges]
     weakest = min(items, key=lambda item: reliability(item, at))
     routine = items[0].routine
-    return replace(
+    return replaced(
         weakest,
         label=_seed_path_label(path),
         derived_from=f"{_SEED_ROOT}{path.edges[0].actor}", counts_with=items[0].derived_from,
@@ -1663,14 +1667,14 @@ def with_record(situation: Situation, record: Mapping[str, Any] | None) -> Situa
     """*situation* with the floor its intel record would set once dated and sourced, for the record's cue."""
     level = str((record or {}).get("threat_level") or "").strip()
     band = CapabilityEvidence(intel_threat_level=level).recognised_threat_level()
-    return replace(situation, record_prior=_PRIOR_FLOOR_CAP if band is not None and band >= Band.HIGH else None)
+    return replaced(situation, record_prior=_PRIOR_FLOOR_CAP if band is not None and band >= Band.HIGH else None)
 
 
 def with_history(situation: Situation, signals: HistorySignals | None) -> Situation:
     """*situation* with what the history says: its burns, newest set, detection floor and truncation."""
     if signals is None:
         return situation
-    return replace(
+    return replaced(
         situation,
         burns=tuple(HeldBurn(b.epoch, b.normality) for b in signals.burns),
         newest_elset_at=signals.newest_at,

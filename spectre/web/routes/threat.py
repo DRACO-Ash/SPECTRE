@@ -29,6 +29,7 @@ from spectre.astro.along_track import (
     shift_along_track,
 )
 from spectre.astro.constants import normalise_regime, regimes_compatible
+from spectre.astro.copies import replaced
 from spectre.astro.elset_check import HELD_KEPT
 from spectre.astro.events import EventType, find_orbital_events
 from spectre.astro.maneuvers import (
@@ -134,6 +135,8 @@ router = APIRouter(prefix="/plan/threat")
 
 _THREAT_SWEEP_TEMPLATE = "partials/threat_sweep.html"
 _BURN_WATCH_TEMPLATE = "partials/burn_watch_note.html"
+_MANUAL_TLES_TEMPLATE = "partials/sweep_manual_tles.html"
+_FETCH_STATUS_TEMPLATE = "partials/sweep_fetch_status.html"
 
 _RED_COUNTRIES = {"CHN", "RUS", "IRN", "PRK"}
 
@@ -146,8 +149,8 @@ _SWEEP_SLOTS = asyncio.Semaphore(2)
 @router.get("/red-orbit-info", response_model=None)
 async def red_orbit_info(
     request: Request,
-    red_sat: str = Query("", description="Red satellite name"),
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
+    red_sat: Annotated[str, Query(description="Red satellite name")] = "",
 ) -> HTMLResponse:
     """Compute orbital parameters for a red satellite and return a compact info card."""
     state = get_session_state(current_user)
@@ -336,7 +339,7 @@ def _manual_target_error(existing: list[dict[str, str]], name: str, tle: str, co
 @router.post("/add-manual-tle", response_model=None)
 async def add_manual_tle(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Add a manually provided TLE to the session's manual sweep target list."""
     state = get_session_state(current_user)
@@ -347,7 +350,7 @@ async def add_manual_tle(
 
     error = _manual_target_error(state.manual_sweep_tles, name, tle, confidence)
     if error:
-        return render(request, "partials/sweep_manual_tles.html", {
+        return render(request, _MANUAL_TLES_TEMPLATE, {
             "manual_tles": state.manual_sweep_tles,
             "error": error,
         })
@@ -357,7 +360,7 @@ async def add_manual_tle(
     state.manual_sweep_tles.append({"name": name, "tle": tle, "confidence": confidence})
     state.append_log(f"[THREAT] Manual TLE added: {name} ({confidence})")
 
-    return render(request, "partials/sweep_manual_tles.html", {
+    return render(request, _MANUAL_TLES_TEMPLATE, {
         "manual_tles": state.manual_sweep_tles,
         "error": None,
     })
@@ -366,14 +369,14 @@ async def add_manual_tle(
 @router.post("/remove-manual-tle", response_model=None)
 async def remove_manual_tle(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Remove a manual TLE entry from the session."""
     state = get_session_state(current_user)
     form = await request.form()
     name = str(form.get("manual_name") or "").strip()
     state.manual_sweep_tles = [e for e in state.manual_sweep_tles if e["name"] != name]
-    return render(request, "partials/sweep_manual_tles.html", {
+    return render(request, _MANUAL_TLES_TEMPLATE, {
         "manual_tles": state.manual_sweep_tles,
         "error": None,
     })
@@ -383,7 +386,7 @@ async def remove_manual_tle(
 async def target_config(
     request: Request,
     current_user: Annotated[User, Depends(require_login)],
-    red_sat: str = Query("", description="Selected interceptor stk_name — used to filter by regime"),
+    red_sat: Annotated[str, Query(description="Selected interceptor stk_name — used to filter by regime")] = "",
 ) -> HTMLResponse:
     """Return the sweep target dropdown filtered to the interceptor's orbital regime."""
     state = get_session_state(current_user)
@@ -462,7 +465,7 @@ async def _prefetch_group_tle(
 @router.post("/fetch-targets", response_model=None)
 async def fetch_targets(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Pre-fetch TLEs for a selected HRR target group (side:rank)."""
     state = get_session_state(current_user)
@@ -487,19 +490,19 @@ async def fetch_targets(
         try:
             rank = int(rank_str)
         except ValueError:
-            return render(request, "partials/sweep_fetch_status.html", {
+            return render(request, _FETCH_STATUS_TEMPLATE, {
                 "error": f"Invalid rank: {rank_str}", "fetched": None, "total": 0, "failed": 0,
             })
         objects = _objects_for_group(state, side, rank)
 
     if not objects:
-        return render(request, "partials/sweep_fetch_status.html", {
+        return render(request, _FETCH_STATUS_TEMPLATE, {
             "error": "No HRR objects found for selected group.",
             "fetched": None, "total": 0, "failed": 0,
         })
 
     if not state.udl_username or not state.udl_password:
-        return render(request, "partials/sweep_fetch_status.html", {
+        return render(request, _FETCH_STATUS_TEMPLATE, {
             "error": "Not connected to UDL — cannot fetch TLEs.",
             "fetched": None, "total": 0, "failed": 0,
         })
@@ -531,7 +534,7 @@ async def fetch_targets(
         f"{fetched}/{total} TLEs ({failed} failed)"
     )
 
-    return render(request, "partials/sweep_fetch_status.html", {
+    return render(request, _FETCH_STATUS_TEMPLATE, {
         "error": None, "fetched": fetched, "total": total, "failed": failed, "refused": refusals,
     })
 
@@ -906,7 +909,7 @@ def _red_capability(
     if history is None:
         return base
     propellant = history.propellant
-    return replace(
+    return replaced(
         base,
         propellant_used_pct=propellant.propellant_used_pct,
         discretionary_remaining_m_s=propellant.discretionary_remaining_m_s,
@@ -2037,7 +2040,7 @@ def _switched_actor(verdict: ActorVerdict, *, switch_on: bool) -> ActorVerdict:
         return verdict
     reading = read_verdict(verdict.assessment.verdict, verdict.assessment.access, (span.floor, span.ceiling),
                            span.understanding)
-    return replace(verdict, switched=reading)
+    return replaced(verdict, switched=reading)
 
 
 def _worst_coa_in_context(
@@ -2841,7 +2844,7 @@ def _sweep_decide_by(
     result = decide_by(entries, times, basis.now, basis.max_dv_m_s)
     # With no response time set there is no decide-by to stand, so the note that it stands is not added (SPC-211).
     if result.due is not Due.NEEDS_TIME and worst_coa is not None and worst_coa.get("capability_level") == "MINIMAL":
-        return replace(result, sentence=f"{result.sentence} {_not_silenced(worst_coa, understanding)}")
+        return replaced(result, sentence=f"{result.sentence} {_not_silenced(worst_coa, understanding)}")
     return result
 
 
@@ -2893,8 +2896,8 @@ def _unmatched_response_target(name: str, targets: list[ThreatTarget], errors: l
 async def threat_sweep(
     request: Request,
     red_sat: Annotated[str, Form()],
+    current_user: Annotated[User, Depends(require_login)],
     max_dv_m_s: Annotated[float, Form(ge=0.0, le=100000.0)] = DEFAULT_SWEEP_BUDGET_M_S,
-    current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Run a threat sweep for a red satellite against the selected target group."""
     t0 = time.monotonic()
@@ -3212,7 +3215,7 @@ def _screen_all_actors(  # noqa: PLR0913, PLR0917
             )
             continue
         regime = actor.regime or _regime_of_tle(actor_tle)
-        spanned = replace(verdict, understanding=_actor_range(state, verdict, regime, actor_tle, now))
+        spanned = replaced(verdict, understanding=_actor_range(state, verdict, regime, actor_tle, now))
         verdicts.append(_switched_actor(spanned, switch_on=switch_on))
 
     return _ScreenRun(verdicts=verdicts, entries=entries, refusals=refusals, notes=notes)
@@ -3661,8 +3664,8 @@ def _target_tle(state: object, target: ThreatTarget) -> str | None:
 async def refine_entry(
     request: Request,
     entry_index: Annotated[int, Form(ge=0)],
+    current_user: Annotated[User, Depends(require_login)],
     group_idx: Annotated[int, Form(ge=0)] = 0,
-    current_user: User = Depends(require_login),
 ) -> HTMLResponse:
     """Refine a single threat sweep entry with Lambert solver.
 

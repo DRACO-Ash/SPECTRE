@@ -20,6 +20,7 @@ import asyncio
 import logging
 import time
 from collections import defaultdict, deque
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 
@@ -162,21 +163,21 @@ async def _guard(limiter: SlidingWindowLimiter, user: User, label: str) -> None:
         )
 
 
-async def udl_auth_rate_limit(current_user: User = Depends(require_login)) -> None:
+async def udl_auth_rate_limit(current_user: Annotated[User, Depends(require_login)]) -> None:
     """5 UDL credential probes per 60 s per operator."""
     await _guard(_udl_auth_limiter, current_user, "UDL authentication")
 
 
-async def udl_data_rate_limit(current_user: User = Depends(require_login)) -> None:
+async def udl_data_rate_limit(current_user: Annotated[User, Depends(require_login)]) -> None:
     """60 UDL data requests per 60 s per operator."""
     await _guard(_udl_data_limiter, current_user, "UDL data")
 
 
-async def udl_sync_rate_limit(current_user: User = Depends(require_login)) -> None:
+async def udl_sync_rate_limit(current_user: Annotated[User, Depends(require_login)]) -> None:
     """3 NOTSO bulk-sync operations per 600 s per operator."""
     await _guard(_udl_sync_limiter, current_user, "UDL sync")
 
 
-async def pol_compute_rate_limit(current_user: User = Depends(require_login)) -> None:
+async def pol_compute_rate_limit(current_user: Annotated[User, Depends(require_login)]) -> None:
     """10 Monte Carlo or photometry runs per 60 s per operator (audit F-145)."""
     await _guard(_pol_compute_limiter, current_user, "PoL computation")

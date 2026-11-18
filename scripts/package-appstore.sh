@@ -19,6 +19,16 @@
 # Usage:
 #   scripts/package-appstore.sh [output-dir]                  python template
 #   scripts/package-appstore.sh [--docker-only] [output-dir]   flag order is free
+#   scripts/package-appstore.sh [--docker-only] --stage-only <dir>
+#       stage the package tree into <dir> and stop: no checks, no zip. This is
+#       how scripts/sonar-gate.sh analyses exactly what would ship.
+#
+# Before the zip is written, scripts/sonar-gate.sh runs SonarQube on the staged
+# tree and any open issue or unreviewed hotspot stops the build (owner's
+# instruction, 18 November 2026: zero issues, whole codebase). It needs docker.
+# SKIP_SONAR_GATE=1 is the only override: it prints a warning and writes
+# "SONAR GATE SKIPPED" into the .sha256 record, so the package is visibly
+# unverified and must not be submitted.
 #
 # TEMPLATE SELECTION IS DECIDED BY WHAT IS IN THE PACKAGE, NOT BY A SETTING.
 # The platform detects Python from a recognised manifest at the package root.
@@ -35,9 +45,15 @@ set -eu
 # so a bare `--docker-only` is not mistaken for a directory name.
 OUT_DIR=""
 MODE="python"
+STAGE_ONLY=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --docker-only) MODE="docker-only" ;;
+        --stage-only)
+            [ "$#" -ge 2 ] || { echo "FAIL: --stage-only needs a directory"; exit 1; }
+            STAGE_ONLY="$2"
+            shift
+            ;;
         -*) echo "FAIL: unknown option $1"; exit 1 ;;
         *)
             [ -z "$OUT_DIR" ] || { echo "FAIL: output dir given twice ($OUT_DIR, $1)"; exit 1; }
@@ -185,6 +201,14 @@ if [ -f "$STAGE/sonar-project.properties" ]; then
         "$STAGE/sonar-project.properties"
 fi
 
+# --stage-only: hand over the tree exactly as it would be zipped, and stop.
+if [ -n "$STAGE_ONLY" ]; then
+    mkdir -p "$STAGE_ONLY"
+    cp -R "$STAGE/." "$STAGE_ONLY/"
+    echo "Staged the ${MODE} package tree in $STAGE_ONLY"
+    exit 0
+fi
+
 # ── Fail-closed checks on the staged tree ─────────────────────────────────────
 [ -f "$STAGE/Dockerfile" ] || { echo "FAIL: Dockerfile must be at the package root"; exit 1; }
 
@@ -277,12 +301,14 @@ if [ -f "$LEDGER" ]; then
     fi
 fi
 
-# ── Code Quality rules the gate has raised before ─────────────────────────────
+# ── Code Quality rules the gate has raised before (fast pre-check) ───────────
 # Submissions failed Code Quality on rules a script can see: 0.6.0 (36), 0.6.1
 # (2), 0.6.3 (10). scripts/sonar_rules.py reproduces each of those verdicts at
 # the gate's own lines (docs/SONAR-RULES.md), so a package is not built while
 # one of them lands on changed code. SONAR_BASE names where the platform's
 # new-code window starts, master by default.
+# It is the fast pre-check, seconds rather than minutes. It is NOT the gate:
+# the SonarQube step below is, and it decides on the whole package.
 # A missing checker stops the build rather than skipping the check.
 echo
 echo "  checking changed code against the rules the gate has raised before..."
@@ -293,8 +319,44 @@ if ! python3 scripts/sonar_rules.py "${SONAR_BASE:-master}"; then
     exit 1
 fi
 
-# ── Build ─────────────────────────────────────────────────────────────────────
+# ── SonarQube gate: zero issues across the whole package ─────────────────────
+# Owner's instruction, 18 November 2026: zero open issues and zero unreviewed
+# security hotspots, whole codebase, measured by SonarQube itself at check
+# time. 0.48.5 shipped with 174 platform findings that a rule replica on
+# changed lines could not see, so the real analyser runs on the staged tree,
+# which is exactly what the zip will hold. No docker is a failure, not a pass.
 mkdir -p "$OUT_DIR"
+SONAR_GATE="PASSED"
+if [ "${SKIP_SONAR_GATE:-0}" = "1" ]; then
+    SONAR_GATE="SKIPPED"
+    echo
+    echo "  ####################################################################"
+    echo "  ##  WARNING: SONAR GATE SKIPPED (SKIP_SONAR_GATE=1)               ##"
+    echo "  ##  This package was NOT checked by SonarQube. It may carry issues ##"
+    echo "  ##  the App Store gate will fail. The .sha256 record says so.     ##"
+    echo "  ##  Do not submit it.                                             ##"
+    echo "  ####################################################################"
+    echo
+else
+    echo
+    echo "  running the SonarQube gate on the staged package (scripts/sonar-gate.sh)..."
+    ABS_OUT=$(cd "$OUT_DIR" && pwd)
+    if SONAR_REPORT="$ABS_OUT/${PKG_NAME}.sonar-gate.json" sh scripts/sonar-gate.sh "$STAGE"; then
+        echo "  SonarQube gate passed: zero issues, zero hotspots to review"
+    else
+        GATE_STATUS=$?
+        case "$GATE_STATUS" in
+            1) echo "FAIL: SonarQube reports the issues above. The gate is zero issues, whole codebase." ;;
+            3) echo "FAIL: docker is not available, so the SonarQube gate cannot run and no package is built."
+               echo "      Start docker and run again. SKIP_SONAR_GATE=1 builds an UNVERIFIED package,"
+               echo "      marked as such in its .sha256 record, which must not be submitted." ;;
+            *) echo "FAIL: the SonarQube gate could not reach a verdict (exit $GATE_STATUS); see above." ;;
+        esac
+        exit 1
+    fi
+fi
+
+# ── Build ─────────────────────────────────────────────────────────────────────
 rm -f "$ZIP_PATH"
 # -X drops extra file attributes so the archive is reproducible across machines.
 # Resolve to an absolute path before the subshell changes directory, so an
@@ -310,6 +372,12 @@ COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 cat > "${OUT_DIR}/${PKG_NAME}.sha256" <<EOF
 $SHA  ${PKG_NAME}.zip
 EOF
+# A skipped gate travels with the package. sha256sum -c still verifies the zip
+# and warns about this line, which is the point: the record is not clean.
+if [ "$SONAR_GATE" = "SKIPPED" ]; then
+    echo "SONAR GATE SKIPPED: built with SKIP_SONAR_GATE=1, not verified by SonarQube, do not submit" \
+        >> "${OUT_DIR}/${PKG_NAME}.sha256"
+fi
 
 echo
 echo "  package   $ZIP_PATH"

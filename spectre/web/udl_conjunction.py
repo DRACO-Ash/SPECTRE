@@ -252,10 +252,14 @@ def _row(rec: dict[str, Any], tca: datetime, other: int, fallback_mode: str) -> 
     )
 
 
-def _identity(rec: dict[str, Any], row: ConjunctionRow) -> tuple[str, ...]:
-    """What makes two entries the same record, so one found by both queries lists once."""
+def _identity(rec: dict[str, Any], row: ConjunctionRow) -> tuple[str, str, str]:
+    """What makes two entries the same record, so one found by both queries lists once.
+
+    A record's own id decides when it has one. The "id" marker can never equal
+    a time in ISO form, so an id key never matches a key built from the row.
+    """
     if rec.get("id"):
-        return ("id", str(rec["id"]))
+        return ("id", str(rec["id"]), "")
     return (row.tca.isoformat(), row.other_satno, row.miss_distance)
 
 

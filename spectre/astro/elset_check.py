@@ -70,8 +70,9 @@ _FIRST_YEAR_OF_THE_1900S = 57
 
 #: A decimal number as the format writes one: a sign, digits and at most one decimal point, padded with spaces, as
 #: in " 97.4000" or "-.00002182". No exponent, underscore or word, each of which float() reads. re.ASCII keeps \d to
-#: the digits 0 to 9, as float() would also read other scripts' digits.
-_DECIMAL = re.compile(r" *[+-]?\d*\.?\d+ *", re.ASCII)
+#: the digits 0 to 9, as float() would also read other scripts' digits. Digits with an optional fraction, or a bare
+#: fraction: the same numbers as "\d*\.?\d+", with only one way to split the digits, so no backtracking between them.
+_DECIMAL = re.compile(r" *[+-]?(?:\d+(?:\.\d+)?|\.\d+) *", re.ASCII)
 #: A mantissa with an implied decimal point and a one-digit power of 10 (" 10270-3", "-11606-4", " 00000+0").
 _IMPLIED_EXPONENT = re.compile(r" *[+-]?\d{1,5}[+-]\d *", re.ASCII)
 #: The epoch, its padding stripped first: a two-digit year, then the day of the year and its fraction. Stripping

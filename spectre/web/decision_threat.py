@@ -18,10 +18,10 @@ is set. held_picture is the engine's half. Neither fetches anything.
 
 from __future__ import annotations
 
-import dataclasses
 from datetime import datetime
 from typing import Any
 
+from spectre.astro.copies import replaced
 from spectre.domain import threat_understanding as tu
 from spectre.domain.decide_by import DecideBy, Due
 from spectre.domain.decision import ScenarioBinding, ThreatPicture
@@ -70,7 +70,7 @@ def held_picture(state: Any, binding: ScenarioBinding | None, now: datetime) -> 
     blue = None if binding is None else binding.blue
     if picture is None or blue is None or not picture.target or picture.target in (blue.name, blue.stk_name):
         return picture
-    return dataclasses.replace(
+    return replaced(
         picture, decide_at=None, arrival=None,
         decide_by=_OTHER_TARGET.format(target=picture.target, blue=blue.stk_name),
     )

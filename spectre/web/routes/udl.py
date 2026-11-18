@@ -57,6 +57,10 @@ router = APIRouter(prefix="/udl")
 _TLE_FIELDS_TEMPLATE = "partials/tle_fields.html"
 _STATEVECTOR_FIELDS_TEMPLATE = "partials/statevector_fields.html"
 _ELSET_REFRESH_TEMPLATE = "partials/elset_refresh_note.html"
+_UDL_STATUS_TEMPLATE = "partials/udl_status.html"
+_HRR_PANEL_TEMPLATE = "partials/hrr_panel.html"
+_EMPTY_BODY = "(empty)"
+_TIMED_OUT = "UDL request timed out."
 
 
 def _parse_tle_epoch(line1: str) -> datetime | None:
@@ -110,6 +114,15 @@ def _udl_refused(call: str, status: int) -> str:
     else:
         advice = "Check your UDL access and the request, then try again"
     return f"UDL answered the {call} with HTTP {status}. {advice}; {_DETAIL_IN_LOG}"
+
+
+def _as_records(data: Any) -> list[Any]:
+    """A UDL answer as a list of records: a list as it is, one record as a list of one, anything else as none."""
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        return [data]
+    return []
 
 
 async def fetch_tle_history_for_satno(
@@ -168,7 +181,7 @@ async def fetch_tle_history_for_satno(
         logger.warning("fetch_tle_history_for_satno(%s) failed: %s", log_safe(satno), log_safe(exc, limit=500))
         return ElsetHistory()
 
-    records = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
+    records = _as_records(data)
     sets: list[tuple[str, dict[str, Any]]] = []
     for rec in records:
         line1 = str(rec.get("line1") or rec.get("TLE_LINE1") or "").strip()
@@ -348,8 +361,10 @@ def _provider_of(record: Any) -> str:
 
 def _newest_first(records: list[Any]) -> list[Any]:
     """*records* newest line 1 epoch first; among those tied at an epoch, provider then set text, a stable order."""
-    by_provider = sorted(records, key=lambda r: (_provider_of(r), _elset_line(r, 1), _elset_line(r, 2)))
-    return sorted(by_provider, key=lambda r: _parse_tle_epoch(_elset_line(r, 1)) or _UNDATED, reverse=True)
+    ordered = sorted(records, key=lambda r: (_provider_of(r), _elset_line(r, 1), _elset_line(r, 2)))
+    # A second, stable sort in place: ties at an epoch keep the provider order above.
+    ordered.sort(key=lambda r: _parse_tle_epoch(_elset_line(r, 1)) or _UNDATED, reverse=True)
+    return ordered
 
 
 def _newest_accepted(ordered: list[Any], satno: int) -> _Walk:
@@ -539,8 +554,8 @@ async def udl_login(
     request: Request,
     username: Annotated[str, Form()],
     password: Annotated[str, Form()],
-    current_user: User = Depends(require_login),
-    _rl: None = Depends(udl_auth_rate_limit),
+    current_user: Annotated[User, Depends(require_login)],
+    _rl: Annotated[None, Depends(udl_auth_rate_limit)],
 ) -> HTMLResponse:
     """Validate UDL credentials and store them in the operator session.
 
@@ -560,30 +575,30 @@ async def udl_login(
         if resp.status_code == 401:
             logger.warning("UDL login rejected for operator %s", log_safe(current_user.username))
             return render(request,
-                "partials/udl_status.html",
+                _UDL_STATUS_TEMPLATE,
                 {"udl_user": None, "error": "Invalid UDL credentials (401)."},
             )
         if not resp.is_success:
-            body = resp.text[:300].strip() or "(empty)"
+            body = resp.text[:300].strip() or _EMPTY_BODY
             logger.warning(
                 "UDL login probe %d for operator %s: %s",
                 resp.status_code, log_safe(current_user.username), log_safe(body, limit=500),
             )
             return render(request,
-                "partials/udl_status.html",
+                _UDL_STATUS_TEMPLATE,
                 {"udl_user": None, "error": _udl_refused("login check", resp.status_code)},
             )
     # No raise_for_status: every non-success status returned above, so the
     # HTTPStatusError branch it fed could never run (audit F-250).
     except httpx.TimeoutException:
         return render(request,
-            "partials/udl_status.html",
+            _UDL_STATUS_TEMPLATE,
             {"udl_user": None, "error": "UDL connection timed out (10 s). Check network."},
         )
     except httpx.RequestError as exc:
         logger.warning("UDL login probe failed: %s", log_safe(exc, limit=500))
         return render(request,
-            "partials/udl_status.html",
+            _UDL_STATUS_TEMPLATE,
             {"udl_user": None, "error": _udl_unreachable("login check")},
         )
 
@@ -602,7 +617,7 @@ async def udl_login(
     _spawn(refresh_held_elsets(state, username, password), current_user.session_key)
 
     return render(request,
-        "partials/udl_status.html",
+        _UDL_STATUS_TEMPLATE,
         {
             "udl_user": username,
             "error": None,
@@ -667,7 +682,7 @@ def _request_data_mode(state: SessionState, requested: str) -> str | None:
 async def set_data_mode(
     request: Request,
     data_mode: Annotated[str, Form()],
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Set the UDL data classification mode for this session."""
     state = get_session_state(current_user)
@@ -694,7 +709,7 @@ async def set_data_mode(
 async def set_tle_source(
     request: Request,
     tle_source: Annotated[str, Form()],
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Set the preferred TLE source provider for this session."""
     state = get_session_state(current_user)
@@ -717,7 +732,7 @@ async def set_tle_source(
 @router.post("/logout", response_model=None)
 async def udl_logout(
     request: Request,
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
 ) -> HTMLResponse:
     """Clear UDL credentials from the operator session."""
     state = get_session_state(current_user)
@@ -733,7 +748,7 @@ async def udl_logout(
     logger.info("UDL session closed for operator: %s%s", log_safe(current_user.username), _side())
 
     return render(request,
-        "partials/udl_status.html",
+        _UDL_STATUS_TEMPLATE,
         {"udl_user": None, "error": None},
     )
 
@@ -961,7 +976,7 @@ async def _get_elsets(state: Any, satno: int, mode: str, dm: str) -> tuple[list[
         async with httpx.AsyncClient() as client:
             return await _panel_records(client, state, satno, mode, dm), None
     except httpx.HTTPStatusError as exc:
-        body = exc.response.text[:300].strip() or "(empty)"
+        body = exc.response.text[:300].strip() or _EMPTY_BODY
         # The remote response body cannot go into the record verbatim
         # (pythonsecurity:S5145), nor to the operator at all (SPC-019).
         logger.warning(
@@ -970,7 +985,7 @@ async def _get_elsets(state: Any, satno: int, mode: str, dm: str) -> tuple[list[
         )
         return [], _udl_refused("TLE fetch", exc.response.status_code)
     except httpx.TimeoutException:
-        return [], "UDL request timed out."
+        return [], _TIMED_OUT
     except httpx.RequestError as exc:
         logger.warning("UDL TLE fetch failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
         return [], _udl_unreachable("TLE fetch")
@@ -979,12 +994,12 @@ async def _get_elsets(state: Any, satno: int, mode: str, dm: str) -> tuple[list[
 @router.get("/tle", response_model=None)
 async def fetch_tle(
     request: Request,
-    satno: int = Query(..., description="NORAD satellite catalog number"),
-    mode: str = Query("latest", description="'latest' for current elset, 'epoch' for closest to scenario start"),
+    satno: Annotated[int, Query(description="NORAD satellite catalog number")],
+    current_user: Annotated[User, Depends(require_login)],
+    _rl: Annotated[None, Depends(udl_data_rate_limit)],
+    mode: Annotated[str, Query(description="'latest' for current elset, 'epoch' for closest to scenario start")] = "latest",
     name_override: Annotated[str, Query(description="Pre-populated name (e.g. from HRR watchlist commonName)")] = "",
     data_mode: Annotated[str, Query(description="UDL data mode for this fetch only; blank uses the session mode")] = "",
-    current_user: User = Depends(require_login),
-    _rl: None = Depends(udl_data_rate_limit),
 ) -> HTMLResponse:
     """Fetch a TLE for *satno* from UDL and return a pre-filled form partial.
 
@@ -1137,10 +1152,10 @@ def _newest_state_vector(data: object) -> dict[str, Any] | None:
 @router.get("/statevector", response_model=None)
 async def fetch_statevector(
     request: Request,
-    satno: int = Query(..., description="NORAD satellite catalog number"),
+    satno: Annotated[int, Query(description="NORAD satellite catalog number")],
+    current_user: Annotated[User, Depends(require_login)],
+    _rl: Annotated[None, Depends(udl_data_rate_limit)],
     data_mode: Annotated[str, Query(description="UDL data mode for this fetch only; blank uses the session mode")] = "",
-    current_user: User = Depends(require_login),
-    _rl: None = Depends(udl_data_rate_limit),
 ) -> HTMLResponse:
     """Fetch the latest Cartesian state vector for *satno* from UDL.
 
@@ -1178,7 +1193,7 @@ async def fetch_statevector(
     except httpx.HTTPStatusError as exc:
         # It showed "UDL returned 503 for SATNO ..." with no advice and logged
         # no body, the one call SPC-019's two sentences had not reached.
-        body = exc.response.text[:300].strip() or "(empty)"
+        body = exc.response.text[:300].strip() or _EMPTY_BODY
         logger.warning(
             "UDL state vector fetch returned %s for SATNO %s: %s",
             log_safe(exc.response.status_code), log_safe(satno), log_safe(body, limit=500),
@@ -1190,7 +1205,7 @@ async def fetch_statevector(
     except httpx.TimeoutException:
         return render(request,
             _STATEVECTOR_FIELDS_TEMPLATE,
-            {"sv": None, "error": "UDL request timed out."},
+            {"sv": None, "error": _TIMED_OUT},
         )
     except httpx.RequestError as exc:
         logger.warning("UDL state vector fetch failed for SATNO %s: %s", log_safe(satno), log_safe(exc))
@@ -1305,11 +1320,11 @@ async def fetch_hrr_objects(
                     days_used = day
                     break
     except httpx.HTTPStatusError as exc:
-        body = exc.response.text[:200].strip() or "(empty)"
+        body = exc.response.text[:200].strip() or _EMPTY_BODY
         logger.warning("HRR fetch returned HTTP %s: %s", log_safe(exc.response.status_code), log_safe(body, limit=500))
         return [], [], 0, _udl_refused("HRR fetch", exc.response.status_code)
     except httpx.TimeoutException:
-        return [], [], 0, "UDL request timed out."
+        return [], [], 0, _TIMED_OUT
     except httpx.RequestError as exc:
         logger.warning("HRR fetch failed: %s", log_safe(exc, limit=500))
         return [], [], 0, _udl_unreachable("HRR fetch")
@@ -1392,8 +1407,8 @@ def parse_hrr_notification(notification: dict[str, Any]) -> tuple[list[dict[str,
 @router.get("/hrr", response_model=None)
 async def fetch_hrr(
     request: Request,
-    current_user: User = Depends(require_login),
-    _rl: None = Depends(udl_data_rate_limit),
+    current_user: Annotated[User, Depends(require_login)],
+    _rl: Annotated[None, Depends(udl_data_rate_limit)],
 ) -> HTMLResponse:
     """Fetch the UDL High Rate Revisit (HRR) satellite list and return a panel partial."""
     state = get_session_state(current_user)
@@ -1402,7 +1417,7 @@ async def fetch_hrr(
 
     if not state.udl_username or not state.udl_password:
         return render(request,
-            "partials/hrr_panel.html",
+            _HRR_PANEL_TEMPLATE,
             {**_empty_err, "error": _NOT_CONNECTED_MESSAGE},
         )
 
@@ -1414,7 +1429,7 @@ async def fetch_hrr(
     if error:
         logger.warning("HRR fetch error for operator %s: %s", log_safe(current_user.username), log_safe(error))
         return render(request,
-            "partials/hrr_panel.html", {**_empty_err, "error": error},
+            _HRR_PANEL_TEMPLATE, {**_empty_err, "error": error},
         )
 
     # Cache all HRR objects in session state for threat sweep use. A set the acceptance check refused was not
@@ -1433,7 +1448,7 @@ async def fetch_hrr(
     )
 
     return render(request,
-        "partials/hrr_panel.html",
+        _HRR_PANEL_TEMPLATE,
         {"hrr_blue": hrr_blue, "hrr_red": hrr_red,
          "hrr_lookback": days_used, "error": None},
     )
@@ -1468,8 +1483,8 @@ def _catalogue_matches(catalog: list[dict[str, Any]], q: str) -> list[dict[str, 
 @router.get("/catalog/search", response_model=None)
 async def search_catalog(
     request: Request,
-    q: str = Query("", description="Search query — name substring or SATNO prefix"),
-    current_user: User = Depends(require_login),
+    current_user: Annotated[User, Depends(require_login)],
+    q: Annotated[str, Query(description="Search query — name substring or SATNO prefix")] = "",
 ) -> HTMLResponse:
     """Search the cached on-orbit catalog and return a results partial.
 
@@ -1553,7 +1568,7 @@ async def _get_conjunction_pages(
                     )
                     return [], f"UDL answered the {_CONJUNCTION_CALL} with a body SPECTRE could not read; {_DETAIL_IN_LOG}"
     except httpx.HTTPStatusError as exc:
-        body = exc.response.text[:300].strip() or "(empty)"
+        body = exc.response.text[:300].strip() or _EMPTY_BODY
         logger.warning(
             "UDL conjunction lookup returned %s for SATNO %s: %s",
             log_safe(exc.response.status_code), log_safe(satno), log_safe(body, limit=500),
@@ -1636,8 +1651,8 @@ def _normalise_notso(rec: dict[str, Any]) -> dict[str, str]:
 async def udl_notso(
     satno: int,
     request: Request,
-    current_user: User = Depends(require_login),
-    _rl: None = Depends(udl_data_rate_limit),
+    current_user: Annotated[User, Depends(require_login)],
+    _rl: Annotated[None, Depends(udl_data_rate_limit)],
 ) -> Any:
     """Attempt to fetch NOTSO records from UDL for a given SATNO.
 
@@ -1780,8 +1795,8 @@ def _notso_sync_status(total_added: int, errors: list[str], cache: Any) -> str:
 @router.post("/notso/sync", response_model=None)
 async def udl_notso_sync(
     request: Request,
-    current_user: User = Depends(require_login),
-    _rl: None = Depends(udl_sync_rate_limit),
+    current_user: Annotated[User, Depends(require_login)],
+    _rl: Annotated[None, Depends(udl_sync_rate_limit)],
 ) -> Any:
     """Incrementally sync TACREP_NOTSO records from UDL into the local cache.
 

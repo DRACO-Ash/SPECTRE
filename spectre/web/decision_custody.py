@@ -22,6 +22,7 @@ import dataclasses
 from datetime import datetime
 from typing import Any
 
+from spectre.astro.copies import replaced
 from spectre.domain.custody import CustodyStatus
 from spectre.domain.decision import BoundElset, ScenarioBinding
 from spectre.domain.normality import BurnNormality
@@ -88,4 +89,4 @@ def with_red_custody(binding: ScenarioBinding, custody: CustodyStatus) -> Scenar
     """*binding* with *custody* on its red track; a binding with no red track is returned as it is."""
     if binding.red is None:
         return binding
-    return dataclasses.replace(binding, red=dataclasses.replace(binding.red, custody=custody))
+    return replaced(binding, red=dataclasses.replace(binding.red, custody=custody))
