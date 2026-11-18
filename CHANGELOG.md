@@ -9,6 +9,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- The owner, as Information Security Manager, accepted both suppressions released in 0.48.6 on 18 November 2026: unverified Postgres TLS under `sslmode=require` and binding every interface. Recorded under "Accepted risks" in `docs/SECURITY.md`, with when to revisit each. The stale open item on structured logging, delivered in 0.48.4, is removed.
+
 ## [0.48.6] - 2026-11-18
 
 **Zero SonarQube issues across the whole codebase, and a SonarQube gate that refuses to package otherwise.**

@@ -153,6 +153,17 @@ another sign-in of the same account, cleared on logout, password change and
 account deletion, dropped when the session cookie expires, and never written
 to disk.
 
+## Accepted risks
+
+Accepted by the owner, as Information Security Manager, on 18 November 2026. Each is the only suppression of its rule
+in the code (`# NOSONAR`, with the reason on the line above), and the SonarQube gate lists every suppression on each
+run, so neither can widen unseen.
+
+| Risk | Where | Why it stands | Revisit when |
+|------|-------|---------------|--------------|
+| Postgres TLS under `sslmode=require` encrypts without verifying the server certificate (Sonar python:S4830) | `spectre/config/settings.py` | libpq's documented meaning of `require`, which the platform's Postgres add-on injects; a verifying context would refuse the add-on's private certificate authority and stop the database connection. `verify-ca` and `verify-full` in the URL do verify, and the code honours them | The platform confirms the add-on's certificate verifies against a known authority: then set `sslmode=verify-full` |
+| The server binds every network interface (Sonar python:S8392, bandit B104) | `spectre/web/_entrypoint.py` | The container's only route in is the platform ingress on the pod address; a loopback bind fails the readiness probe. Exposure is bounded by the pod network policy and the ingress | Never, while SPECTRE runs as a container behind an ingress |
+
 ## Open items
 
 Owner for all items: Ashley Higgins, unless reassigned.
@@ -167,7 +178,6 @@ Owner for all items: Ashley Higgins, unless reassigned.
 | Container image vulnerability scan in CI | Not in CI; the hosting platform scans the image, which this repository cannot verify |
 | Licence audit | Not in place |
 | Property-based tests | None; `hypothesis` is not used |
-| Structured JSON logging | `spectre/app_logging/config.py` defines it, but the web application never calls it |
 | CONTRIBUTING.md | Absent |
 | Data protection | Operator accounts, sign-in logs and decision records are personal data; a DPIA screening, a retention period for logs and for decision records, their stored inputs included (SPC-228), and a ruling on keeping a deleted account's decision records are due |
 

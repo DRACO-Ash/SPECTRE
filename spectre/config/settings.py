@@ -258,7 +258,7 @@ def split_database_url(url: str) -> tuple[str, dict[str, Any]]:
         # rejects the private certificate authorities managed databases
         # normally use. Match libpq's semantics rather than asyncpg's default.
         context = ssl.create_default_context(cafile=cafile)
-        # python:S4830 is kept on purpose: this is libpq's documented "require"
+        # python:S4830 accepted by the owner (ISM), 18 November 2026: libpq's documented "require"
         # mode, used by the platform's Postgres add-on; verify-ca/verify-full verify.
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE  # NOSONAR
