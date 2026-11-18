@@ -9,6 +9,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.48.7] - 2026-11-18
+
+**Clears the platform's one Code Quality finding on 0.48.6.**
+
+### Fixed
+- `spectre/web/static/js/operator.js`: the theme list is a `Set` checked with `has()` (javascript:S7776). 0.48.6 changed this check from `indexOf` to `includes` to clear S7765, which raised S7776, a rule the local gate's profile did not run. S7776 is now a named rule in `scripts/sonar-profile.json`.
+
 ### Security
 - The owner, as Information Security Manager, accepted both suppressions released in 0.48.6 on 18 November 2026: unverified Postgres TLS under `sslmode=require` and binding every interface. Recorded under "Accepted risks" in `docs/SECURITY.md`, with when to revisit each. The stale open item on structured logging, delivered in 0.48.4, is removed.
 

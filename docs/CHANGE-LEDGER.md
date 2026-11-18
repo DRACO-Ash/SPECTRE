@@ -1524,3 +1524,14 @@ Zero SonarQube issues across the whole codebase, and the packager runs SonarQube
 | DAST | **HYGIENE** | Login no longer autofocuses; labels and table headers added | No route or header changed. | n/a. |
 | SCA | **HYGIENE** | No dependency added | The gate's images are pinned by digest and used only at check time. | n/a. |
 
+## 0.48.7
+
+The theme list as a Set, the one finding the platform's Code Quality gate raised on 0.48.6.
+
+| Gate | Class | Change | Evidence | If it still fails |
+|---|---|---|---|---|
+| Code Quality | **EVIDENCED** | `THEMES` in `operator.js` is a `Set` and is checked with `has()`; javascript:S7776 added to `scripts/sonar-profile.json` | The platform's report on 0.48.6: "New issues: 1 (max allowed: 0)", `operator.js:641` javascript:S7776. The local gate did not run S7776: its profile is Sonar way extended plus the rules the platform had raised, not the platform's own profile, which is not available here. | Then the platform runs another rule the local profile lacks. The remedy is the platform's own quality profiles (a SonarQube backup of each), loaded into the local gate, which removes the gap rather than narrowing it. |
+| Test | **HYGIENE** | None | The operator console browser tests cover the theme switch. | n/a. |
+| DAST | **HYGIENE** | None | n/a. | n/a. |
+| SCA | **HYGIENE** | None | n/a. | n/a. |
+
